@@ -1,0 +1,108 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: oklch(0.10 0.02 270);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.35 0.05 270);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.72 0.25 330);
+  }
+}
+
+@layer utilities {
+  .container {
+    @apply mx-auto px-4 sm:px-6 lg:px-8;
+    width: 100%;
+    max-width: 1400px;
+  }
+
+  .glow-pink {
+    text-shadow: 0 0 7px oklch(0.72 0.25 330), 0 0 20px oklch(0.72 0.25 330 / 0.5), 0 0 40px oklch(0.72 0.25 330 / 0.3);
+  }
+
+  .glow-cyan {
+    text-shadow: 0 0 7px oklch(0.75 0.18 195), 0 0 20px oklch(0.75 0.18 195 / 0.5), 0 0 40px oklch(0.75 0.18 195 / 0.3);
+  }
+
+  .glow-purple {
+    text-shadow: 0 0 7px oklch(0.60 0.22 300), 0 0 20px oklch(0.60 0.22 300 / 0.5);
+  }
+
+  .box-glow-pink {
+    box-shadow: 0 0 5px oklch(0.72 0.25 330 / 0.3), 0 0 15px oklch(0.72 0.25 330 / 0.15), inset 0 0 5px oklch(0.72 0.25 330 / 0.05);
+  }
+
+  .box-glow-cyan {
+    box-shadow: 0 0 5px oklch(0.75 0.18 195 / 0.3), 0 0 15px oklch(0.75 0.18 195 / 0.15), inset 0 0 5px oklch(0.75 0.18 195 / 0.05);
+  }
+
+  .hud-bracket {
+    position: relative;
+  }
+
+  .hud-bracket::before,
+  .hud-bracket::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-color: oklch(0.72 0.25 330 / 0.6);
+  }
+
+  .hud-bracket::before {
+    top: 0;
+    left: 0;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+
+  .hud-bracket::after {
+    bottom: 0;
+    right: 0;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  .hud-panel {
+    background: oklch(0.12 0.02 270 / 0.9);
+    border: 1px solid oklch(0.30 0.04 270);
+    backdrop-filter: blur(8px);
+  }
+
+  .neon-border {
+    border: 1px solid oklch(0.72 0.25 330 / 0.4);
+    transition: border-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+  }
+
+  .neon-border:hover {
+    border-color: oklch(0.72 0.25 330 / 0.8);
+    box-shadow: 0 0 10px oklch(0.72 0.25 330 / 0.2);
+  }
+}
