@@ -1234,6 +1234,51 @@ describe("engineSoundModel", () => {
     expect(meanAbsDelta(v15High.left)).toBeLessThan(meanAbsDelta(v14High.left) * 0.94);
   });
 
+  it("keeps v15 redline output smooth without static-like roughness", () => {
+    function renderRedlineCandidate(presetKey: "v8-crossplane" | "v8-flatplane" | "v12") {
+      const preset = FACTORY_PRESETS[presetKey].config;
+      return generateEnginePcm(
+        {
+          ...preset,
+          soundProfile: "v15",
+          seed: 91,
+          quick: {
+            ...preset.quick,
+            redline: 9000,
+            exhaustCharacter: "sport",
+          },
+        },
+        {
+          durationSec: 0.42,
+          sampleRate: 44100,
+          profile: "steady",
+          startRpm: 8400,
+          endRpm: 8400,
+          throttle: 0.82,
+          load: 0.62,
+          normalize: false,
+        },
+      );
+    }
+
+    const crossPlane = renderRedlineCandidate("v8-crossplane");
+    const flatPlane = renderRedlineCandidate("v8-flatplane");
+    const v12 = renderRedlineCandidate("v12");
+
+    expect(allFinite(crossPlane.left)).toBe(true);
+    expect(allFinite(flatPlane.left)).toBe(true);
+    expect(allFinite(v12.left)).toBe(true);
+    expect(rms(crossPlane.left)).toBeGreaterThan(0.03);
+    expect(rms(flatPlane.left)).toBeGreaterThan(0.03);
+    expect(rms(v12.left)).toBeGreaterThan(0.03);
+    expect(peak(crossPlane.left)).toBeLessThanOrEqual(1);
+    expect(peak(flatPlane.left)).toBeLessThanOrEqual(1);
+    expect(peak(v12.left)).toBeLessThanOrEqual(1);
+    expect(meanAbsDelta(crossPlane.left)).toBeLessThan(0.0062);
+    expect(meanAbsDelta(flatPlane.left)).toBeLessThan(0.0084);
+    expect(meanAbsDelta(v12.left)).toBeLessThan(0.0104);
+  });
+
   it("models v12 turbo as broadband compressor flow plus restrained blade tone", () => {
     const { left, sampleRate } = generateEnginePcm(
       {

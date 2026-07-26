@@ -75,6 +75,9 @@ function renderWorklet(
   let sumSquares = 0;
   let midSquares = 0;
   let sideSquares = 0;
+  let previousSample: number | null = null;
+  let deltaSum = 0;
+  let deltaCount = 0;
 
   for (let block = 0; block < blocks; block++) {
     processor.port.onmessage?.({ data: controlForBlock(block) });
@@ -89,6 +92,11 @@ function renderWorklet(
       expect(Number.isFinite(sample)).toBe(true);
       expect(Number.isFinite(side)).toBe(true);
       samples.push(sample);
+      if (previousSample !== null) {
+        deltaSum += Math.abs(sample - previousSample);
+        deltaCount++;
+      }
+      previousSample = sample;
       peak = Math.max(peak, Math.abs(sample));
       sumSquares += sample * sample;
       if (block > blocks * 0.25) {
@@ -103,6 +111,7 @@ function renderWorklet(
     peak,
     rms: Math.sqrt(sumSquares / Math.max(1, samples.length)),
     tailRms: rms(samples.slice(Math.floor(samples.length * 0.72))),
+    meanAbsDelta: deltaSum / Math.max(1, deltaCount),
     sideMidRatio: Math.sqrt(sideSquares / Math.max(1e-9, midSquares)),
   };
 }
@@ -173,6 +182,32 @@ describe("browser AudioWorklet runtime", () => {
     expect(render.tailRms).toBeGreaterThan(0.006);
     expect(render.sideMidRatio).toBeLessThan(0.34);
     expect(render.peak).toBeLessThanOrEqual(1);
+    expect(render.meanAbsDelta).toBeLessThan(0.0105);
+  });
+
+  it("keeps the exact worklet smooth and continuous near redline", () => {
+    const config = {
+      ...FACTORY_PRESETS["v8-crossplane"].config,
+      soundProfile: "v15" as const,
+      seed: 91,
+      quick: {
+        ...FACTORY_PRESETS["v8-crossplane"].config.quick,
+        redline: 9000,
+        exhaustCharacter: "sport" as const,
+      },
+    };
+    const render = renderWorklet(config, 760, () => ({
+      rpm: 8400,
+      throttle: 0.82,
+      load: 0.62,
+    }));
+
+    expect(render.returnedFalseAt).toBeNull();
+    expect(render.rms).toBeGreaterThan(0.007);
+    expect(render.tailRms).toBeGreaterThan(0.006);
+    expect(render.peak).toBeGreaterThan(0.035);
+    expect(render.peak).toBeLessThanOrEqual(1);
+    expect(render.meanAbsDelta).toBeLessThan(0.0064);
   });
 
   it("keeps current worklet loudness stable from V8 to V12", () => {

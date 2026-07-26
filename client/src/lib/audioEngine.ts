@@ -292,6 +292,12 @@ class CombustionProcessor extends AudioWorkletProcessor {
     const power = (0.22 + this.throttle * 0.78) * (0.62 + this.load * 0.38);
     const perCylinder = this.analysis.perCylinderDisplacement || 0.5;
     const cylinderCount = Math.max(1, this.analysis.cylinderCount || 8);
+    const highRpmJitterTrim = cleanHandoffProfile
+      ? clamp(1 - Math.max(0, rpmNorm - 0.62) * (cylinderCount >= 10 ? 1.45 : 1.25), cylinderCount >= 10 ? 0.30 : 0.38, 1)
+      : 1;
+    const highRpmMechanicalTrim = cleanHandoffProfile
+      ? clamp(1 - Math.max(0, rpmNorm - 0.72) * 0.92, 0.58, 1)
+      : 1;
     const acoustic = this.analysis.acousticProfile || this.defaultAnalysis().acousticProfile;
     const modes = acoustic.resonanceModes || [];
     const exhaustMode = modes.find((mode) => mode.name === 'exhaust-quarter') || modes[0] || { frequencyHz: 42, gain: 0.7 };
@@ -444,9 +450,11 @@ class CombustionProcessor extends AudioWorkletProcessor {
         Math.min(1.65, Math.max(0.45, edgeWeight * clarity / Math.max(0.7, muffling))) *
         (accessoryQualityProfile ? clamp(0.72 + this.load * 0.12, 0.70, 0.86) : 1)
       : 0.18 + this.analysis.exhaustBrightness * 0.38;
-    const combustionVariance = cleanProfile ? 1 + (this.random() - 0.5) * 0.10 : 1;
-    const microDelaySec = cleanProfile ? (this.random() - 0.5) * 0.00022 : 0;
-    const resonatorDrift = cleanProfile ? 1 + (this.random() - 0.5) * (0.045 + brightnessWeight * 0.012) : 1;
+    const combustionVariance = cleanProfile ? 1 + (this.random() - 0.5) * 0.10 * highRpmJitterTrim : 1;
+    const microDelaySec = cleanProfile
+      ? (this.random() - 0.5) * (cleanHandoffProfile ? 0.00022 * clamp(0.42 + highRpmJitterTrim * 0.58, 0.42, 1) : 0.00022)
+      : 0;
+    const resonatorDrift = cleanProfile ? 1 + (this.random() - 0.5) * (0.045 + brightnessWeight * 0.012) * highRpmJitterTrim : 1;
     const startupTransientLift = clarityProfile && this.crankAngleDeg < 1440 ? 1.10 : 1;
     this.pulses.push({
       ageSec: -(event.pipeDelaySec + microDelaySec),
@@ -467,7 +475,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
       growlHz,
       pipeHz: pipeHz * resonatorDrift,
       pipeGain: cleanProfile ? primaryMode.gain * clamp(1.18 - (tunedTilt - 1) * 0.25 + brightnessWeight * 0.08, 0.65, 1.35) : 1,
-      presenceHz: presenceHz * (clarityProfile ? 1 + (this.random() - 0.5) * 0.160 : 1),
+      presenceHz: presenceHz * (clarityProfile ? 1 + (this.random() - 0.5) * 0.160 * highRpmJitterTrim : 1),
       presenceGain,
       scatterHzA,
       scatterHzB,
@@ -502,7 +510,8 @@ class CombustionProcessor extends AudioWorkletProcessor {
       const mechanicalStrike = eventStrength *
         (0.18 + rpmNorm * 0.16) *
         cylinderIdentity *
-        clamp(1.12 - tunedSmoothing * 0.08 + (acoustic.bankRoughness || 0) * 0.10, 0.78, 1.18);
+        clamp(1.12 - tunedSmoothing * 0.08 + (acoustic.bankRoughness || 0) * 0.10, 0.78, 1.18) *
+        highRpmMechanicalTrim;
       this.mechanicalTickEnvelope = clamp((this.mechanicalTickEnvelope || 0) + mechanicalStrike, 0, 1.70);
     }
     const maxActivePulses = cleanProfile
@@ -573,6 +582,12 @@ class CombustionProcessor extends AudioWorkletProcessor {
       const denseStereoWidth = stereoStabilityProfile && cylinderCount >= 10
         ? Math.min(0.48, Math.max(0.16, 0.48 - Math.max(0, cylinderCount - 8) * 0.055 - Math.max(0, rpmNorm - 0.65) * 0.22))
         : 1;
+      const highRpmFineTrim = cleanHandoffProfile
+        ? Math.min(1, Math.max(cylinderCount >= 10 ? 0.35 : 0.42, 1 - Math.max(0, rpmNorm - 0.66) * (cylinderCount >= 10 ? 1.65 : 1.45)))
+        : 1;
+      const highRpmPresenceTrim = cleanHandoffProfile
+        ? Math.min(1, Math.max(cylinderCount >= 10 ? 0.40 : 0.48, 1 - Math.max(0, rpmNorm - 0.66) * (cylinderCount >= 10 ? 1.35 : 1.15)))
+        : 1;
 
       for (let p = this.pulses.length - 1; p >= 0; p--) {
         const pulse = this.pulses[p];
@@ -615,7 +630,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
         if (!clarityProfile || transientDetail) {
           const pressureRise = Math.exp(-age / (clarityProfile ? 0.0026 : 0.003)) - Math.exp(-age / (clarityProfile ? 0.00034 : 0.00055));
           const pressureTail = clarityProfile ? (Math.exp(-age / 0.013) - Math.exp(-age / 0.0022)) * 0.22 * pulse.pressureSkew : 0;
-          pressureStep = (pressureRise - pressureTail) * (cleanProfile ? (clarityProfile ? 0.66 : 0.58) : 0.52) * Math.min(1.35, Math.max(0.55, 0.84 + edgeWeight * 0.18)) * smoothTransient;
+          pressureStep = (pressureRise - pressureTail) * (cleanProfile ? (clarityProfile ? 0.66 : 0.58) : 0.52) * Math.min(1.35, Math.max(0.55, 0.84 + edgeWeight * 0.18)) * smoothTransient * highRpmFineTrim;
         }
         const eventBodyLift = clarityProfile ? 1.24 : 1;
         const sub = Math.sin(twoPi * pulse.subHz * age + pulse.toneOffset * 0.35) * (cleanProfile ? 0.30 : 0.18) * pulse.subGain * bodyGain * eventBodyLift;
@@ -629,8 +644,8 @@ class CombustionProcessor extends AudioWorkletProcessor {
         const pipe = cleanProfile
           ? pipeEnv * (
             Math.sin(pipePhase + pulse.toneOffset * 1.3) * (clarityProfile ? cleanHandoffProfile ? 0.072 : 0.092 : 0.09) +
-            Math.sin(pipePhase * 1.41 + pulse.toneOffset * 0.31 - chirpPhase * 0.34) * (clarityProfile ? cleanHandoffProfile ? 0.028 : 0.068 : 0.065) +
-            Math.sin(pipePhase * 2.03 + pulse.toneOffset * 1.7 + chirpPhase * 0.21) * (clarityProfile ? cleanHandoffProfile ? 0.010 : 0.042 : 0.04)
+            Math.sin(pipePhase * 1.41 + pulse.toneOffset * 0.31 - chirpPhase * 0.34) * (clarityProfile ? cleanHandoffProfile ? 0.028 * highRpmFineTrim : 0.068 : 0.065) +
+            Math.sin(pipePhase * 2.03 + pulse.toneOffset * 1.7 + chirpPhase * 0.21) * (clarityProfile ? cleanHandoffProfile ? 0.010 * highRpmFineTrim : 0.042 : 0.04)
           ) * pipeGain * pulse.pipeGain
           : Math.sin(twoPi * pulse.pipeHz * age) * pipeEnv * 0.22;
         const blowdownEnv = clarityProfile
@@ -673,9 +688,9 @@ class CombustionProcessor extends AudioWorkletProcessor {
         }
         const dryPresence = cleanProfile
           ? (clarityProfile && !transientDetail) ? 0 : presenceEnv * pulse.presenceGain * (
-            Math.sin(twoPi * pulse.presenceHz * age + pulse.toneOffset * 1.9) * (clarityProfile ? 0.018 : 0.014) +
-            Math.sin(twoPi * pulse.presenceHz * 1.57 * age + pulse.toneOffset * 0.4) * (clarityProfile ? 0.022 : 0.007) +
-            Math.sin(twoPi * pulse.presenceHz * 2.11 * age + pulse.toneOffset * 2.2) * (clarityProfile ? 0.016 : 0.004) +
+            Math.sin(twoPi * pulse.presenceHz * age + pulse.toneOffset * 1.9) * (clarityProfile ? 0.018 * highRpmPresenceTrim : 0.014) +
+            Math.sin(twoPi * pulse.presenceHz * 1.57 * age + pulse.toneOffset * 0.4) * (clarityProfile ? 0.022 * highRpmFineTrim : 0.007) +
+            Math.sin(twoPi * pulse.presenceHz * 2.11 * age + pulse.toneOffset * 2.2) * (clarityProfile ? 0.016 * highRpmFineTrim : 0.004) +
             (clarityProfile && !cleanHandoffProfile ? Math.sin(twoPi * pulse.scatterHzA * age + pulse.scatterPhaseA) * (airwashControlProfile ? 0.006 : 0.024) : 0) +
             (clarityProfile && !cleanHandoffProfile ? Math.sin(twoPi * pulse.scatterHzB * age + pulse.scatterPhaseB) * (airwashControlProfile ? 0.004 : 0.018) : 0)
           ) * (cleanHandoffProfile ? 0.34 : staticCleanProfile ? 0.50 : airwashControlProfile ? 0.62 : 1)
@@ -705,7 +720,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
           const throatTexture = staticCleanProfile ? 0 : pulse.throatNoise - pulse.throatNoiseLow * 0.42;
           const throatEnv = (Math.exp(-age / 0.0042) - Math.exp(-age / 0.00032)) * Math.min(1.24, Math.max(0.72, 0.78 + edgeWeight * 0.18 + this.load * 0.16));
           const throatFold = Math.tanh((pressureStep + chirpPhase * 0.12 + throatTexture * 0.68) * 2.7);
-          throatPulse = (throatTexture * 0.70 + throatFold * 0.30) * throatEnv * pulse.throatGain * eventEdgeGain * smoothTransient * (cleanHandoffProfile ? 0.08 : staticCleanProfile ? 0.26 : airwashControlProfile ? 0.42 : 1);
+          throatPulse = (throatTexture * 0.70 + throatFold * 0.30) * throatEnv * pulse.throatGain * eventEdgeGain * smoothTransient * (cleanHandoffProfile ? 0.08 : staticCleanProfile ? 0.26 : airwashControlProfile ? 0.42 : 1) * highRpmFineTrim;
         }
         const crack = (!clarityProfile || earlyDetail)
           ? staticCleanProfile ? 0 : (this.random() - 0.5) * crackEnv * pulse.crackle * (cleanProfile ? (clarityProfile ? (airwashControlProfile ? 0.12 : 0.42) : 0.58) + this.throttle * (airwashControlProfile ? 0.08 : 0.32) : 1) * eventEdgeGain * smoothTransient
@@ -725,10 +740,10 @@ class CombustionProcessor extends AudioWorkletProcessor {
         }
         const edge = cleanProfile
           ? (!clarityProfile || earlyDetail)
-              ? (Math.exp(-age / 0.0021) - Math.exp(-age / 0.00028)) * ((clarityProfile ? (cleanHandoffProfile ? 0.035 : staticCleanProfile ? 0.070 : airwashControlProfile ? 0.105 : 0.165) : 0.12) + this.analysis.exhaustBrightness * (cleanHandoffProfile ? 0.014 : staticCleanProfile ? 0.030 : airwashControlProfile ? 0.055 : 0.10)) * eventEdgeGain * smoothTransient
+              ? (Math.exp(-age / 0.0021) - Math.exp(-age / 0.00028)) * ((clarityProfile ? (cleanHandoffProfile ? 0.035 : staticCleanProfile ? 0.070 : airwashControlProfile ? 0.105 : 0.165) : 0.12) + this.analysis.exhaustBrightness * (cleanHandoffProfile ? 0.014 : staticCleanProfile ? 0.030 : airwashControlProfile ? 0.055 : 0.10)) * eventEdgeGain * smoothTransient * highRpmFineTrim
             : 0
           : 0;
-        const nonlinearBite = clarityProfile && transientDetail ? Math.tanh((pressureStep + pipeReflection + dryPresence * 0.55) * 2.4) * 0.045 : 0;
+        const nonlinearBite = clarityProfile && transientDetail ? Math.tanh((pressureStep + pipeReflection + dryPresence * 0.55) * 2.4) * 0.045 * highRpmFineTrim : 0;
         const pressureCore = pressureStep + pipeReflection + nonlinearBite + dryPresence * 0.42 + airBurst * 0.58 + throatPulse * 0.74 + blowdownBark * 0.92 + exhaustRadiation * 0.80;
         const pressureDelta = clarityProfile ? pressureCore - (pulse.previousPressure || 0) : 0;
         pulse.previousPressure = pressureCore;
@@ -740,7 +755,8 @@ class CombustionProcessor extends AudioWorkletProcessor {
             (cleanHandoffProfile ? 0.012 + this.analysis.exhaustBrightness * 0.006 + this.load * 0.003 : 0.027 + this.analysis.exhaustBrightness * 0.014 + this.load * 0.007) *
             eventEdgeGain *
             smoothTransient *
-            (cleanHandoffProfile ? 0.22 : staticCleanProfile ? 0.40 : airwashControlProfile ? 0.62 : 1) : 0
+            (cleanHandoffProfile ? 0.22 : staticCleanProfile ? 0.40 : airwashControlProfile ? 0.62 : 1) *
+            highRpmFineTrim : 0
           : 0;
         const pressureGrain = clarityProfile
           ? earlyDetail && !staticCleanProfile ? (this.random() - 0.5) *
