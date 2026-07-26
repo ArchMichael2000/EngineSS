@@ -47,7 +47,7 @@ function configure(processor: WorkletProcessor, config: EngineConfiguration) {
         wastegateEnabled: config.forcedInduction.wastegateEnabled ?? true,
         superchargerType: config.forcedInduction.superchargerType ?? "roots",
         whineIntensity: config.forcedInduction.whineIntensity ?? 0.6,
-        audioProfile: config.soundProfile ?? "v15",
+        audioProfile: config.soundProfile ?? "v16",
         layout: config.quick.layout,
         crankshaft: config.quick.crankshaft,
         exhaustCharacter: config.quick.exhaustCharacter,
@@ -90,7 +90,7 @@ function render(config: EngineConfiguration, rpm: number, throttle: number, load
 }
 
 for (const [key, preset] of Object.entries(FACTORY_PRESETS)) {
-  const config: EngineConfiguration = { ...preset.config, soundProfile: "v15", seed: 42 };
+  const config: EngineConfiguration = { ...preset.config, soundProfile: "v16", seed: 42 };
   const idle = render(config, 900, 0.08, 0.22);
   const mid = render(config, Math.min(config.quick.redline * 0.62, 5200), 0.55, 0.55);
   const high = render(config, config.quick.redline * 0.94, 0.85, 0.65);

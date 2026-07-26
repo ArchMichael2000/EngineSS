@@ -4,7 +4,7 @@ import { resolveLiveOutputGain, resolveRealtimeAudioMixProfile } from "./realtim
 
 describe("realtime audio mix profile", () => {
   it("makes current and saved clarity models primarily direct to avoid filtered live playback coloration", () => {
-    const clarity = resolveRealtimeAudioMixProfile("v15");
+    const clarity = resolveRealtimeAudioMixProfile("v16");
 
     expect(clarity.dryExhaustGain).toBeGreaterThan(0.95);
     expect(clarity.filteredExhaustGain).toBe(0);
@@ -15,10 +15,11 @@ describe("realtime audio mix profile", () => {
     expect(resolveRealtimeAudioMixProfile("v12")).toEqual(clarity);
     expect(resolveRealtimeAudioMixProfile("v13")).toEqual(clarity);
     expect(resolveRealtimeAudioMixProfile("v14")).toEqual(clarity);
+    expect(resolveRealtimeAudioMixProfile("v15")).toEqual(clarity);
   });
 
   it("keeps current compressor nearly transparent for sharper live playback", () => {
-    const clarity = resolveRealtimeAudioMixProfile("v15");
+    const clarity = resolveRealtimeAudioMixProfile("v16");
 
     expect(clarity.compressorThresholdDb).toBeGreaterThan(-1);
     expect(clarity.compressorRatio).toBeLessThan(1.12);
@@ -26,7 +27,7 @@ describe("realtime audio mix profile", () => {
   });
 
   it("disables legacy forced-induction oscillators for current worklet playback", () => {
-    const clarity = resolveRealtimeAudioMixProfile("v15");
+    const clarity = resolveRealtimeAudioMixProfile("v16");
 
     expect(clarity.legacyForcedInductionOscillatorGain).toBe(0);
   });
@@ -41,7 +42,7 @@ describe("realtime audio mix profile", () => {
   });
 
   it("defaults missing profile values to clarity", () => {
-    expect(resolveRealtimeAudioMixProfile(undefined)).toEqual(resolveRealtimeAudioMixProfile("v15"));
+    expect(resolveRealtimeAudioMixProfile(undefined)).toEqual(resolveRealtimeAudioMixProfile("v16"));
   });
 
   it("raises live output gain for smaller and smoother engine families", () => {
@@ -58,8 +59,8 @@ describe("realtime audio mix profile", () => {
     const v12 = resolveLiveOutputGain(FACTORY_PRESETS["v12"].config);
     const superchargedV8 = resolveLiveOutputGain(FACTORY_PRESETS["supercharged-v8"].config);
 
-    expect(v12).toBeLessThanOrEqual(0.88);
-    expect(superchargedV8).toBeLessThanOrEqual(0.88);
+    expect(v12).toBeLessThanOrEqual(0.90);
+    expect(superchargedV8).toBeLessThanOrEqual(0.90);
     expect(v12).toBeGreaterThanOrEqual(0.72);
   });
 

@@ -8,6 +8,7 @@ import {
   isAccessoryQualitySoundProfile,
   isCleanHandoffSoundProfile,
   isCylinderBalanceSoundProfile,
+  isForcedInductionSoundProfile,
   isStaticCleanSoundProfile,
   isStereoStabilitySoundProfile,
   normalizeSoundProfile,
@@ -1022,6 +1023,7 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
   const airwashControlProfile = isAirwashControlSoundProfile(soundProfile);
   const staticCleanProfile = isStaticCleanSoundProfile(soundProfile);
   const cleanHandoffProfile = isCleanHandoffSoundProfile(soundProfile);
+  const forcedInductionProfile = isForcedInductionSoundProfile(soundProfile);
   const tuning = state.tuning;
   const clarity = cleanProfile ? tuning.clarity : 1;
   const muffling = cleanProfile ? tuning.muffling : 1;
@@ -1384,43 +1386,67 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
   if (forcedInduction.type === "turbo") {
     const threshold = forcedInduction.turboSpoolThreshold ?? 3000;
     const sizeLag = forcedInduction.turboSize === "small" ? 0.7 : forcedInduction.turboSize === "large" ? 1.35 : 1;
-    const targetSpool = clamp(((rpm - threshold) / (2600 * sizeLag)) * throttle * (0.76 + load * 0.34), 0, 1);
+    const spoolOnset = forcedInductionProfile ? threshold - (forcedInduction.turboSize === "large" ? 1550 : forcedInduction.turboSize === "small" ? 800 : 1200) : threshold;
+    const spoolRange = forcedInductionProfile ? 1300 * sizeLag : 2600 * sizeLag;
+    const exhaustDrive = forcedInductionProfile
+      ? clamp(Math.pow(throttle, 0.82) * (0.42 + load * 0.72) + Math.max(0, rpmNorm - 0.18) * 0.28, 0, 1.18)
+      : throttle * (0.76 + load * 0.34);
+    const targetSpool = clamp(((rpm - spoolOnset) / spoolRange) * exhaustDrive, 0, 1);
     if (accessoryQualityProfile) {
-      const spoolResponseSec = forcedInduction.turboSize === "small" ? 0.070 : forcedInduction.turboSize === "large" ? 0.240 : 0.135;
+      const spoolResponseSec = forcedInductionProfile
+        ? forcedInduction.turboSize === "small" ? 0.080 : forcedInduction.turboSize === "large" ? 0.285 : 0.150
+        : forcedInduction.turboSize === "small" ? 0.070 : forcedInduction.turboSize === "large" ? 0.240 : 0.135;
       state.turboSpool += (targetSpool - state.turboSpool) * (1 - Math.exp(-1 / (sr * spoolResponseSec)));
     } else {
       state.turboSpool = targetSpool;
     }
     const spool = clamp(accessoryQualityProfile ? state.turboSpool : targetSpool, 0, 1);
-    const shaftTone = accessoryQualityProfile ? Math.pow(spool, 0.58) * (0.82 + rpmNorm * 0.18) : spool;
+    const shaftTone = accessoryQualityProfile ? Math.pow(spool, forcedInductionProfile ? 0.46 : 0.58) * (0.82 + rpmNorm * 0.18) : spool;
     const turboHz = accessoryQualityProfile
-      ? clamp(2200 + shaftTone * (forcedInduction.turboSize === "large" ? 4400 : forcedInduction.turboSize === "small" ? 6100 : 5200) + rpmNorm * 320, 1900, 9800)
+      ? forcedInductionProfile
+        ? clamp(1450 + shaftTone * (forcedInduction.turboSize === "large" ? 4700 : forcedInduction.turboSize === "small" ? 7200 : 5900) + rpmNorm * 180, 1200, 10800)
+        : clamp(2200 + shaftTone * (forcedInduction.turboSize === "large" ? 4400 : forcedInduction.turboSize === "small" ? 6100 : 5200) + rpmNorm * 320, 1900, 9800)
       : cleanProfile ? 1800 + spool * 5400 + rpmNorm * 700 : 1700 + spool * 6500 + rpmNorm * 900;
     state.boostPhase += TWO_PI * turboHz / sr;
     if (state.boostPhase > TWO_PI) state.boostPhase -= TWO_PI;
     const whistle = accessoryQualityProfile
-      ? Math.sin(state.boostPhase) * 0.50 + Math.sin(state.boostPhase * 1.618 + state.turboFlutterPhase * 0.2) * 0.14
+      ? forcedInductionProfile
+        ? Math.sin(state.boostPhase) * 0.34 +
+          Math.sin(state.boostPhase * 1.54 + state.turboFlutterPhase * 0.26) * 0.22 +
+          Math.sin(state.boostPhase * 2.17 - state.turboFlutterPhase * 0.13) * 0.08
+        : Math.sin(state.boostPhase) * 0.50 + Math.sin(state.boostPhase * 1.618 + state.turboFlutterPhase * 0.2) * 0.14
       : Math.sin(state.boostPhase) + Math.sin(state.boostPhase * 1.49) * (cleanProfile ? 0.12 : 0.28);
     if (cleanProfile) {
-      state.turboFlutterPhase += TWO_PI * (accessoryQualityProfile ? 28 + spool * 92 + rpmNorm * 26 : 34 + spool * 130 + rpmNorm * 80) / sr;
+      state.turboFlutterPhase += TWO_PI * (accessoryQualityProfile ? forcedInductionProfile ? 18 + spool * 118 + load * 42 + rpmNorm * 18 : 28 + spool * 92 + rpmNorm * 26 : 34 + spool * 130 + rpmNorm * 80) / sr;
       if (state.turboFlutterPhase > TWO_PI) state.turboFlutterPhase -= TWO_PI;
-      const gatedFlow = spool * throttle * clamp(turboWhoosh, 0.45, 1.75);
+      const gatedFlow = spool * (forcedInductionProfile ? Math.pow(throttle, 0.72) * (0.55 + load * 0.65) : throttle) * clamp(turboWhoosh, 0.45, forcedInductionProfile ? 2.10 : 1.75);
       state.turboWhooshFast = state.turboWhooshFast * (cleanHandoffProfile ? 0.94 : accessoryQualityProfile ? 0.64 : 0.72) + (nextRandom(state) - 0.5) * (cleanHandoffProfile ? 0 : accessoryQualityProfile ? 0.36 : 0.28);
       state.turboWhooshSlow = state.turboWhooshSlow * (cleanHandoffProfile ? 0.992 : accessoryQualityProfile ? 0.975 : 0.985) + state.turboWhooshFast * (cleanHandoffProfile ? 0.008 : accessoryQualityProfile ? 0.025 : 0.015);
       const compressorTexture = cleanHandoffProfile ? 0 : state.turboWhooshFast - state.turboWhooshSlow * (accessoryQualityProfile ? 0.62 : 0.55);
-      const surgeWindow = accessoryQualityProfile ? clamp((1 - Math.abs(spool - 0.58) * 1.25) * (0.34 + load * 0.66) * throttle, 0, 1) : 0;
-      const compressorBreath = Math.sin(state.turboFlutterPhase) * gatedFlow * (cleanHandoffProfile ? 0.0008 + surgeWindow * 0.0022 + rpmNorm * 0.0007 : accessoryQualityProfile ? 0.0025 + surgeWindow * 0.006 + rpmNorm * 0.0018 : 0.002 + rpmNorm * 0.004);
+      const surgeWindow = accessoryQualityProfile ? clamp((1 - Math.abs(spool - 0.58) * (forcedInductionProfile ? 1.05 : 1.25)) * (0.34 + load * 0.66) * Math.pow(throttle, forcedInductionProfile ? 0.72 : 1), 0, 1) : 0;
+      const deterministicRush = forcedInductionProfile
+        ? (
+          Math.sin(state.turboFlutterPhase) * 0.52 +
+          Math.sin(state.turboFlutterPhase * 2.7 + state.boostPhase * 0.07) * 0.24 +
+          Math.sin(state.turboFlutterPhase * 5.1 - state.boostPhase * 0.03) * 0.12
+        )
+        : Math.sin(state.turboFlutterPhase);
+      const compressorBreath = deterministicRush * gatedFlow * (forcedInductionProfile ? 0.016 + surgeWindow * 0.026 + rpmNorm * 0.006 : cleanHandoffProfile ? 0.0008 + surgeWindow * 0.0022 + rpmNorm * 0.0007 : accessoryQualityProfile ? 0.0025 + surgeWindow * 0.006 + rpmNorm * 0.0018 : 0.002 + rpmNorm * 0.004);
       const flowNoise = compressorTexture *
         gatedFlow *
         (cleanHandoffProfile ? 0 : accessoryQualityProfile ? 0.010 + surgeWindow * 0.012 + (forcedInduction.maxBoost ?? 15) / 3600 : 0.010 + (forcedInduction.maxBoost ?? 15) / 3200);
-      const wastegate = forcedInduction.wastegateEnabled && load > 0.55 && spool > 0.65
-        ? (accessoryQualityProfile ? Math.sin(state.turboFlutterPhase * 1.7) + compressorTexture * (cleanHandoffProfile ? 0 : 0.45) : Math.sin(state.boostPhase * 0.37)) * spool * (cleanHandoffProfile ? 0.0016 : accessoryQualityProfile ? 0.0045 : 0.006) * clamp(turboWhoosh, 0.5, 1.5)
+      const compressorChuff = forcedInductionProfile
+        ? Math.tanh(deterministicRush * 1.25 + whistle * 0.46) * gatedFlow * (0.014 + surgeWindow * 0.020)
         : 0;
-      const turbo = whistle * spool * throttle * (accessoryQualityProfile ? 0.004 + (forcedInduction.maxBoost ?? 15) / 5200 : 0.005 + (forcedInduction.maxBoost ?? 15) / 3000) * clamp(turboTone, 0.45, 1.45) +
+      const wastegate = forcedInduction.wastegateEnabled && load > 0.55 && spool > 0.65
+        ? (accessoryQualityProfile ? Math.sin(state.turboFlutterPhase * 1.7) + compressorTexture * (cleanHandoffProfile ? 0 : 0.45) + (forcedInductionProfile ? deterministicRush * 0.42 : 0) : Math.sin(state.boostPhase * 0.37)) * spool * (forcedInductionProfile ? 0.0085 + load * 0.006 : cleanHandoffProfile ? 0.0016 : accessoryQualityProfile ? 0.0045 : 0.006) * clamp(turboWhoosh, 0.5, forcedInductionProfile ? 1.8 : 1.5)
+        : 0;
+      const turbo = whistle * spool * (forcedInductionProfile ? Math.pow(throttle, 0.70) : throttle) * (forcedInductionProfile ? 0.028 + (forcedInduction.maxBoost ?? 15) / 2900 : accessoryQualityProfile ? 0.004 + (forcedInduction.maxBoost ?? 15) / 5200 : 0.005 + (forcedInduction.maxBoost ?? 15) / 3000) * clamp(turboTone, 0.45, forcedInductionProfile ? 1.80 : 1.45) +
         flowNoise +
         compressorBreath +
+        compressorChuff +
         wastegate;
-      left += turbo * (accessoryQualityProfile ? 0.94 : 0.88);
+      left += turbo * (accessoryQualityProfile ? forcedInductionProfile ? 0.98 : 0.94 : 0.88);
       right += turbo;
     } else {
       const turbo = whistle * spool * (0.018 + (forcedInduction.maxBoost ?? 15) / 900);
@@ -1429,31 +1455,38 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
     }
   } else if (forcedInduction.type === "supercharged") {
     const type = forcedInduction.superchargerType ?? "roots";
-    const driveRatio = type === "centrifugal" ? 5.1 : type === "twin-screw" ? 3.45 : 2.85;
+    const driveRatio = type === "centrifugal" ? 5.1 : type === "twin-screw" ? 3.45 : forcedInductionProfile ? 3.05 : 2.85;
     const rotorHz = (rpm / 60) * driveRatio;
     const scHz = accessoryQualityProfile
-      ? clamp(rotorHz * (type === "centrifugal" ? 12.5 : type === "twin-screw" ? 9.5 : 7.5), 260, 6800)
+      ? forcedInductionProfile
+        ? clamp(rotorHz * (type === "centrifugal" ? 12.8 : type === "twin-screw" ? 10.8 : 8.7), 320, 8200)
+        : clamp(rotorHz * (type === "centrifugal" ? 12.5 : type === "twin-screw" ? 9.5 : 7.5), 260, 6800)
       : (rpm / 60) * driveRatio * (cleanProfile ? (type === "roots" ? 9 : 11) : 12);
     state.boostPhase += TWO_PI * scHz / sr;
-    state.superchargerGearPhase += TWO_PI * clamp(rotorHz * (type === "twin-screw" ? 10.5 : type === "roots" ? 8.2 : 13.5), 220, 7600) / sr;
-    state.superchargerLobePhase += TWO_PI * clamp(rotorHz * (type === "roots" ? 6 : type === "twin-screw" ? 8 : 11), 90, 5200) / sr;
+    state.superchargerGearPhase += TWO_PI * clamp(rotorHz * (type === "twin-screw" ? forcedInductionProfile ? 11.4 : 10.5 : type === "roots" ? forcedInductionProfile ? 9.6 : 8.2 : 13.5), 220, forcedInductionProfile ? 8800 : 7600) / sr;
+    state.superchargerLobePhase += TWO_PI * clamp(rotorHz * (type === "roots" ? forcedInductionProfile ? 4.2 : 6 : type === "twin-screw" ? 8 : 11), 90, 5200) / sr;
     if (state.boostPhase > TWO_PI) state.boostPhase -= TWO_PI;
     if (state.superchargerGearPhase > TWO_PI) state.superchargerGearPhase -= TWO_PI;
     if (state.superchargerLobePhase > TWO_PI) state.superchargerLobePhase -= TWO_PI;
     if (cleanProfile) {
-      const typeGain = type === "roots" ? 1.07 : type === "twin-screw" ? 1.55 : 0.92;
-      const bypassGate = accessoryQualityProfile ? clamp(0.20 + throttle * 0.58 + load * 0.28, 0.18, 1.05) : 1;
+      const typeGain = type === "roots" ? forcedInductionProfile ? 1.78 : 1.07 : type === "twin-screw" ? forcedInductionProfile ? 1.86 : 1.55 : forcedInductionProfile ? 1.08 : 0.92;
+      const bypassGate = accessoryQualityProfile ? forcedInductionProfile ? clamp(0.42 + Math.pow(throttle, 0.64) * 0.46 + load * 0.24, 0.38, 1.18) : clamp(0.20 + throttle * 0.58 + load * 0.28, 0.18, 1.05) : 1;
       const whine = accessoryQualityProfile
-        ? Math.sin(state.superchargerGearPhase) * 0.62 +
-          Math.sin(state.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
-          Math.sin(state.boostPhase * 0.74 + 0.8) * 0.16
+        ? forcedInductionProfile
+          ? Math.sin(state.superchargerGearPhase) * 0.78 +
+            Math.sin(state.superchargerGearPhase * 2.01 + 0.3) * (type === "centrifugal" ? 0.18 : 0.31) +
+            Math.sin(state.superchargerGearPhase * 3.02 - 0.45) * (type === "roots" ? 0.15 : 0.10) +
+            Math.sin(state.boostPhase * 0.74 + 0.8) * (type === "roots" ? 0.22 : 0.15)
+          : Math.sin(state.superchargerGearPhase) * 0.62 +
+            Math.sin(state.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
+            Math.sin(state.boostPhase * 0.74 + 0.8) * 0.16
         : Math.sin(state.boostPhase) + Math.sin(state.boostPhase * 2) * 0.10;
       state.superchargerNoise = accessoryQualityProfile
         ? state.superchargerNoise * (cleanHandoffProfile ? 0.98 : 0.90) + (nextRandom(state) - 0.5) * (cleanHandoffProfile ? 0 : 0.10)
         : state.superchargerNoise;
       const lobePulse = type === "centrifugal"
         ? 0
-        : Math.pow(Math.max(0, Math.sin(state.superchargerLobePhase)), type === "roots" ? 2.4 : 2.4) * (accessoryQualityProfile ? (type === "twin-screw" ? 0.024 + load * 0.036 : 0.010 + load * 0.018) : 0.006 + load * 0.010);
+        : Math.pow(Math.max(0, Math.sin(state.superchargerLobePhase)), type === "roots" ? forcedInductionProfile ? 1.7 : 2.4 : 2.2) * (accessoryQualityProfile ? forcedInductionProfile ? (type === "twin-screw" ? 0.042 + load * 0.072 : 0.034 + load * 0.064) : (type === "twin-screw" ? 0.024 + load * 0.036 : 0.010 + load * 0.018) : 0.006 + load * 0.010);
       const compressorAir = accessoryQualityProfile
         ? state.superchargerNoise * (cleanHandoffProfile ? 0 : type === "centrifugal" ? 0.014 : type === "twin-screw" ? 0.018 : 0.007) * bypassGate * (0.45 + rpmNorm * 0.55)
         : 0;
@@ -1461,18 +1494,22 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
         ? (Math.sin(state.boostPhase) * 0.54 + Math.sin(state.boostPhase * 1.37) * 0.16) * Math.pow(rpmNorm, 1.35) * (0.010 + load * 0.014)
         : 0;
       const twinScrewCompression = accessoryQualityProfile && type === "twin-screw"
-        ? Math.tanh(whine * 1.9 + state.superchargerNoise * (cleanHandoffProfile ? 0 : 1.1)) * (cleanHandoffProfile ? 0.020 + load * 0.018 : 0.030 + load * 0.030) * bypassGate
+        ? Math.tanh(whine * (forcedInductionProfile ? 2.3 : 1.9) + state.superchargerNoise * (cleanHandoffProfile ? 0 : 1.1)) * (forcedInductionProfile ? 0.036 + load * 0.042 : cleanHandoffProfile ? 0.020 + load * 0.018 : 0.030 + load * 0.030) * bypassGate
         : 0;
-      const superchargerOutputLift = accessoryQualityProfile && type === "twin-screw" ? 1.16 : 1;
+      const rootsCaseWhistle = forcedInductionProfile && type === "roots"
+        ? Math.tanh(whine * 1.65) * (0.030 + load * 0.050) * bypassGate
+        : 0;
+      const superchargerOutputLift = accessoryQualityProfile ? forcedInductionProfile ? type === "centrifugal" ? 1.18 : 1.48 : type === "twin-screw" ? 1.16 : 1 : 1;
       const gain = (forcedInduction.whineIntensity ?? 0.6) *
         typeGain *
-        (accessoryQualityProfile ? 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
-        clamp(superchargerWhine, 0.45, 1.75) *
+        (accessoryQualityProfile ? forcedInductionProfile ? 0.045 + Math.pow(rpmNorm, 0.78) * 0.118 : 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
+        clamp(superchargerWhine, 0.45, forcedInductionProfile ? 2.15 : 1.75) *
         bypassGate;
       const supercharger = (whine * gain +
-        lobePulse * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55) +
+        lobePulse * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, forcedInductionProfile ? 1.95 : 1.55) +
         compressorAir +
         twinScrewCompression * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55) +
+        rootsCaseWhistle * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.95) +
         centrifugalSiren * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55)) * superchargerOutputLift;
       left += supercharger * (accessoryQualityProfile ? 0.96 : 0.92);
       right += supercharger;

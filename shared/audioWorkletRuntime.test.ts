@@ -51,7 +51,7 @@ function configureProcessor(processor: WorkletProcessor, config: EngineConfigura
         wastegateEnabled: config.forcedInduction.wastegateEnabled ?? true,
         superchargerType: config.forcedInduction.superchargerType ?? "roots",
         whineIntensity: config.forcedInduction.whineIntensity ?? 0.6,
-        audioProfile: config.soundProfile ?? "v15",
+        audioProfile: config.soundProfile ?? "v16",
         layout: config.quick.layout,
         crankshaft: config.quick.crankshaft,
         exhaustCharacter: config.quick.exhaustCharacter,
@@ -115,7 +115,7 @@ function rms(samples: number[]) {
 
 describe("browser AudioWorklet runtime", () => {
   it("keeps the exact worklet alive and audible for V12", () => {
-    const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 42 };
+    const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 42 };
     const render = renderWorklet(config, 520, () => ({
       rpm: 4200,
       throttle: 0.55,
@@ -131,7 +131,7 @@ describe("browser AudioWorklet runtime", () => {
   });
 
   it("does not die or go silent when V8 crosses 6000 RPM", () => {
-    const config = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 };
+    const config = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 };
     const render = renderWorklet(config, 700, (block) => {
       const progress = block / 699;
       return {
@@ -151,7 +151,7 @@ describe("browser AudioWorklet runtime", () => {
   it("does not die or go silent when dense engines run past 8000 RPM", () => {
     const config = {
       ...FACTORY_PRESETS["v12"].config,
-      soundProfile: "v15" as const,
+      soundProfile: "v16" as const,
       seed: 42,
       quick: {
         ...FACTORY_PRESETS["v12"].config.quick,
@@ -176,12 +176,12 @@ describe("browser AudioWorklet runtime", () => {
   });
 
   it("keeps current worklet loudness stable from V8 to V12", () => {
-    const renderV8 = renderWorklet({ ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 }, 560, () => ({
+    const renderV8 = renderWorklet({ ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 }, 560, () => ({
       rpm: 3600,
       throttle: 0.58,
       load: 0.62,
     }));
-    const renderV12 = renderWorklet({ ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 42 }, 560, () => ({
+    const renderV12 = renderWorklet({ ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 42 }, 560, () => ({
       rpm: 3600,
       throttle: 0.58,
       load: 0.62,
@@ -195,8 +195,8 @@ describe("browser AudioWorklet runtime", () => {
 
   it("flushes old combustion state when presets change during an RPM sweep", () => {
     const processor = instantiateCombustionProcessor();
-    const v8 = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 };
-    const v12 = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 77 };
+    const v8 = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 };
+    const v12 = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 77 };
     const internals = processor as WorkletProcessor & { pulses?: unknown[]; analysis?: { cylinderCount?: number } };
 
     configureProcessor(processor, v8);

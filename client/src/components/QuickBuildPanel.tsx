@@ -19,7 +19,7 @@ const TOOLTIPS = {
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
   redline: 'The maximum safe RPM. Higher redlines allow more rev range but change the engine character at the top end.',
-  soundProfile: 'Choose a saved ESS audio model version. v15 is current; v14 preserves the static-clean model for A/B testing.',
+  soundProfile: 'Choose a saved ESS audio model version. v16 is current; v15 preserves the clean-handoff model for A/B testing.',
 };
 
 function InfoTooltip({ text }: { text: string }) {

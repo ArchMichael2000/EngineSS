@@ -33,6 +33,7 @@ export type IdleCharacter = 'smooth' | 'lumpy' | 'aggressive' | 'lopey';
 
 /** Sound model selection for A/B testing and regression control. */
 export type SoundProfile =
+  | 'v16'
   | 'v15'
   | 'v14'
   | 'v13'
@@ -46,9 +47,9 @@ export type SoundProfile =
   | 'clean'
   | 'baseline';
 
-export type CanonicalSoundProfile = 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
+export type CanonicalSoundProfile = 'v16' | 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
 
-export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v15';
+export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v16';
 
 export const SOUND_PROFILE_HISTORY: Array<{
   value: CanonicalSoundProfile;
@@ -56,9 +57,14 @@ export const SOUND_PROFILE_HISTORY: Array<{
   description: string;
 }> = [
   {
+    value: 'v16',
+    label: 'v16 - Forced Induction',
+    description: 'Current ESS model with earlier turbo spool and aggressive Hellcat-style supercharger whine.',
+  },
+  {
     value: 'v15',
     label: 'v15 - Clean Handoff',
-    description: 'Current ESS model with stricter air-noise removal and stable live preset switching.',
+    description: 'Saved clean-handoff model with stricter air-noise removal and stable live preset switching.',
   },
   {
     value: 'v14',
@@ -115,7 +121,7 @@ export function isBaselineSoundProfile(soundProfile: SoundProfile | undefined): 
 
 export function isClaritySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isCurrentSoundProfile(soundProfile: SoundProfile | undefined): boolean {
@@ -124,31 +130,36 @@ export function isCurrentSoundProfile(soundProfile: SoundProfile | undefined): b
 
 export function isCylinderBalanceSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isStereoStabilitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isAccessoryQualitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isAirwashControlSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isStaticCleanSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isCleanHandoffSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  return normalizeSoundProfile(soundProfile) === 'v15';
+  const normalized = normalizeSoundProfile(soundProfile);
+  return normalized === 'v15' || normalized === 'v16';
+}
+
+export function isForcedInductionSoundProfile(soundProfile: SoundProfile | undefined): boolean {
+  return normalizeSoundProfile(soundProfile) === 'v16';
 }
 
 /** Derived sound-shaping weights learned from reference captures. */
