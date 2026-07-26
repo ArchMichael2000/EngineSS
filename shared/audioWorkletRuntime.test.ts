@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
+import { AUDIO_ENGINE_MODEL_VERSION, COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
 import { buildEngineSoundAnalysis, resolveSoundTuningWeights } from "./engineSoundModel";
 import { FACTORY_PRESETS } from "./engineTypes";
 import type { EngineConfiguration } from "./engineTypes";
@@ -114,6 +114,10 @@ function rms(samples: number[]) {
 }
 
 describe("browser AudioWorklet runtime", () => {
+  it("uses a recovery model version so stale forced-induction worklets are replaced", () => {
+    expect(AUDIO_ENGINE_MODEL_VERSION).toContain("forced-induction-recovery");
+  });
+
   it("keeps the exact worklet alive and audible for V12", () => {
     const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 42 };
     const render = renderWorklet(config, 520, () => ({

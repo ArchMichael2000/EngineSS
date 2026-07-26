@@ -1101,7 +1101,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
 registerProcessor('combustion-processor', CombustionProcessor);
 `;
 
-export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v16-forced-induction";
+export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v16-forced-induction-recovery";
 
 export class AudioEngine {
   readonly modelVersion = AUDIO_ENGINE_MODEL_VERSION;
@@ -1134,6 +1134,7 @@ export class AudioEngine {
   private analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
   private silentFrameCount = 0;
   private rebuildInProgress = false;
+  private processorErrorCount = 0;
 
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
   private state: PlaybackState = {
@@ -1429,15 +1430,40 @@ export class AudioEngine {
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
-    this.combustionNode.onprocessorerror = () => {
-      this.silentFrameCount = 999;
-    };
+    this.combustionNode.onprocessorerror = () => this.handleProcessorError();
     this.combustionNode.connect(this.exhaustFilter);
     this.combustionNode.connect(this.intakeFilter);
     this.combustionNode.connect(this.dryExhaustGain);
     this.silentFrameCount = 0;
     this.updateAudioParameters();
     return this.combustionNode;
+  }
+
+  private handleProcessorError(): void {
+    this.processorErrorCount++;
+    this.silentFrameCount = 999;
+
+    const failedNode = this.combustionNode;
+    this.combustionNode = null;
+    try {
+      failedNode?.disconnect();
+    } catch {
+      // The browser may already have torn down the failed worklet node.
+    }
+
+    if (!this.state.isPlaying || !this.ctx) return;
+
+    if (this.workletReady && this.processorErrorCount <= 2) {
+      window.setTimeout(() => {
+        if (!this.state.isPlaying || !this.ctx || !this.workletReady || this.combustionNode || this.rebuildInProgress) return;
+        this.rebuildCombustionNode();
+      }, 0);
+      return;
+    }
+
+    this.workletReady = false;
+    this.startFallbackSynthesis();
+    this.updateAudioParameters();
   }
 
   private rebuildCombustionNode(): void {
@@ -1835,6 +1861,7 @@ export class AudioEngine {
     this.analyserBuffer = null;
     this.silentFrameCount = 0;
     this.rebuildInProgress = false;
+    this.processorErrorCount = 0;
     this.workletReady = false;
     this.isInitialized = false;
   }
