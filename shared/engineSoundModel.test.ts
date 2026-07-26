@@ -214,7 +214,7 @@ describe("engineSoundModel", () => {
     expect(dcBlockCoefficientForSoundProfile("v15")).toBe(dcBlockCoefficientForSoundProfile("v10"));
     expect(dcBlockCoefficientForSoundProfile("v9")).toBeGreaterThan(0.999);
     expect(dcBlockCoefficientForSoundProfile("v8")).toBe(0.995);
-    expect(dcBlockCoefficientForSoundProfile(undefined)).toBe(dcBlockCoefficientForSoundProfile("v16"));
+    expect(dcBlockCoefficientForSoundProfile(undefined)).toBe(dcBlockCoefficientForSoundProfile("v15"));
   });
 
   it("renders bounded, non-silent stereo PCM", () => {
@@ -244,7 +244,7 @@ describe("engineSoundModel", () => {
   });
 
   it("renders saved versioned sound profiles and legacy aliases", () => {
-    for (const soundProfile of ["v16", "v15", "v14", "v13", "v12", "v11", "v10", "v9", "v8", "v0", "clarity", "clean", "baseline"] as const) {
+    for (const soundProfile of ["v15", "v14", "v13", "v12", "v11", "v10", "v9", "v8", "v0", "clarity", "clean", "baseline"] as const) {
       const { left, right } = generateEnginePcm(
         {
           ...DEFAULT_ENGINE_CONFIG,
@@ -1329,77 +1329,6 @@ describe("engineSoundModel", () => {
     expect(meanAbsDifference(roots, centrifugal)).toBeGreaterThan(0.0005);
   });
 
-  it("brings v16 turbo spool in earlier with broadband compressor motion instead of a pure frequency rise", () => {
-    const turboConfig = {
-      ...FACTORY_PRESETS["inline-4-turbo"].config,
-      soundProfile: "v16" as const,
-      seed: 61,
-    };
-    const naConfig = {
-      ...turboConfig,
-      forcedInduction: { type: "na" as const },
-    };
-    const render = (config: typeof turboConfig | typeof naConfig, rpm: number) => generateEnginePcm(config, {
-      durationSec: 0.42,
-      sampleRate: 22050,
-      profile: "steady",
-      startRpm: rpm,
-      endRpm: rpm,
-      throttle: 0.72,
-      load: 0.66,
-      normalize: false,
-    }).left;
-    const difference = (a: Float32Array, b: Float32Array) => {
-      const output = new Float32Array(Math.min(a.length, b.length));
-      for (let i = 0; i < output.length; i++) output[i] = a[i] - b[i];
-      return output;
-    };
-
-    const earlyTurbo = render(turboConfig, 2600);
-    const earlyNa = render(naConfig, 2600);
-    const earlyAccessory = difference(earlyTurbo, earlyNa);
-    const highTurbo = render(turboConfig, 5200);
-    const highBands = bandPowers(highTurbo, 22050, 1200, 9000, 140);
-
-    expect(rms(earlyAccessory)).toBeGreaterThan(rms(earlyNa) * 0.10);
-    expect(bandPower(earlyAccessory, 22050, 1100, 6200, 100)).toBeGreaterThan(bandPower(earlyNa, 22050, 1100, 6200, 100) * 0.18);
-    expect(bandPower(highTurbo, 22050, 850, 3000, 80)).toBeGreaterThan(bandPower(highTurbo, 22050, 4200, 9000, 120) * 0.16);
-    expect(tonalDominance(highBands)).toBeLessThan(0.38);
-  });
-
-  it("makes v16 roots supercharger whine aggressive and Hellcat-like without muting engine body", () => {
-    const base = {
-      ...FACTORY_PRESETS["supercharged-v8"].config,
-      soundProfile: "v16" as const,
-      seed: 71,
-      forcedInduction: {
-        ...FACTORY_PRESETS["supercharged-v8"].config.forcedInduction,
-        superchargerType: "roots" as const,
-        whineIntensity: 0.95,
-      },
-    };
-    const na = { ...base, forcedInduction: { type: "na" as const } };
-    const render = (config: typeof base | typeof na, rpm: number) => generateEnginePcm(config, {
-      durationSec: 0.34,
-      sampleRate: 22050,
-      profile: "steady",
-      startRpm: rpm,
-      endRpm: rpm,
-      throttle: 0.54,
-      load: 0.58,
-      normalize: false,
-    }).left;
-
-    const rootsLow = render(base, 2400);
-    const rootsHigh = render(base, 4800);
-    const naHigh = render(na, 4800);
-
-    expect(bandPower(rootsLow, 22050, 1100, 5200, 100)).toBeGreaterThan(bandPower(render(na, 2400), 22050, 1100, 5200, 100) * 1.12);
-    expect(bandPower(rootsHigh, 22050, 1500, 7600, 120)).toBeGreaterThan(bandPower(naHigh, 22050, 1500, 7600, 120) * 1.28);
-    expect(bandPower(rootsHigh, 22050, 55, 900, 35)).toBeGreaterThan(bandPower(naHigh, 22050, 55, 900, 35) * 0.82);
-    expect(peak(rootsHigh)).toBeLessThanOrEqual(1);
-  });
-
   it("renders idle, sweep, and acceleration differently by engine family", () => {
     function renderFamilyEnergy(presetKey: string, profile: "steady" | "sweep" | "acceleration") {
       const config = FACTORY_PRESETS[presetKey].config;
@@ -1429,7 +1358,7 @@ describe("engineSoundModel", () => {
     function renderAudibleRms(cylinderCount: number) {
       const config = {
         ...DEFAULT_ENGINE_CONFIG,
-        soundProfile: "v16" as const,
+        soundProfile: "v15" as const,
         quick: {
           ...DEFAULT_ENGINE_CONFIG.quick,
           cylinderCount,

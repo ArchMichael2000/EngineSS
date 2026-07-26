@@ -8,7 +8,7 @@
 /// <reference lib="dom" />
 
 import type { EngineConfiguration, PlaybackState } from "../../../shared/engineTypes";
-import { DEFAULT_ENGINE_CONFIG, isBaselineSoundProfile, isClaritySoundProfile, isForcedInductionSoundProfile, normalizeSoundProfile } from "../../../shared/engineTypes";
+import { DEFAULT_ENGINE_CONFIG, isBaselineSoundProfile, isClaritySoundProfile, normalizeSoundProfile } from "../../../shared/engineTypes";
 import { buildEngineSoundAnalysis, generateEnginePcm, resolveSoundTuningWeights } from "../../../shared/engineSoundModel";
 import { resolveLiveOutputGain, resolveRealtimeAudioMixProfile } from "../../../shared/realtimeAudioMix";
 
@@ -28,7 +28,7 @@ function normalizeSoundProfile(soundProfile) {
   if (soundProfile === 'baseline') return 'v0';
   if (soundProfile === 'clean') return 'v8';
   if (soundProfile === 'clarity') return 'v9';
-  return soundProfile || 'v16';
+  return soundProfile || 'v15';
 }
 
 function isBaselineProfile(soundProfile) {
@@ -37,41 +37,36 @@ function isBaselineProfile(soundProfile) {
 
 function isClarityProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
 }
 
 function isCylinderBalanceProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
 }
 
 function isStereoStabilityProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
 }
 
 function isAccessoryQualityProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
 }
 
 function isAirwashControlProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
 }
 
 function isStaticCleanProfile(soundProfile) {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
+  return normalized === 'v14' || normalized === 'v15';
 }
 
 function isCleanHandoffProfile(soundProfile) {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v15' || normalized === 'v16';
-}
-
-function isForcedInductionProfile(soundProfile) {
-  return normalizeSoundProfile(soundProfile) === 'v16';
+  return normalizeSoundProfile(soundProfile) === 'v15';
 }
 
 class CombustionProcessor extends AudioWorkletProcessor {
@@ -118,7 +113,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
       wastegateEnabled: true,
       superchargerType: 'roots',
       whineIntensity: 0.6,
-      audioProfile: 'v16',
+      audioProfile: 'v15',
       layout: 'v',
       crankshaft: 'cross-plane',
       exhaustCharacter: 'sport',
@@ -283,7 +278,6 @@ class CombustionProcessor extends AudioWorkletProcessor {
     const airwashControlProfile = isAirwashControlProfile(soundProfile);
     const staticCleanProfile = isStaticCleanProfile(soundProfile);
     const cleanHandoffProfile = isCleanHandoffProfile(soundProfile);
-    const forcedInductionProfile = isForcedInductionProfile(soundProfile);
     const clarity = cleanProfile ? this.tune('clarity') : 1;
     const muffling = cleanProfile ? this.tune('muffling') : 1;
     const brightnessWeight = cleanProfile ? this.tune('exhaustBrightness') : 1;
@@ -539,7 +533,6 @@ class CombustionProcessor extends AudioWorkletProcessor {
     const airwashControlProfile = isAirwashControlProfile(soundProfile);
     const staticCleanProfile = isStaticCleanProfile(soundProfile);
     const cleanHandoffProfile = isCleanHandoffProfile(soundProfile);
-    const forcedInductionProfile = isForcedInductionProfile(soundProfile);
     const clarity = cleanProfile ? this.tune('clarity') : 1;
     const muffling = cleanProfile ? this.tune('muffling') : 1;
     const brightnessWeight = cleanProfile ? this.tune('exhaustBrightness') : 1;
@@ -902,67 +895,43 @@ class CombustionProcessor extends AudioWorkletProcessor {
 
       if (this.sound.forcedType === 'turbo') {
         const sizeLag = this.sound.turboSize === 'small' ? 0.7 : this.sound.turboSize === 'large' ? 1.35 : 1;
-        const spoolOnset = forcedInductionProfile ? this.sound.turboSpoolThreshold - (this.sound.turboSize === 'large' ? 1550 : this.sound.turboSize === 'small' ? 800 : 1200) : this.sound.turboSpoolThreshold;
-        const spoolRange = forcedInductionProfile ? 1300 * sizeLag : 2600 * sizeLag;
-        const exhaustDrive = forcedInductionProfile
-          ? Math.min(1.18, Math.max(0, Math.pow(this.throttle, 0.82) * (0.42 + this.load * 0.72) + Math.max(0, rpmNorm - 0.18) * 0.28))
-          : this.throttle * (0.76 + this.load * 0.34);
-        const targetSpool = Math.min(1, Math.max(0, ((rpm - spoolOnset) / spoolRange) * exhaustDrive));
+        const targetSpool = Math.min(1, Math.max(0, ((rpm - this.sound.turboSpoolThreshold) / (2600 * sizeLag)) * this.throttle * (0.76 + this.load * 0.34)));
         if (accessoryQualityProfile) {
-          const spoolResponseSec = forcedInductionProfile
-            ? this.sound.turboSize === 'small' ? 0.080 : this.sound.turboSize === 'large' ? 0.285 : 0.150
-            : this.sound.turboSize === 'small' ? 0.070 : this.sound.turboSize === 'large' ? 0.240 : 0.135;
+          const spoolResponseSec = this.sound.turboSize === 'small' ? 0.070 : this.sound.turboSize === 'large' ? 0.240 : 0.135;
           this.turboSpool = (this.turboSpool || 0) + (targetSpool - (this.turboSpool || 0)) * (1 - Math.exp(-1 / (sr * spoolResponseSec)));
         } else {
           this.turboSpool = targetSpool;
         }
         const spool = Math.min(1, Math.max(0, accessoryQualityProfile ? (this.turboSpool || 0) : targetSpool));
-        const shaftTone = accessoryQualityProfile ? Math.pow(spool, forcedInductionProfile ? 0.46 : 0.58) * (0.82 + rpmNorm * 0.18) : spool;
+        const shaftTone = accessoryQualityProfile ? Math.pow(spool, 0.58) * (0.82 + rpmNorm * 0.18) : spool;
         const turboHz = accessoryQualityProfile
-          ? forcedInductionProfile
-            ? Math.min(10800, Math.max(1200, 1450 + shaftTone * (this.sound.turboSize === 'large' ? 4700 : this.sound.turboSize === 'small' ? 7200 : 5900) + rpmNorm * 180))
-            : Math.min(9800, Math.max(1900, 2200 + shaftTone * (this.sound.turboSize === 'large' ? 4400 : this.sound.turboSize === 'small' ? 6100 : 5200) + rpmNorm * 320))
+          ? Math.min(9800, Math.max(1900, 2200 + shaftTone * (this.sound.turboSize === 'large' ? 4400 : this.sound.turboSize === 'small' ? 6100 : 5200) + rpmNorm * 320))
           : cleanProfile ? 1800 + spool * 5400 + rpmNorm * 700 : 1700 + spool * 6500 + rpmNorm * 900;
         this.boostPhase += twoPi * turboHz / sr;
         if (this.boostPhase > twoPi) this.boostPhase -= twoPi;
         const whistle = accessoryQualityProfile
-          ? forcedInductionProfile
-            ? Math.sin(this.boostPhase) * 0.34 +
-              Math.sin(this.boostPhase * 1.54 + (this.turboFlutterPhase || 0) * 0.26) * 0.22 +
-              Math.sin(this.boostPhase * 2.17 - (this.turboFlutterPhase || 0) * 0.13) * 0.08
-            : Math.sin(this.boostPhase) * 0.50 + Math.sin(this.boostPhase * 1.618 + (this.turboFlutterPhase || 0) * 0.2) * 0.14
+          ? Math.sin(this.boostPhase) * 0.50 + Math.sin(this.boostPhase * 1.618 + (this.turboFlutterPhase || 0) * 0.2) * 0.14
           : Math.sin(this.boostPhase) + Math.sin(this.boostPhase * 1.49) * (cleanProfile ? 0.12 : 0.28);
         if (cleanProfile) {
-          this.turboFlutterPhase = (this.turboFlutterPhase || 0) + twoPi * (accessoryQualityProfile ? forcedInductionProfile ? 18 + spool * 118 + this.load * 42 + rpmNorm * 18 : 28 + spool * 92 + rpmNorm * 26 : 34 + spool * 130 + rpmNorm * 80) / sr;
+          this.turboFlutterPhase = (this.turboFlutterPhase || 0) + twoPi * (accessoryQualityProfile ? 28 + spool * 92 + rpmNorm * 26 : 34 + spool * 130 + rpmNorm * 80) / sr;
           if (this.turboFlutterPhase > twoPi) this.turboFlutterPhase -= twoPi;
-          const gatedFlow = spool * (forcedInductionProfile ? Math.pow(this.throttle, 0.72) * (0.55 + this.load * 0.65) : this.throttle) * Math.min(forcedInductionProfile ? 2.10 : 1.75, Math.max(0.45, turboWhoosh));
+          const gatedFlow = spool * this.throttle * Math.min(1.75, Math.max(0.45, turboWhoosh));
           this.turboWhooshFast = (this.turboWhooshFast || 0) * (cleanHandoffProfile ? 0.94 : accessoryQualityProfile ? 0.64 : 0.72) + (this.random() - 0.5) * (cleanHandoffProfile ? 0 : accessoryQualityProfile ? 0.36 : 0.28);
           this.turboWhooshSlow = (this.turboWhooshSlow || 0) * (cleanHandoffProfile ? 0.992 : accessoryQualityProfile ? 0.975 : 0.985) + this.turboWhooshFast * (cleanHandoffProfile ? 0.008 : accessoryQualityProfile ? 0.025 : 0.015);
           const compressorTexture = cleanHandoffProfile ? 0 : this.turboWhooshFast - this.turboWhooshSlow * (accessoryQualityProfile ? 0.62 : 0.55);
-          const surgeWindow = accessoryQualityProfile ? Math.min(1, Math.max(0, (1 - Math.abs(spool - 0.58) * (forcedInductionProfile ? 1.05 : 1.25)) * (0.34 + this.load * 0.66) * Math.pow(this.throttle, forcedInductionProfile ? 0.72 : 1))) : 0;
-          const deterministicRush = forcedInductionProfile
-            ? (
-              Math.sin(this.turboFlutterPhase) * 0.52 +
-              Math.sin(this.turboFlutterPhase * 2.7 + this.boostPhase * 0.07) * 0.24 +
-              Math.sin(this.turboFlutterPhase * 5.1 - this.boostPhase * 0.03) * 0.12
-            )
-            : Math.sin(this.turboFlutterPhase);
-          const compressorBreath = deterministicRush * gatedFlow * (forcedInductionProfile ? 0.016 + surgeWindow * 0.026 + rpmNorm * 0.006 : cleanHandoffProfile ? 0.0008 + surgeWindow * 0.0022 + rpmNorm * 0.0007 : accessoryQualityProfile ? 0.0025 + surgeWindow * 0.006 + rpmNorm * 0.0018 : 0.002 + rpmNorm * 0.004);
+          const surgeWindow = accessoryQualityProfile ? Math.min(1, Math.max(0, (1 - Math.abs(spool - 0.58) * 1.25) * (0.34 + this.load * 0.66) * this.throttle)) : 0;
+          const compressorBreath = Math.sin(this.turboFlutterPhase) * gatedFlow * (cleanHandoffProfile ? 0.0008 + surgeWindow * 0.0022 + rpmNorm * 0.0007 : accessoryQualityProfile ? 0.0025 + surgeWindow * 0.006 + rpmNorm * 0.0018 : 0.002 + rpmNorm * 0.004);
           const flowNoise = compressorTexture *
             gatedFlow *
             (cleanHandoffProfile ? 0 : accessoryQualityProfile ? 0.010 + surgeWindow * 0.012 + this.sound.maxBoost / 3600 : 0.010 + this.sound.maxBoost / 3200);
-          const compressorChuff = forcedInductionProfile
-            ? Math.tanh(deterministicRush * 1.25 + whistle * 0.46) * gatedFlow * (0.014 + surgeWindow * 0.020)
-            : 0;
           const wastegate = this.sound.wastegateEnabled && this.load > 0.55 && spool > 0.65
-            ? (accessoryQualityProfile ? Math.sin(this.turboFlutterPhase * 1.7) + compressorTexture * (cleanHandoffProfile ? 0 : 0.45) + (forcedInductionProfile ? deterministicRush * 0.42 : 0) : Math.sin(this.boostPhase * 0.37)) * spool * (forcedInductionProfile ? 0.0085 + this.load * 0.006 : cleanHandoffProfile ? 0.0016 : accessoryQualityProfile ? 0.0045 : 0.006) * Math.min(forcedInductionProfile ? 1.8 : 1.5, Math.max(0.5, turboWhoosh))
+            ? (accessoryQualityProfile ? Math.sin(this.turboFlutterPhase * 1.7) + compressorTexture * (cleanHandoffProfile ? 0 : 0.45) : Math.sin(this.boostPhase * 0.37)) * spool * (cleanHandoffProfile ? 0.0016 : accessoryQualityProfile ? 0.0045 : 0.006) * Math.min(1.5, Math.max(0.5, turboWhoosh))
             : 0;
-          const turbo = whistle * spool * (forcedInductionProfile ? Math.pow(this.throttle, 0.70) : this.throttle) * (forcedInductionProfile ? 0.028 + this.sound.maxBoost / 2900 : accessoryQualityProfile ? 0.004 + this.sound.maxBoost / 5200 : 0.005 + this.sound.maxBoost / 3000) * Math.min(forcedInductionProfile ? 1.80 : 1.45, Math.max(0.45, turboTone)) +
+          const turbo = whistle * spool * this.throttle * (accessoryQualityProfile ? 0.004 + this.sound.maxBoost / 5200 : 0.005 + this.sound.maxBoost / 3000) * Math.min(1.45, Math.max(0.45, turboTone)) +
             flowNoise +
             compressorBreath +
-            compressorChuff +
             wastegate;
-          left += turbo * (accessoryQualityProfile ? forcedInductionProfile ? 0.98 : 0.94 : 0.88);
+          left += turbo * (accessoryQualityProfile ? 0.94 : 0.88);
           right += turbo;
         } else {
           const turbo = whistle * spool * (0.018 + this.sound.maxBoost / 900);
@@ -971,38 +940,31 @@ class CombustionProcessor extends AudioWorkletProcessor {
         }
       } else if (this.sound.forcedType === 'supercharged') {
         const type = this.sound.superchargerType || 'roots';
-        const driveRatio = type === 'centrifugal' ? 5.1 : type === 'twin-screw' ? 3.45 : forcedInductionProfile ? 3.05 : 2.85;
+        const driveRatio = type === 'centrifugal' ? 5.1 : type === 'twin-screw' ? 3.45 : 2.85;
         const rotorHz = (rpm / 60) * driveRatio;
         const scHz = accessoryQualityProfile
-          ? forcedInductionProfile
-            ? Math.min(8200, Math.max(320, rotorHz * (type === 'centrifugal' ? 12.8 : type === 'twin-screw' ? 10.8 : 8.7)))
-            : Math.min(6800, Math.max(260, rotorHz * (type === 'centrifugal' ? 12.5 : type === 'twin-screw' ? 9.5 : 7.5)))
+          ? Math.min(6800, Math.max(260, rotorHz * (type === 'centrifugal' ? 12.5 : type === 'twin-screw' ? 9.5 : 7.5)))
           : (rpm / 60) * driveRatio * (cleanProfile ? (type === 'roots' ? 9 : 11) : 12);
         this.boostPhase += twoPi * scHz / sr;
-        this.superchargerGearPhase = (this.superchargerGearPhase || 0) + twoPi * Math.min(forcedInductionProfile ? 8800 : 7600, Math.max(220, rotorHz * (type === 'twin-screw' ? forcedInductionProfile ? 11.4 : 10.5 : type === 'roots' ? forcedInductionProfile ? 9.6 : 8.2 : 13.5))) / sr;
-        this.superchargerLobePhase = (this.superchargerLobePhase || 0) + twoPi * Math.min(5200, Math.max(90, rotorHz * (type === 'roots' ? forcedInductionProfile ? 4.2 : 6 : type === 'twin-screw' ? 8 : 11))) / sr;
+        this.superchargerGearPhase = (this.superchargerGearPhase || 0) + twoPi * Math.min(7600, Math.max(220, rotorHz * (type === 'twin-screw' ? 10.5 : type === 'roots' ? 8.2 : 13.5))) / sr;
+        this.superchargerLobePhase = (this.superchargerLobePhase || 0) + twoPi * Math.min(5200, Math.max(90, rotorHz * (type === 'roots' ? 6 : type === 'twin-screw' ? 8 : 11))) / sr;
         if (this.boostPhase > twoPi) this.boostPhase -= twoPi;
         if (this.superchargerGearPhase > twoPi) this.superchargerGearPhase -= twoPi;
         if (this.superchargerLobePhase > twoPi) this.superchargerLobePhase -= twoPi;
         if (cleanProfile) {
-          const typeGain = type === 'roots' ? forcedInductionProfile ? 1.78 : 1.07 : type === 'twin-screw' ? forcedInductionProfile ? 1.86 : 1.55 : forcedInductionProfile ? 1.08 : 0.92;
-          const bypassGate = accessoryQualityProfile ? forcedInductionProfile ? Math.min(1.18, Math.max(0.38, 0.42 + Math.pow(this.throttle, 0.64) * 0.46 + this.load * 0.24)) : Math.min(1.05, Math.max(0.18, 0.20 + this.throttle * 0.58 + this.load * 0.28)) : 1;
+          const typeGain = type === 'roots' ? 1.07 : type === 'twin-screw' ? 1.55 : 0.92;
+          const bypassGate = accessoryQualityProfile ? Math.min(1.05, Math.max(0.18, 0.20 + this.throttle * 0.58 + this.load * 0.28)) : 1;
           const whine = accessoryQualityProfile
-            ? forcedInductionProfile
-              ? Math.sin(this.superchargerGearPhase) * 0.78 +
-                Math.sin(this.superchargerGearPhase * 2.01 + 0.3) * (type === 'centrifugal' ? 0.18 : 0.31) +
-                Math.sin(this.superchargerGearPhase * 3.02 - 0.45) * (type === 'roots' ? 0.15 : 0.10) +
-                Math.sin(this.boostPhase * 0.74 + 0.8) * (type === 'roots' ? 0.22 : 0.15)
-              : Math.sin(this.superchargerGearPhase) * 0.62 +
-                Math.sin(this.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
-                Math.sin(this.boostPhase * 0.74 + 0.8) * 0.16
+            ? Math.sin(this.superchargerGearPhase) * 0.62 +
+              Math.sin(this.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
+              Math.sin(this.boostPhase * 0.74 + 0.8) * 0.16
             : Math.sin(this.boostPhase) + Math.sin(this.boostPhase * 2) * 0.10;
           this.superchargerNoise = accessoryQualityProfile
             ? (this.superchargerNoise || 0) * (cleanHandoffProfile ? 0.98 : 0.90) + (this.random() - 0.5) * (cleanHandoffProfile ? 0 : 0.10)
             : this.superchargerNoise;
           const lobePulse = type === 'centrifugal'
             ? 0
-            : Math.pow(Math.max(0, Math.sin(this.superchargerLobePhase)), type === 'roots' ? forcedInductionProfile ? 1.7 : 2.4 : 2.2) * (accessoryQualityProfile ? forcedInductionProfile ? (type === 'twin-screw' ? 0.042 + this.load * 0.072 : 0.034 + this.load * 0.064) : (type === 'twin-screw' ? 0.024 + this.load * 0.036 : 0.010 + this.load * 0.018) : 0.006 + this.load * 0.010);
+            : Math.pow(Math.max(0, Math.sin(this.superchargerLobePhase)), type === 'roots' ? 2.4 : 2.4) * (accessoryQualityProfile ? (type === 'twin-screw' ? 0.024 + this.load * 0.036 : 0.010 + this.load * 0.018) : 0.006 + this.load * 0.010);
           const compressorAir = accessoryQualityProfile
             ? (this.superchargerNoise || 0) * (cleanHandoffProfile ? 0 : type === 'centrifugal' ? 0.014 : type === 'twin-screw' ? 0.018 : 0.007) * bypassGate * (0.45 + rpmNorm * 0.55)
             : 0;
@@ -1010,22 +972,18 @@ class CombustionProcessor extends AudioWorkletProcessor {
             ? (Math.sin(this.boostPhase) * 0.54 + Math.sin(this.boostPhase * 1.37) * 0.16) * Math.pow(rpmNorm, 1.35) * (0.010 + this.load * 0.014)
             : 0;
           const twinScrewCompression = accessoryQualityProfile && type === 'twin-screw'
-            ? Math.tanh(whine * (forcedInductionProfile ? 2.3 : 1.9) + (this.superchargerNoise || 0) * (cleanHandoffProfile ? 0 : 1.1)) * (forcedInductionProfile ? 0.036 + this.load * 0.042 : cleanHandoffProfile ? 0.020 + this.load * 0.018 : 0.030 + this.load * 0.030) * bypassGate
+            ? Math.tanh(whine * 1.9 + (this.superchargerNoise || 0) * (cleanHandoffProfile ? 0 : 1.1)) * (cleanHandoffProfile ? 0.020 + this.load * 0.018 : 0.030 + this.load * 0.030) * bypassGate
             : 0;
-          const rootsCaseWhistle = forcedInductionProfile && type === 'roots'
-            ? Math.tanh(whine * 1.65) * (0.030 + this.load * 0.050) * bypassGate
-            : 0;
-          const superchargerOutputLift = accessoryQualityProfile ? forcedInductionProfile ? type === 'centrifugal' ? 1.18 : 1.48 : type === 'twin-screw' ? 1.16 : 1 : 1;
+          const superchargerOutputLift = accessoryQualityProfile && type === 'twin-screw' ? 1.16 : 1;
           const gain = this.sound.whineIntensity *
             typeGain *
-            (accessoryQualityProfile ? forcedInductionProfile ? 0.045 + Math.pow(rpmNorm, 0.78) * 0.118 : 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
-            Math.min(forcedInductionProfile ? 2.15 : 1.75, Math.max(0.45, superchargerWhine)) *
+            (accessoryQualityProfile ? 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
+            Math.min(1.75, Math.max(0.45, superchargerWhine)) *
             bypassGate;
           const supercharger = (whine * gain +
-            lobePulse * this.sound.whineIntensity * Math.min(forcedInductionProfile ? 1.95 : 1.55, Math.max(0.55, superchargerWhine)) +
+            lobePulse * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine)) +
             compressorAir +
             twinScrewCompression * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine)) +
-            rootsCaseWhistle * this.sound.whineIntensity * Math.min(1.95, Math.max(0.55, superchargerWhine)) +
             centrifugalSiren * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine))) * superchargerOutputLift;
           left += supercharger * (accessoryQualityProfile ? 0.96 : 0.92);
           right += supercharger;
@@ -1101,7 +1059,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
 registerProcessor('combustion-processor', CombustionProcessor);
 `;
 
-export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v16-forced-induction-recovery";
+export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v15-clean-handoff";
 
 export class AudioEngine {
   readonly modelVersion = AUDIO_ENGINE_MODEL_VERSION;
@@ -1134,7 +1092,6 @@ export class AudioEngine {
   private analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
   private silentFrameCount = 0;
   private rebuildInProgress = false;
-  private processorErrorCount = 0;
 
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
   private state: PlaybackState = {
@@ -1430,40 +1387,15 @@ export class AudioEngine {
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
-    this.combustionNode.onprocessorerror = () => this.handleProcessorError();
+    this.combustionNode.onprocessorerror = () => {
+      this.silentFrameCount = 999;
+    };
     this.combustionNode.connect(this.exhaustFilter);
     this.combustionNode.connect(this.intakeFilter);
     this.combustionNode.connect(this.dryExhaustGain);
     this.silentFrameCount = 0;
     this.updateAudioParameters();
     return this.combustionNode;
-  }
-
-  private handleProcessorError(): void {
-    this.processorErrorCount++;
-    this.silentFrameCount = 999;
-
-    const failedNode = this.combustionNode;
-    this.combustionNode = null;
-    try {
-      failedNode?.disconnect();
-    } catch {
-      // The browser may already have torn down the failed worklet node.
-    }
-
-    if (!this.state.isPlaying || !this.ctx) return;
-
-    if (this.workletReady && this.processorErrorCount <= 2) {
-      window.setTimeout(() => {
-        if (!this.state.isPlaying || !this.ctx || !this.workletReady || this.combustionNode || this.rebuildInProgress) return;
-        this.rebuildCombustionNode();
-      }, 0);
-      return;
-    }
-
-    this.workletReady = false;
-    this.startFallbackSynthesis();
-    this.updateAudioParameters();
   }
 
   private rebuildCombustionNode(): void {
@@ -1641,24 +1573,17 @@ export class AudioEngine {
   private updateTurboSound(rpm: number, throttle: number): void {
     if (!this.ctx || !this.turboOsc || !this.turboGain) return;
     const fi = this.config.forcedInduction;
-    const forcedInductionProfile = isForcedInductionSoundProfile(this.config.soundProfile);
     const spoolThreshold = fi.turboSpoolThreshold || 3000;
     const sizeLag = fi.turboSize === "small" ? 0.7 : fi.turboSize === "large" ? 1.35 : 1;
-    const earlierThreshold = forcedInductionProfile ? spoolThreshold - (fi.turboSize === "large" ? 1550 : fi.turboSize === "small" ? 800 : 1200) : spoolThreshold;
-    const spoolRange = forcedInductionProfile ? 1300 * sizeLag : 2600 * sizeLag;
-    const exhaustDrive = forcedInductionProfile ? Math.pow(throttle, 0.82) : throttle;
-    const spool = Math.max(0, Math.min(1, ((rpm - earlierThreshold) / spoolRange) * exhaustDrive));
+    const spool = Math.max(0, Math.min(1, ((rpm - spoolThreshold) / (2600 * sizeLag)) * throttle));
     const cleanProfile = !isBaselineSoundProfile(this.config.soundProfile);
     const tuning = resolveSoundTuningWeights(this.config);
     const realtimeMix = resolveRealtimeAudioMixProfile(this.config.soundProfile);
     const legacyOscillatorGain = this.workletReady ? realtimeMix.legacyForcedInductionOscillatorGain : 1;
-    const shaftTone = forcedInductionProfile ? Math.pow(spool, 0.46) : spool;
-    const turboFreq = forcedInductionProfile
-      ? 1450 + shaftTone * (fi.turboSize === "large" ? 4700 : fi.turboSize === "small" ? 7200 : 5900) + (rpm / this.config.quick.redline) * 180
-      : cleanProfile ? 1800 + spool * 5400 + (rpm / this.config.quick.redline) * 700 : 1700 + spool * 6500 + (rpm / this.config.quick.redline) * 900;
-    const turboVol = spool * (forcedInductionProfile ? Math.pow(throttle, 0.72) : throttle) * (cleanProfile ? (forcedInductionProfile ? 0.034 : 0.005) * tuning.turboTone : 0.055) * legacyOscillatorGain;
-    this.turboOsc.frequency.setTargetAtTime(turboFreq, this.ctx.currentTime, forcedInductionProfile ? 0.14 : 0.06);
-    this.turboGain.gain.setTargetAtTime(turboVol, this.ctx.currentTime, forcedInductionProfile ? 0.03 : 0.04);
+    const turboFreq = cleanProfile ? 1800 + spool * 5400 + (rpm / this.config.quick.redline) * 700 : 1700 + spool * 6500 + (rpm / this.config.quick.redline) * 900;
+    const turboVol = spool * throttle * (cleanProfile ? 0.005 * tuning.turboTone : 0.055) * legacyOscillatorGain;
+    this.turboOsc.frequency.setTargetAtTime(turboFreq, this.ctx.currentTime, 0.06);
+    this.turboGain.gain.setTargetAtTime(turboVol, this.ctx.currentTime, 0.04);
     this.superchargerGain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
     this.state.boost = spool * (fi.maxBoost || 15);
   }
@@ -1667,23 +1592,15 @@ export class AudioEngine {
     if (!this.ctx || !this.superchargerOsc || !this.superchargerGain) return;
     const fi = this.config.forcedInduction;
     const rpmNormalized = rpm / this.config.quick.redline;
-    const forcedInductionProfile = isForcedInductionSoundProfile(this.config.soundProfile);
-    const ratio = forcedInductionProfile
-      ? fi.superchargerType === "centrifugal" ? 4.8 : fi.superchargerType === "twin-screw" ? 3.95 : 3.05
-      : fi.superchargerType === "centrifugal" ? 4.8 : fi.superchargerType === "twin-screw" ? 3.7 : 2.9;
+    const ratio = fi.superchargerType === "centrifugal" ? 4.8 : fi.superchargerType === "twin-screw" ? 3.7 : 2.9;
     const cleanProfile = !isBaselineSoundProfile(this.config.soundProfile);
     const tuning = resolveSoundTuningWeights(this.config);
     const realtimeMix = resolveRealtimeAudioMixProfile(this.config.soundProfile);
     const legacyOscillatorGain = this.workletReady ? realtimeMix.legacyForcedInductionOscillatorGain : 1;
-    const multiplier = forcedInductionProfile
-      ? fi.superchargerType === "roots" ? 9.6 : fi.superchargerType === "twin-screw" ? 11.4 : 12.8
-      : cleanProfile ? (fi.superchargerType === "roots" ? 9 : 11) : 12;
-    const scFreq = (rpm / 60) * ratio * multiplier;
-    const bypassGate = forcedInductionProfile ? Math.max(0.38, Math.min(1.18, 0.42 + Math.pow(rpmNormalized, 0.45) * 0.32 + (this.state.load || 0.45) * 0.24)) : 1;
-    const typeGain = forcedInductionProfile ? fi.superchargerType === "roots" ? 1.78 : fi.superchargerType === "twin-screw" ? 1.86 : 1.08 : 1;
-    const scVol = rpmNormalized * (cleanProfile ? (forcedInductionProfile ? 0.064 : 0.014) * tuning.superchargerWhine : 0.055) * (fi.whineIntensity || 0.6) * bypassGate * typeGain * legacyOscillatorGain;
-    this.superchargerOsc.frequency.setTargetAtTime(scFreq, this.ctx.currentTime, forcedInductionProfile ? 0.018 : 0.025);
-    this.superchargerGain.gain.setTargetAtTime(scVol, this.ctx.currentTime, forcedInductionProfile ? 0.018 : 0.025);
+    const scFreq = (rpm / 60) * ratio * (cleanProfile ? (fi.superchargerType === "roots" ? 9 : 11) : 12);
+    const scVol = rpmNormalized * (cleanProfile ? 0.014 * tuning.superchargerWhine : 0.055) * (fi.whineIntensity || 0.6) * legacyOscillatorGain;
+    this.superchargerOsc.frequency.setTargetAtTime(scFreq, this.ctx.currentTime, 0.025);
+    this.superchargerGain.gain.setTargetAtTime(scVol, this.ctx.currentTime, 0.025);
     this.turboGain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
     this.state.boost = rpmNormalized * (fi.superchargerBoost || 10);
   }
@@ -1861,7 +1778,6 @@ export class AudioEngine {
     this.analyserBuffer = null;
     this.silentFrameCount = 0;
     this.rebuildInProgress = false;
-    this.processorErrorCount = 0;
     this.workletReady = false;
     this.isInitialized = false;
   }

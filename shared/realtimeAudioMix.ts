@@ -68,7 +68,7 @@ export function resolveLiveOutputGain(config: EngineConfiguration): number {
   const normalized = normalizeSoundProfile(config.soundProfile);
   const displacementLift = clamp(0.94 + Math.sqrt(displacement / 5.0) * 0.070, 0.96, 1.12);
   const smoothEngineLift = cylinderCount <= 4 ? 1.14 : cylinderCount <= 6 ? 1.10 : cylinderCount <= 8 ? 1.04 : cylinderCount <= 12 ? 1.08 : 1.06;
-  const currentLift = isCylinderBalanceSoundProfile(normalized) ? normalized === "v16" ? 1.12 : normalized === "v15" ? 1.10 : 1.08 : 1;
+  const currentLift = isCylinderBalanceSoundProfile(normalized) ? normalized === "v15" ? 1.10 : 1.08 : 1;
   const exhaustTrim = quick.exhaustCharacter === "stock" ? 1.08 : quick.exhaustCharacter === "sport" ? 1.03 : quick.exhaustCharacter === "race" ? 0.96 : 0.92;
   const inductionTrim = forcedInduction.type === "turbo" ? 1.04 : forcedInduction.type === "supercharged" ? 0.98 : 1;
   const profileTrim = isClaritySoundProfile(normalized) ? 1.03 : isBaselineSoundProfile(normalized) ? 0.96 : 1;

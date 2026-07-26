@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIO_ENGINE_MODEL_VERSION, COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
+import { COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
 import { buildEngineSoundAnalysis, resolveSoundTuningWeights } from "./engineSoundModel";
 import { FACTORY_PRESETS } from "./engineTypes";
 import type { EngineConfiguration } from "./engineTypes";
@@ -51,7 +51,7 @@ function configureProcessor(processor: WorkletProcessor, config: EngineConfigura
         wastegateEnabled: config.forcedInduction.wastegateEnabled ?? true,
         superchargerType: config.forcedInduction.superchargerType ?? "roots",
         whineIntensity: config.forcedInduction.whineIntensity ?? 0.6,
-        audioProfile: config.soundProfile ?? "v16",
+        audioProfile: config.soundProfile ?? "v15",
         layout: config.quick.layout,
         crankshaft: config.quick.crankshaft,
         exhaustCharacter: config.quick.exhaustCharacter,
@@ -114,12 +114,8 @@ function rms(samples: number[]) {
 }
 
 describe("browser AudioWorklet runtime", () => {
-  it("uses a recovery model version so stale forced-induction worklets are replaced", () => {
-    expect(AUDIO_ENGINE_MODEL_VERSION).toContain("forced-induction-recovery");
-  });
-
   it("keeps the exact worklet alive and audible for V12", () => {
-    const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 42 };
+    const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 42 };
     const render = renderWorklet(config, 520, () => ({
       rpm: 4200,
       throttle: 0.55,
@@ -135,7 +131,7 @@ describe("browser AudioWorklet runtime", () => {
   });
 
   it("does not die or go silent when V8 crosses 6000 RPM", () => {
-    const config = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 };
+    const config = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 };
     const render = renderWorklet(config, 700, (block) => {
       const progress = block / 699;
       return {
@@ -155,7 +151,7 @@ describe("browser AudioWorklet runtime", () => {
   it("does not die or go silent when dense engines run past 8000 RPM", () => {
     const config = {
       ...FACTORY_PRESETS["v12"].config,
-      soundProfile: "v16" as const,
+      soundProfile: "v15" as const,
       seed: 42,
       quick: {
         ...FACTORY_PRESETS["v12"].config.quick,
@@ -180,12 +176,12 @@ describe("browser AudioWorklet runtime", () => {
   });
 
   it("keeps current worklet loudness stable from V8 to V12", () => {
-    const renderV8 = renderWorklet({ ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 }, 560, () => ({
+    const renderV8 = renderWorklet({ ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 }, 560, () => ({
       rpm: 3600,
       throttle: 0.58,
       load: 0.62,
     }));
-    const renderV12 = renderWorklet({ ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 42 }, 560, () => ({
+    const renderV12 = renderWorklet({ ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 42 }, 560, () => ({
       rpm: 3600,
       throttle: 0.58,
       load: 0.62,
@@ -199,8 +195,8 @@ describe("browser AudioWorklet runtime", () => {
 
   it("flushes old combustion state when presets change during an RPM sweep", () => {
     const processor = instantiateCombustionProcessor();
-    const v8 = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v16" as const, seed: 42 };
-    const v12 = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v16" as const, seed: 77 };
+    const v8 = { ...FACTORY_PRESETS["v8-crossplane"].config, soundProfile: "v15" as const, seed: 42 };
+    const v12 = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 77 };
     const internals = processor as WorkletProcessor & { pulses?: unknown[]; analysis?: { cylinderCount?: number } };
 
     configureProcessor(processor, v8);
@@ -247,49 +243,5 @@ describe("browser AudioWorklet runtime", () => {
     expect(peak).toBeGreaterThan(0.035);
     expect(steadyRms).toBeGreaterThan(0.006);
     expect(peak).toBeLessThanOrEqual(1);
-  });
-
-  it("keeps v16 turbo engines alive and audible in the live worklet", () => {
-    const config = {
-      ...FACTORY_PRESETS["inline-4-turbo"].config,
-      soundProfile: "v16" as const,
-      seed: 42,
-    };
-    const render = renderWorklet(config, 560, (block) => {
-      const progress = block / 559;
-      return {
-        rpm: 2400 + progress * 2800,
-        throttle: 0.82,
-        load: 0.72,
-      };
-    });
-
-    expect(render.returnedFalseAt).toBeNull();
-    expect(render.peak).toBeGreaterThan(0.035);
-    expect(render.rms).toBeGreaterThan(0.006);
-    expect(render.tailRms).toBeGreaterThan(0.006);
-    expect(render.peak).toBeLessThanOrEqual(1);
-  });
-
-  it("keeps v16 supercharged engines alive and audible in the live worklet", () => {
-    const config = {
-      ...FACTORY_PRESETS["supercharged-v8"].config,
-      soundProfile: "v16" as const,
-      seed: 42,
-    };
-    const render = renderWorklet(config, 560, (block) => {
-      const progress = block / 559;
-      return {
-        rpm: 1800 + progress * 4200,
-        throttle: 0.78,
-        load: 0.68,
-      };
-    });
-
-    expect(render.returnedFalseAt).toBeNull();
-    expect(render.peak).toBeGreaterThan(0.04);
-    expect(render.rms).toBeGreaterThan(0.007);
-    expect(render.tailRms).toBeGreaterThan(0.007);
-    expect(render.peak).toBeLessThanOrEqual(1);
   });
 });
