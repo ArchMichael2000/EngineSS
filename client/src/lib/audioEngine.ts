@@ -539,6 +539,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
     const airwashControlProfile = isAirwashControlProfile(soundProfile);
     const staticCleanProfile = isStaticCleanProfile(soundProfile);
     const cleanHandoffProfile = isCleanHandoffProfile(soundProfile);
+    const forcedInductionProfile = isForcedInductionProfile(soundProfile);
     const clarity = cleanProfile ? this.tune('clarity') : 1;
     const muffling = cleanProfile ? this.tune('muffling') : 1;
     const brightnessWeight = cleanProfile ? this.tune('exhaustBrightness') : 1;

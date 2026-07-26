@@ -244,4 +244,48 @@ describe("browser AudioWorklet runtime", () => {
     expect(steadyRms).toBeGreaterThan(0.006);
     expect(peak).toBeLessThanOrEqual(1);
   });
+
+  it("keeps v16 turbo engines alive and audible in the live worklet", () => {
+    const config = {
+      ...FACTORY_PRESETS["inline-4-turbo"].config,
+      soundProfile: "v16" as const,
+      seed: 42,
+    };
+    const render = renderWorklet(config, 560, (block) => {
+      const progress = block / 559;
+      return {
+        rpm: 2400 + progress * 2800,
+        throttle: 0.82,
+        load: 0.72,
+      };
+    });
+
+    expect(render.returnedFalseAt).toBeNull();
+    expect(render.peak).toBeGreaterThan(0.035);
+    expect(render.rms).toBeGreaterThan(0.006);
+    expect(render.tailRms).toBeGreaterThan(0.006);
+    expect(render.peak).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps v16 supercharged engines alive and audible in the live worklet", () => {
+    const config = {
+      ...FACTORY_PRESETS["supercharged-v8"].config,
+      soundProfile: "v16" as const,
+      seed: 42,
+    };
+    const render = renderWorklet(config, 560, (block) => {
+      const progress = block / 559;
+      return {
+        rpm: 1800 + progress * 4200,
+        throttle: 0.78,
+        load: 0.68,
+      };
+    });
+
+    expect(render.returnedFalseAt).toBeNull();
+    expect(render.peak).toBeGreaterThan(0.04);
+    expect(render.rms).toBeGreaterThan(0.007);
+    expect(render.tailRms).toBeGreaterThan(0.007);
+    expect(render.peak).toBeLessThanOrEqual(1);
+  });
 });
