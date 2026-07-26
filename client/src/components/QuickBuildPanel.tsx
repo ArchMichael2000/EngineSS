@@ -46,7 +46,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           type: value as AspirationType,
           ...(value === 'turbo' && {
             turboSize: 'balanced' as const,
-            turboSpoolThreshold: 3000,
+            turboSpoolThreshold: 2000,
             maxBoost: 15,
             bovEnabled: true,
             wastegateEnabled: true,

@@ -62,6 +62,19 @@ describe("engineSoundModel", () => {
     return total / Math.max(1, samples.length - 1);
   }
 
+  function meanAbsDifference(a: Float32Array, b: Float32Array): number {
+    let total = 0;
+    for (let i = 0; i < a.length; i++) total += Math.abs(a[i] - b[i]);
+    return total / Math.max(1, a.length);
+  }
+
+  function differenceSamples(a: Float32Array, b: Float32Array): Float32Array {
+    const length = Math.min(a.length, b.length);
+    const difference = new Float32Array(length);
+    for (let i = 0; i < length; i++) difference[i] = a[i] - b[i];
+    return difference;
+  }
+
   function windowedMeanAbsDelta(samples: Float32Array, sampleRate: number, startSec: number, endSec: number): number {
     const start = Math.max(1, Math.floor(startSec * sampleRate));
     const end = Math.min(samples.length, Math.floor(endSec * sampleRate));
@@ -1247,6 +1260,80 @@ describe("engineSoundModel", () => {
     expect(rms(left)).toBeGreaterThan(0.006);
     expect(whooshBand).toBeGreaterThan(bladeAndHissBand * 0.18);
     expect(tonalDominance(turboBands)).toBeLessThan(0.45);
+  });
+
+  it("brings v15 turbo spool into the mix near 2000 rpm", () => {
+    const renderTurbo = (threshold: number) => generateEnginePcm(
+      {
+        ...FACTORY_PRESETS["inline-4-turbo"].config,
+        soundProfile: "v15",
+        seed: 53,
+        forcedInduction: {
+          ...FACTORY_PRESETS["inline-4-turbo"].config.forcedInduction,
+          turboSpoolThreshold: threshold,
+        },
+      },
+      {
+        durationSec: 0.32,
+        sampleRate: 22050,
+        profile: "steady",
+        startRpm: 2400,
+        endRpm: 2400,
+        throttle: 0.78,
+        load: 0.68,
+        normalize: false,
+      },
+    ).left;
+
+    const earlySpool = renderTurbo(2000);
+    const lateSpool = renderTurbo(4500);
+    const sampleRate = 22050;
+    const turboLayer = differenceSamples(earlySpool, lateSpool);
+
+    expect(meanAbsDifference(earlySpool, lateSpool)).toBeGreaterThan(0.00005);
+    expect(rms(turboLayer)).toBeGreaterThan(0.00008);
+    expect(bandPower(turboLayer, sampleRate, 1900, 7600, 120)).toBeGreaterThan(0.0004);
+  });
+
+  it("makes v15 roots superchargers audible just above idle", () => {
+    const base = {
+      ...FACTORY_PRESETS["supercharged-v8"].config,
+      soundProfile: "v15" as const,
+      seed: 59,
+      forcedInduction: {
+        ...FACTORY_PRESETS["supercharged-v8"].config.forcedInduction,
+        whineIntensity: 0.85,
+      },
+    };
+    const render = (forcedType: "na" | "supercharged") => generateEnginePcm(
+      {
+        ...base,
+        forcedInduction: {
+          ...base.forcedInduction,
+          type: forcedType,
+          superchargerType: "roots",
+        },
+      },
+      {
+        durationSec: 0.32,
+        sampleRate: 22050,
+        profile: "steady",
+        startRpm: 1150,
+        endRpm: 1150,
+        throttle: 0.36,
+        load: 0.42,
+        normalize: false,
+      },
+    ).left;
+
+    const naturallyAspirated = render("na");
+    const supercharged = render("supercharged");
+    const sampleRate = 22050;
+    const superchargerLayer = differenceSamples(supercharged, naturallyAspirated);
+
+    expect(meanAbsDifference(supercharged, naturallyAspirated)).toBeGreaterThan(0.00008);
+    expect(rms(superchargerLayer)).toBeGreaterThan(0.00012);
+    expect(bandPower(superchargerLayer, sampleRate, 1200, 6800, 120)).toBeGreaterThan(0.0005);
   });
 
   it("makes v12 superchargers audible while keeping roots, twin-screw, and centrifugal distinct", () => {

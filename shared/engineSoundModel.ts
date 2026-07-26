@@ -1382,9 +1382,14 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
   right += rumble * inductionBodyMakeup + densityBed * 1.06 + intake * (accessoryQualityProfile ? 0.92 : 1.05) * clarityIntakeTrim + valvetrain * 0.9 * clarityValvetrainTrim + orderTone * 1.04;
 
   if (forcedInduction.type === "turbo") {
-    const threshold = forcedInduction.turboSpoolThreshold ?? 3000;
+    const threshold = forcedInduction.turboSpoolThreshold ?? 2000;
     const sizeLag = forcedInduction.turboSize === "small" ? 0.7 : forcedInduction.turboSize === "large" ? 1.35 : 1;
-    const targetSpool = clamp(((rpm - threshold) / (2600 * sizeLag)) * throttle * (0.76 + load * 0.34), 0, 1);
+    const spoolRange = (accessoryQualityProfile ? 1700 : 2600) * sizeLag;
+    const aboveThreshold = Math.max(0, rpm - threshold);
+    const earlySpoolLift = accessoryQualityProfile && aboveThreshold > 0
+      ? Math.min(0.28, 0.12 + aboveThreshold / 10000)
+      : 0;
+    const targetSpool = clamp((aboveThreshold / spoolRange) * throttle * (accessoryQualityProfile ? 0.88 + load * 0.40 : 0.76 + load * 0.34) + earlySpoolLift * throttle, 0, 1);
     if (accessoryQualityProfile) {
       const spoolResponseSec = forcedInduction.turboSize === "small" ? 0.070 : forcedInduction.turboSize === "large" ? 0.240 : 0.135;
       state.turboSpool += (targetSpool - state.turboSpool) * (1 - Math.exp(-1 / (sr * spoolResponseSec)));
@@ -1431,6 +1436,7 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
     const type = forcedInduction.superchargerType ?? "roots";
     const driveRatio = type === "centrifugal" ? 5.1 : type === "twin-screw" ? 3.45 : 2.85;
     const rotorHz = (rpm / 60) * driveRatio;
+    const superchargerWake = accessoryQualityProfile ? clamp((rpm - 900) / 850, 0, 1) : 1;
     const scHz = accessoryQualityProfile
       ? clamp(rotorHz * (type === "centrifugal" ? 12.5 : type === "twin-screw" ? 9.5 : 7.5), 260, 6800)
       : (rpm / 60) * driveRatio * (cleanProfile ? (type === "roots" ? 9 : 11) : 12);
@@ -1442,7 +1448,7 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
     if (state.superchargerLobePhase > TWO_PI) state.superchargerLobePhase -= TWO_PI;
     if (cleanProfile) {
       const typeGain = type === "roots" ? 1.07 : type === "twin-screw" ? 1.55 : 0.92;
-      const bypassGate = accessoryQualityProfile ? clamp(0.20 + throttle * 0.58 + load * 0.28, 0.18, 1.05) : 1;
+      const bypassGate = accessoryQualityProfile ? clamp(0.32 + throttle * 0.50 + load * 0.28, 0.32, 1.08) : 1;
       const whine = accessoryQualityProfile
         ? Math.sin(state.superchargerGearPhase) * 0.62 +
           Math.sin(state.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
@@ -1466,14 +1472,14 @@ function synthesizeSample(state: SynthesisState, config: EngineConfiguration, rp
       const superchargerOutputLift = accessoryQualityProfile && type === "twin-screw" ? 1.16 : 1;
       const gain = (forcedInduction.whineIntensity ?? 0.6) *
         typeGain *
-        (accessoryQualityProfile ? 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
+        (accessoryQualityProfile ? 0.034 + Math.pow(Math.max(0, rpmNorm), 0.72) * 0.072 : 0.008 + rpmNorm * 0.038) *
         clamp(superchargerWhine, 0.45, 1.75) *
         bypassGate;
       const supercharger = (whine * gain +
         lobePulse * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55) +
         compressorAir +
         twinScrewCompression * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55) +
-        centrifugalSiren * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55)) * superchargerOutputLift;
+        centrifugalSiren * (forcedInduction.whineIntensity ?? 0.6) * clamp(superchargerWhine, 0.55, 1.55)) * superchargerOutputLift * superchargerWake;
       left += supercharger * (accessoryQualityProfile ? 0.96 : 0.92);
       right += supercharger;
     } else {

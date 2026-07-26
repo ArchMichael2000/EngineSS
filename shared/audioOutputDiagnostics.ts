@@ -41,7 +41,7 @@ function configure(processor: WorkletProcessor, config: EngineConfiguration) {
       sound: {
         redline: config.quick.redline,
         forcedType: config.forcedInduction.type,
-        turboSpoolThreshold: config.forcedInduction.turboSpoolThreshold ?? 3000,
+        turboSpoolThreshold: config.forcedInduction.turboSpoolThreshold ?? 2000,
         turboSize: config.forcedInduction.turboSize ?? "balanced",
         maxBoost: config.forcedInduction.maxBoost ?? 15,
         wastegateEnabled: config.forcedInduction.wastegateEnabled ?? true,

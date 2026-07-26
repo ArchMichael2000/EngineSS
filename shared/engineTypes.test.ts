@@ -122,6 +122,7 @@ describe("FACTORY_PRESETS", () => {
     expect(turboPreset).toBeDefined();
     expect(turboPreset.config.forcedInduction.type).toBe("turbo");
     expect(turboPreset.config.forcedInduction.turboSize).toBeDefined();
+    expect(turboPreset.config.forcedInduction.turboSpoolThreshold).toBe(2000);
     expect(turboPreset.config.forcedInduction.maxBoost).toBeGreaterThan(0);
   });
 

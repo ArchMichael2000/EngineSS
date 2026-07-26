@@ -32,16 +32,20 @@ export function PlaybackController({
   const sweepRef = useRef<number | null>(null);
   const holdTimeoutRef = useRef<number | null>(null);
   const sweepRpmRef = useRef(800);
+  const sweepRunIdRef = useRef(0);
+  const resetKeyRef = useRef(resetKey);
 
   const clearSweepTimers = useCallback(() => {
-    if (sweepRef.current) {
+    sweepRunIdRef.current += 1;
+    if (sweepRef.current !== null) {
       cancelAnimationFrame(sweepRef.current);
       sweepRef.current = null;
     }
-    if (holdTimeoutRef.current) {
+    if (holdTimeoutRef.current !== null) {
       window.clearTimeout(holdTimeoutRef.current);
       holdTimeoutRef.current = null;
     }
+    sweepRpmRef.current = 800;
   }, []);
 
   const stopSweep = useCallback(() => {
@@ -55,6 +59,8 @@ export function PlaybackController({
     if (!isPlaying) return;
     clearSweepTimers();
     setSweepActive(true);
+    const sweepRunId = sweepRunIdRef.current + 1;
+    sweepRunIdRef.current = sweepRunId;
     sweepRpmRef.current = 800;
     onRpmChange(800);
 
@@ -64,6 +70,7 @@ export function PlaybackController({
     const endRpm = redline;
 
     const animate = (now: number) => {
+      if (sweepRunId !== sweepRunIdRef.current) return;
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / sweepDuration, 1);
       // Ease-in-out for natural feel
@@ -79,8 +86,10 @@ export function PlaybackController({
       if (progress < 1) {
         sweepRef.current = requestAnimationFrame(animate);
       } else {
+        sweepRef.current = null;
         // Hold at redline briefly then back to idle
         holdTimeoutRef.current = window.setTimeout(() => {
+          if (sweepRunId !== sweepRunIdRef.current) return;
           onThrottleChange(0);
           onRpmChange(800);
           setSweepActive(false);
@@ -92,22 +101,39 @@ export function PlaybackController({
     sweepRef.current = requestAnimationFrame(animate);
   }, [clearSweepTimers, isPlaying, redline, onThrottleChange, onRpmChange]);
 
+  const handleStopEngine = useCallback(() => {
+    stopSweep();
+    onStop();
+  }, [stopSweep, onStop]);
+
   useEffect(() => {
     return () => clearSweepTimers();
   }, [clearSweepTimers]);
 
   useEffect(() => {
+    if (!isPlaying && sweepActive) {
+      stopSweep();
+    }
+  }, [isPlaying, sweepActive, stopSweep]);
+
+  useEffect(() => {
+    if (resetKeyRef.current !== resetKey) {
+      resetKeyRef.current = resetKey;
+    } else {
+      return;
+    }
+
     if (sweepActive) {
       stopSweep();
     }
-  }, [resetKey]);
+  }, [resetKey, sweepActive, stopSweep]);
 
   return (
     <div className="space-y-5">
       {/* Start/Stop Controls */}
       <div className="flex items-center gap-3">
         <Button
-          onClick={isPlaying ? onStop : onStart}
+          onClick={isPlaying ? handleStopEngine : onStart}
           className={`flex-1 h-12 font-[Orbitron] text-sm uppercase tracking-wider transition-all duration-200 ${
             isPlaying
               ? 'bg-neon-pink/20 border border-neon-pink text-neon-pink hover:bg-neon-pink/30 box-glow-pink'

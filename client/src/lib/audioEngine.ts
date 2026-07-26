@@ -107,7 +107,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
     this.sound = {
       redline: 6500,
       forcedType: 'na',
-      turboSpoolThreshold: 3000,
+      turboSpoolThreshold: 2000,
       turboSize: 'balanced',
       maxBoost: 15,
       wastegateEnabled: true,
@@ -895,7 +895,12 @@ class CombustionProcessor extends AudioWorkletProcessor {
 
       if (this.sound.forcedType === 'turbo') {
         const sizeLag = this.sound.turboSize === 'small' ? 0.7 : this.sound.turboSize === 'large' ? 1.35 : 1;
-        const targetSpool = Math.min(1, Math.max(0, ((rpm - this.sound.turboSpoolThreshold) / (2600 * sizeLag)) * this.throttle * (0.76 + this.load * 0.34)));
+        const spoolRange = (accessoryQualityProfile ? 1700 : 2600) * sizeLag;
+        const aboveThreshold = Math.max(0, rpm - this.sound.turboSpoolThreshold);
+        const earlySpoolLift = accessoryQualityProfile && aboveThreshold > 0
+          ? Math.min(0.28, 0.12 + aboveThreshold / 10000)
+          : 0;
+        const targetSpool = Math.min(1, Math.max(0, (aboveThreshold / spoolRange) * this.throttle * (accessoryQualityProfile ? 0.88 + this.load * 0.40 : 0.76 + this.load * 0.34) + earlySpoolLift * this.throttle));
         if (accessoryQualityProfile) {
           const spoolResponseSec = this.sound.turboSize === 'small' ? 0.070 : this.sound.turboSize === 'large' ? 0.240 : 0.135;
           this.turboSpool = (this.turboSpool || 0) + (targetSpool - (this.turboSpool || 0)) * (1 - Math.exp(-1 / (sr * spoolResponseSec)));
@@ -942,6 +947,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
         const type = this.sound.superchargerType || 'roots';
         const driveRatio = type === 'centrifugal' ? 5.1 : type === 'twin-screw' ? 3.45 : 2.85;
         const rotorHz = (rpm / 60) * driveRatio;
+        const superchargerWake = accessoryQualityProfile ? Math.min(1, Math.max(0, (rpm - 900) / 850)) : 1;
         const scHz = accessoryQualityProfile
           ? Math.min(6800, Math.max(260, rotorHz * (type === 'centrifugal' ? 12.5 : type === 'twin-screw' ? 9.5 : 7.5)))
           : (rpm / 60) * driveRatio * (cleanProfile ? (type === 'roots' ? 9 : 11) : 12);
@@ -953,7 +959,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
         if (this.superchargerLobePhase > twoPi) this.superchargerLobePhase -= twoPi;
         if (cleanProfile) {
           const typeGain = type === 'roots' ? 1.07 : type === 'twin-screw' ? 1.55 : 0.92;
-          const bypassGate = accessoryQualityProfile ? Math.min(1.05, Math.max(0.18, 0.20 + this.throttle * 0.58 + this.load * 0.28)) : 1;
+          const bypassGate = accessoryQualityProfile ? Math.min(1.08, Math.max(0.32, 0.32 + this.throttle * 0.50 + this.load * 0.28)) : 1;
           const whine = accessoryQualityProfile
             ? Math.sin(this.superchargerGearPhase) * 0.62 +
               Math.sin(this.superchargerGearPhase * 2.01 + 0.3) * 0.18 +
@@ -977,14 +983,14 @@ class CombustionProcessor extends AudioWorkletProcessor {
           const superchargerOutputLift = accessoryQualityProfile && type === 'twin-screw' ? 1.16 : 1;
           const gain = this.sound.whineIntensity *
             typeGain *
-            (accessoryQualityProfile ? 0.018 + rpmNorm * 0.060 : 0.008 + rpmNorm * 0.038) *
+            (accessoryQualityProfile ? 0.034 + Math.pow(Math.max(0, rpmNorm), 0.72) * 0.072 : 0.008 + rpmNorm * 0.038) *
             Math.min(1.75, Math.max(0.45, superchargerWhine)) *
             bypassGate;
           const supercharger = (whine * gain +
             lobePulse * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine)) +
             compressorAir +
             twinScrewCompression * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine)) +
-            centrifugalSiren * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine))) * superchargerOutputLift;
+            centrifugalSiren * this.sound.whineIntensity * Math.min(1.55, Math.max(0.55, superchargerWhine))) * superchargerOutputLift * superchargerWake;
           left += supercharger * (accessoryQualityProfile ? 0.96 : 0.92);
           right += supercharger;
         } else {
@@ -1321,7 +1327,7 @@ export class AudioEngine {
       sound: {
         redline: quick.redline,
         forcedType: forcedInduction.type,
-        turboSpoolThreshold: forcedInduction.turboSpoolThreshold ?? 3000,
+        turboSpoolThreshold: forcedInduction.turboSpoolThreshold ?? 2000,
         turboSize: forcedInduction.turboSize ?? "balanced",
         maxBoost: forcedInduction.maxBoost ?? 15,
         wastegateEnabled: forcedInduction.wastegateEnabled ?? true,
@@ -1573,10 +1579,13 @@ export class AudioEngine {
   private updateTurboSound(rpm: number, throttle: number): void {
     if (!this.ctx || !this.turboOsc || !this.turboGain) return;
     const fi = this.config.forcedInduction;
-    const spoolThreshold = fi.turboSpoolThreshold || 3000;
+    const spoolThreshold = fi.turboSpoolThreshold || 2000;
     const sizeLag = fi.turboSize === "small" ? 0.7 : fi.turboSize === "large" ? 1.35 : 1;
-    const spool = Math.max(0, Math.min(1, ((rpm - spoolThreshold) / (2600 * sizeLag)) * throttle));
     const cleanProfile = !isBaselineSoundProfile(this.config.soundProfile);
+    const aboveThreshold = Math.max(0, rpm - spoolThreshold);
+    const spoolRange = (cleanProfile ? 1700 : 2600) * sizeLag;
+    const earlySpoolLift = cleanProfile && aboveThreshold > 0 ? Math.min(0.28, 0.12 + aboveThreshold / 10000) : 0;
+    const spool = Math.max(0, Math.min(1, (aboveThreshold / spoolRange) * throttle * (cleanProfile ? 1.02 : 1) + earlySpoolLift * throttle));
     const tuning = resolveSoundTuningWeights(this.config);
     const realtimeMix = resolveRealtimeAudioMixProfile(this.config.soundProfile);
     const legacyOscillatorGain = this.workletReady ? realtimeMix.legacyForcedInductionOscillatorGain : 1;
@@ -1598,7 +1607,8 @@ export class AudioEngine {
     const realtimeMix = resolveRealtimeAudioMixProfile(this.config.soundProfile);
     const legacyOscillatorGain = this.workletReady ? realtimeMix.legacyForcedInductionOscillatorGain : 1;
     const scFreq = (rpm / 60) * ratio * (cleanProfile ? (fi.superchargerType === "roots" ? 9 : 11) : 12);
-    const scVol = rpmNormalized * (cleanProfile ? 0.014 * tuning.superchargerWhine : 0.055) * (fi.whineIntensity || 0.6) * legacyOscillatorGain;
+    const superchargerWake = cleanProfile ? Math.max(0, Math.min(1, (rpm - 900) / 850)) : 1;
+    const scVol = superchargerWake * (cleanProfile ? 0.020 + rpmNormalized * 0.034 : rpmNormalized * 0.055) * tuning.superchargerWhine * (fi.whineIntensity || 0.6) * legacyOscillatorGain;
     this.superchargerOsc.frequency.setTargetAtTime(scFreq, this.ctx.currentTime, 0.025);
     this.superchargerGain.gain.setTargetAtTime(scVol, this.ctx.currentTime, 0.025);
     this.turboGain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);

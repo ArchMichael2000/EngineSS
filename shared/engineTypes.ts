@@ -370,7 +370,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
       forcedInduction: {
         type: 'turbo',
         turboSize: 'balanced',
-        turboSpoolThreshold: 3000,
+        turboSpoolThreshold: 2000,
         maxBoost: 18,
         bovEnabled: true,
         wastegateEnabled: true,

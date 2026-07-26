@@ -83,10 +83,10 @@ export function ForcedInductionPanel({ config, onChange }: ForcedInductionPanelP
                 <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Spool Threshold</label>
                 <InfoTooltip text="The RPM at which the turbo begins to build boost. Lower threshold means earlier boost onset." />
               </div>
-              <span className="text-xs font-[Orbitron] text-neon-purple">{fi.turboSpoolThreshold || 3000} RPM</span>
+              <span className="text-xs font-[Orbitron] text-neon-purple">{fi.turboSpoolThreshold || 2000} RPM</span>
             </div>
             <Slider
-              value={[fi.turboSpoolThreshold || 3000]}
+              value={[fi.turboSpoolThreshold || 2000]}
               onValueChange={([v]) => updateFI({ turboSpoolThreshold: v })}
               min={1500}
               max={5500}
