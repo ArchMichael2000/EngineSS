@@ -1,6 +1,7 @@
 ﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import { AUDIO_ENGINE_MODEL_VERSION, getAudioEngine, AudioEngine } from '@/lib/audioEngine';
-import type { EngineConfiguration, PlaybackState } from '../../../shared/engineTypes';
+import type { EngineConfiguration, ListenerPerspective, PlaybackState } from '../../../shared/engineTypes';
+import type { DriveMode, StemGains } from '../../../shared/ess/engine';
 import { DEFAULT_ENGINE_CONFIG, normalizeSoundProfile } from '../../../shared/engineTypes';
 
 export function useAudioEngine() {
@@ -116,6 +117,19 @@ export function useAudioEngine() {
     ensureEngine().triggerBOV();
   }, [ensureEngine]);
 
+  const setDriveMode = useCallback((mode: DriveMode) => {
+    ensureEngine().setDriveMode(mode);
+  }, [ensureEngine]);
+
+  const setPerspective = useCallback((perspective: ListenerPerspective) => {
+    ensureEngine().setPerspective(perspective);
+    setConfig((prev) => ({ ...prev, listener: { ...prev.listener, perspective } }));
+  }, [ensureEngine]);
+
+  const setStemGains = useCallback((stems: Partial<StemGains>) => {
+    ensureEngine().setStemGains(stems);
+  }, [ensureEngine]);
+
   return {
     isPlaying,
     isInitialized,
@@ -129,6 +143,9 @@ export function useAudioEngine() {
     setLoad,
     updateConfig,
     triggerBOV,
+    setDriveMode,
+    setPerspective,
+    setStemGains,
     engine: engineRef.current,
   };
 }

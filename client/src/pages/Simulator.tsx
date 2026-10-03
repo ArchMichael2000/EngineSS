@@ -11,6 +11,11 @@ import { ForcedInductionPanel } from '@/components/ForcedInductionPanel';
 import { CapturePanel } from '@/components/CapturePanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { WaveformVisualizer } from '@/components/WaveformVisualizer';
+import { PhysicsPanel } from '@/components/PhysicsPanel';
+import { ListenerPanel } from '@/components/ListenerPanel';
+import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
+import { solveFiringSchedule } from '../../../shared/ess/geometry';
+import { isPhysicalSoundProfile } from '../../../shared/engineTypes';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { Save, Share2, Download } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,7 +37,12 @@ export default function Simulator() {
     setLoad,
     updateConfig,
     triggerBOV,
+    setDriveMode,
+    setPerspective,
+    setStemGains,
   } = useAudioEngine();
+  const physical = isPhysicalSoundProfile(config.soundProfile);
+  const schedule = useMemo(() => (physical ? solveFiringSchedule(resolveEngineSpec(config)) : null), [config, physical]);
 
   const [activeTab, setActiveTab] = useState('quick');
   const [showExport, setShowExport] = useState(false);
@@ -66,10 +76,11 @@ export default function Simulator() {
   }, [loadedConfig]);
 
   const firingOrder = useMemo(() => {
+    if (schedule) return schedule.firingOrder;
     return config.advanced?.firingOrder || getDefaultFiringOrder(
       config.quick.layout, config.quick.cylinderCount, config.quick.crankshaft
     );
-  }, [config.quick.layout, config.quick.cylinderCount, config.quick.crankshaft, config.advanced?.firingOrder]);
+  }, [schedule, config.quick.layout, config.quick.cylinderCount, config.quick.crankshaft, config.advanced?.firingOrder]);
 
   const playbackResetKey = useMemo(() => JSON.stringify({
     soundProfile: config.soundProfile,
@@ -186,6 +197,14 @@ export default function Simulator() {
                   >
                     Boost
                   </TabsTrigger>
+                  {physical && (
+                    <TabsTrigger
+                      value="physics"
+                      className="flex-1 text-xs font-[Rajdhani] uppercase data-[state=active]:bg-neon-cyan/20 data-[state=active]:text-neon-cyan"
+                    >
+                      Physics
+                    </TabsTrigger>
+                  )}
                   <TabsTrigger
                     value="capture"
                     className="flex-1 text-xs font-[Rajdhani] uppercase data-[state=active]:bg-neon-cyan/20 data-[state=active]:text-neon-cyan"
@@ -204,6 +223,10 @@ export default function Simulator() {
 
                 <TabsContent value="induction" className="mt-4">
                   <ForcedInductionPanel config={config} onChange={updateConfig} />
+                </TabsContent>
+
+                <TabsContent value="physics" className="mt-4">
+                  <PhysicsPanel config={config} onChange={updateConfig} />
                 </TabsContent>
 
                 <TabsContent value="capture" className="mt-4">
@@ -256,6 +279,11 @@ export default function Simulator() {
                     </div>
                   ))}
                 </div>
+                {schedule && (
+                  <p className="mt-2 text-[10px] font-[Rajdhani] text-muted-foreground">
+                    Firing intervals {schedule.intervalsDeg.map((d) => Math.round(d)).join(' / ')}° crank
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -273,8 +301,21 @@ export default function Simulator() {
                 onRpmChange={setRPM}
                 redline={config.quick.redline}
                 resetKey={playbackResetKey}
+                physical={physical}
+                driveMode={playbackState.driveMode ?? 'free'}
+                onDriveModeChange={setDriveMode}
               />
             </div>
+
+            {physical && (
+              <div className="hud-panel rounded-lg p-4 mt-4">
+                <ListenerPanel
+                  perspective={config.listener?.perspective ?? 'exterior-rear'}
+                  onPerspectiveChange={setPerspective}
+                  onStemsChange={setStemGains}
+                />
+              </div>
+            )}
 
             {/* Waveform Visualization */}
             <div className="hud-panel rounded-lg p-4 mt-4">

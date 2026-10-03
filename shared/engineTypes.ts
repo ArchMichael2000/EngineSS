@@ -33,6 +33,7 @@ export type IdleCharacter = 'smooth' | 'lumpy' | 'aggressive' | 'lopey';
 
 /** Sound model selection for A/B testing and regression control. */
 export type SoundProfile =
+  | 'v16'
   | 'v15'
   | 'v14'
   | 'v13'
@@ -46,9 +47,12 @@ export type SoundProfile =
   | 'clean'
   | 'baseline';
 
-export type CanonicalSoundProfile = 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
+export type CanonicalSoundProfile = 'v16' | 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
 
-export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v15';
+export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v16';
+
+/** The last additive (pre-physics) model, kept for A/B comparison and saved configurations. */
+export const LEGACY_SOUND_PROFILE: CanonicalSoundProfile = 'v15';
 
 export const SOUND_PROFILE_HISTORY: Array<{
   value: CanonicalSoundProfile;
@@ -56,9 +60,14 @@ export const SOUND_PROFILE_HISTORY: Array<{
   description: string;
 }> = [
   {
+    value: 'v16',
+    label: 'v16 - Physical Core',
+    description: 'Physics-based engine: thermodynamic cylinders, valve flow into duct waveguides, hot-gas exhaust acoustics, radiation to a placed listener.',
+  },
+  {
     value: 'v15',
-    label: 'v15 - Clean Handoff',
-    description: 'Current ESS model with stricter air-noise removal and stable live preset switching.',
+    label: 'v15 - Clean Handoff (legacy)',
+    description: 'Last additive model before the physical core; kept for A/B comparison.',
   },
   {
     value: 'v14',
@@ -115,7 +124,7 @@ export function isBaselineSoundProfile(soundProfile: SoundProfile | undefined): 
 
 export function isClaritySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isCurrentSoundProfile(soundProfile: SoundProfile | undefined): boolean {
@@ -124,31 +133,38 @@ export function isCurrentSoundProfile(soundProfile: SoundProfile | undefined): b
 
 export function isCylinderBalanceSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isStereoStabilitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isAccessoryQualitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isAirwashControlSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isStaticCleanSoundProfile(soundProfile: SoundProfile | undefined): boolean {
   const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v14' || normalized === 'v15';
+  return normalized === 'v14' || normalized === 'v15' || normalized === 'v16';
 }
 
 export function isCleanHandoffSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  return normalizeSoundProfile(soundProfile) === 'v15';
+  // The legacy additive model renders v16 configurations with its latest (v15) behaviour.
+  const normalized = normalizeSoundProfile(soundProfile);
+  return normalized === 'v15' || normalized === 'v16';
+}
+
+/** True when the configuration should run on the v16 physical core. */
+export function isPhysicalSoundProfile(soundProfile: SoundProfile | undefined): boolean {
+  return normalizeSoundProfile(soundProfile) === 'v16';
 }
 
 /** Derived sound-shaping weights learned from reference captures. */
@@ -248,6 +264,67 @@ export interface AdvancedConfig {
   intakeRunnerLengthCm: number;
 }
 
+/** Crank strategies understood by the physical core (superset of the Quick Build choices). */
+export type PhysicalCrankType = 'even-fire' | 'cross-plane' | 'flat-plane' | 'common-pin' | 'single-pin' | 'custom';
+export type CollectorType = 'bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
+export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
+export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'none';
+export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
+export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe';
+
+/**
+ * Detailed physical overrides for the v16 core. Every field is optional; anything
+ * omitted is filled with family-typical values by resolveEngineSpec().
+ */
+export interface PhysicalOverrides {
+  crankType: PhysicalCrankType;
+  /** Throw angle per cylinder, degrees (crankType 'custom'). */
+  crankPinAnglesDeg: number[];
+  /** Firing TDC per cylinder in the 720° cycle (overrides crank geometry). */
+  fireAnglesDeg: number[];
+  vrAngleDeg: number;
+  rodLengthMm: number;
+  compressionRatio: number;
+  valvesPerCylinder: 2 | 3 | 4 | 5;
+  intakeValveDiameterMm: number;
+  exhaustValveDiameterMm: number;
+  intakeDurationDeg: number;
+  exhaustDurationDeg: number;
+  intakeCenterlineDeg: number;
+  exhaustCenterlineDeg: number;
+  intakeLiftMm: number;
+  exhaustLiftMm: number;
+  plenumVolumeL: number;
+  throttleDiameterMm: number;
+  runnerDiameterMm: number;
+  airFilter: AirFilterKind;
+  primaryDiameterMm: number;
+  primaryLengthsMm: number[];
+  collector: CollectorType;
+  collectorDiameterMm: number;
+  pipeDiameterMm: number;
+  crossover: CrossoverPipe;
+  catalyst: boolean;
+  resonator: boolean;
+  muffler: MufflerKind;
+  mufflerPacking: number;
+  tailpipeDiameterMm: number;
+  outletSpacingM: number;
+  idleRpm: number;
+  inertiaKgM2: number;
+  afterfireTendency: number;
+  turboCount: number;
+  compressorWheelMm: number;
+  superchargerDisplacementL: number;
+  superchargerDriveRatio: number;
+}
+
+/** How the engine is listened to (does not change the physics). */
+export interface ListenerConfig {
+  perspective: ListenerPerspective;
+  monitorGainDb: number;
+}
+
 /**
  * Full engine configuration combining all settings.
  */
@@ -262,6 +339,10 @@ export interface EngineConfiguration {
   soundProfile?: SoundProfile;
   // Reference-derived sound shaping
   soundTuning?: EngineSoundTuning;
+  // Physical-core overrides (v16)
+  physical?: Partial<PhysicalOverrides>;
+  // Listener placement (v16)
+  listener?: Partial<ListenerConfig>;
   // Runtime state (not saved, used for playback)
   seed?: number; // For deterministic reproduction
 }
@@ -276,6 +357,29 @@ export interface PlaybackState {
   load: number; // 0-1
   targetRpm: number;
   boost: number; // PSI, 0 for NA
+  /** v16 only: free-running or dyno-held. */
+  driveMode?: 'free' | 'dyno';
+  /** v16 only: live physics telemetry from the core. */
+  telemetry?: {
+    rpm: number;
+    mapKpa: number;
+    boostKpa: number;
+    torqueNm: number;
+    brakeTorqueNm: number;
+    powerKw: number;
+    lambda: number;
+    egtC: number;
+    throttlePlate: number;
+    fuelCut: boolean;
+    limiter: boolean;
+    afterfire: number;
+    turboRpm: number;
+    imepBar: number;
+    peakPressureBar: number;
+    peakPressureAngle: number;
+    volumetricEfficiency: number;
+    splDb: number;
+  };
 }
 
 /**

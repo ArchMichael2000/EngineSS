@@ -7,10 +7,13 @@
 
 /// <reference lib="dom" />
 
-import type { EngineConfiguration, PlaybackState } from "../../../shared/engineTypes";
-import { DEFAULT_ENGINE_CONFIG, isBaselineSoundProfile, isClaritySoundProfile, normalizeSoundProfile } from "../../../shared/engineTypes";
+import type { EngineConfiguration, ListenerPerspective, PlaybackState } from "../../../shared/engineTypes";
+import { DEFAULT_ENGINE_CONFIG, isBaselineSoundProfile, isClaritySoundProfile, isPhysicalSoundProfile, normalizeSoundProfile } from "../../../shared/engineTypes";
 import { buildEngineSoundAnalysis, generateEnginePcm, resolveSoundTuningWeights } from "../../../shared/engineSoundModel";
 import { resolveLiveOutputGain, resolveRealtimeAudioMixProfile } from "../../../shared/realtimeAudioMix";
+import { renderEssPcm } from "../../../shared/ess/render";
+import type { DriveMode, EngineTelemetry, StemGains } from "../../../shared/ess/engine";
+import essProcessorUrl from "./ess/essProcessor?worker&url";
 
 export const COMBUSTION_PROCESSOR_CODE = `
 function shapeClarityOutput(input) {
@@ -1081,7 +1084,7 @@ class CombustionProcessor extends AudioWorkletProcessor {
 registerProcessor('combustion-processor', CombustionProcessor);
 `;
 
-export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v15-clean-handoff";
+export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v16-physical-core";
 
 export class AudioEngine {
   readonly modelVersion = AUDIO_ENGINE_MODEL_VERSION;
@@ -1115,6 +1118,15 @@ export class AudioEngine {
   private silentFrameCount = 0;
   private rebuildInProgress = false;
 
+  // ---- v16 physical core
+  private essNode: AudioWorkletNode | null = null;
+  private essReady = false;
+  private driveMode: DriveMode = "free";
+  private perspective: ListenerPerspective = "exterior-rear";
+  private stemGains: Partial<StemGains> = {};
+  private telemetry: EngineTelemetry | null = null;
+  private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number } | null = null;
+
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
   private state: PlaybackState = {
     isPlaying: false,
@@ -1133,7 +1145,7 @@ export class AudioEngine {
       throw new Error("Web Audio is not available in this browser. Try Chrome, Edge, or a mobile browser with audio support enabled.");
     }
 
-    this.ctx = new AudioContextCtor({ sampleRate: 44100 });
+    this.ctx = new AudioContextCtor({ sampleRate: 48000, latencyHint: "interactive" });
     const blob = new Blob([COMBUSTION_PROCESSOR_CODE], { type: "application/javascript" });
     const url = URL.createObjectURL(blob);
 
@@ -1145,6 +1157,13 @@ export class AudioEngine {
       this.workletReady = false;
     } finally {
       URL.revokeObjectURL(url);
+    }
+    try {
+      await this.ctx.audioWorklet.addModule(essProcessorUrl);
+      this.essReady = true;
+    } catch (error) {
+      console.warn("v16 physical core unavailable; using the legacy model", error);
+      this.essReady = false;
     }
 
     this.setupAudioGraph();
@@ -1207,8 +1226,28 @@ export class AudioEngine {
     this.superchargerGain.connect(this.masterGain);
   }
 
+  private usesPhysicalCore(config: EngineConfiguration = this.config): boolean {
+    return this.essReady && isPhysicalSoundProfile(config.soundProfile);
+  }
+
   setConfig(config: EngineConfiguration): void {
     const nextConfig = { ...config, soundProfile: normalizeSoundProfile(config.soundProfile), seed: config.seed ?? 42 };
+    if (config.listener?.perspective) this.perspective = config.listener.perspective;
+    if (this.usesPhysicalCore(nextConfig)) {
+      const wasPhysical = this.usesPhysicalCore();
+      this.config = nextConfig;
+      if (!wasPhysical) this.teardownLegacyNodes();
+      this.masterGain?.gain.setTargetAtTime(1, this.ctx?.currentTime ?? 0, 0.05);
+      if (this.state.isPlaying) {
+        this.ensureEssNode();
+        this.essNode?.port.postMessage({ type: "config", config: nextConfig, perspective: this.perspective });
+      }
+      return;
+    }
+    if (this.essNode) {
+      this.essNode.disconnect();
+      this.essNode = null;
+    }
     const requiresProcessorSwap = this.state.isPlaying &&
       this.workletReady &&
       !!this.combustionNode &&
@@ -1360,11 +1399,71 @@ export class AudioEngine {
     });
   }
 
+  private ensureEssNode(): AudioWorkletNode | null {
+    if (!this.ctx || !this.masterGain || !this.essReady) return null;
+    if (this.essNode) return this.essNode;
+    const node = new AudioWorkletNode(this.ctx, "ess-v16-processor", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
+    node.port.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === "telemetry") {
+        this.telemetry = msg.telemetry;
+        this.state.rpm = msg.telemetry.rpm;
+        this.state.boost = Math.max(0, msg.telemetry.boostKpa / 6.895);
+      } else if (msg.type === "ready") {
+        this.engineInfo = { firingOrder: msg.firingOrder, intervals: msg.intervals, notes: msg.notes, displacementL: msg.displacementL };
+      } else if (msg.type === "error") {
+        console.warn("v16 core:", msg.message);
+      }
+    };
+    node.connect(this.masterGain);
+    this.essNode = node;
+    this.postControls();
+    if (Object.keys(this.stemGains).length) node.port.postMessage({ type: "stems", stems: this.stemGains });
+    return node;
+  }
+
+  private postControls(): void {
+    this.essNode?.port.postMessage({
+      type: "controls",
+      controls: { throttle: this.state.throttle, load: this.state.load, targetRpm: this.state.targetRpm, mode: this.driveMode },
+    });
+  }
+
+  private teardownLegacyNodes(): void {
+    this.combustionNode?.disconnect();
+    this.combustionNode = null;
+    this.resetAccessoryRamps();
+  }
+
   async start(): Promise<void> {
     if (!this.ctx) await this.initialize();
     if (!this.ctx) return;
 
     if (this.ctx.state === "suspended") await this.ctx.resume();
+
+    if (this.usesPhysicalCore()) {
+      this.masterGain?.gain.setValueAtTime(1, this.ctx.currentTime);
+      this.limiterGain?.gain.setValueAtTime(1, this.ctx.currentTime);
+      // Near-transparent safety compressor: the physics sets the level, not the mix bus.
+      if (this.compressor) {
+        this.compressor.threshold.value = -1;
+        this.compressor.ratio.value = 1.5;
+        this.compressor.knee.value = 3;
+      }
+      this.state.isPlaying = true;
+      this.driveMode = "free";
+      this.state.throttle = 0;
+      this.state.targetRpm = 800;
+      this.ensureEssNode();
+      this.essNode?.port.postMessage({ type: "config", config: this.config, perspective: this.perspective });
+      this.postControls();
+      this.startUpdateLoop();
+      return;
+    }
 
     if (this.workletReady && !this.combustionNode) {
       this.createCombustionNode();
@@ -1454,6 +1553,9 @@ export class AudioEngine {
 
   stop(): void {
     this.state.isPlaying = false;
+    this.essNode?.disconnect();
+    this.essNode = null;
+    this.telemetry = null;
     this.combustionNode?.disconnect();
     this.combustionNode = null;
     if (this.fallbackOsc) {
@@ -1481,6 +1583,11 @@ export class AudioEngine {
 
     const update = () => {
       if (!this.state.isPlaying) return;
+      if (this.usesPhysicalCore()) {
+        // The physical core owns speed, limiter and inertia; nothing to animate on the main thread.
+        this.animationFrame = requestAnimationFrame(update);
+        return;
+      }
 
       const limiterRpm = this.config.advanced?.revLimiterRpm || this.config.quick.redline;
       const limiterType = this.config.advanced?.revLimiterType || "soft";
@@ -1633,6 +1740,7 @@ export class AudioEngine {
 
   triggerBOV(): void {
     if (!this.ctx || !this.masterGain) return;
+    if (this.usesPhysicalCore()) return; // the v16 BOV is a pressure-driven valve in the model
     if (this.config.forcedInduction.type !== "turbo" || !this.config.forcedInduction.bovEnabled) return;
 
     const bufferSize = Math.floor(this.ctx.sampleRate * 0.34);
@@ -1659,9 +1767,56 @@ export class AudioEngine {
 
   setRPM(rpm: number): void {
     this.state.targetRpm = Math.max(600, Math.min(rpm, this.config.quick.redline));
+    if (this.usesPhysicalCore()) {
+      // Commanding a speed means putting the engine on the dyno.
+      this.driveMode = "dyno";
+      this.postControls();
+    }
+  }
+
+  /** v16: free-running (throttle drives speed) or dyno hold (absorber holds the RPM set-point). */
+  setDriveMode(mode: DriveMode): void {
+    this.driveMode = mode;
+    if (mode === "dyno") this.state.targetRpm = Math.max(600, this.state.rpm || this.state.targetRpm);
+    this.postControls();
+  }
+
+  getDriveMode(): DriveMode {
+    return this.driveMode;
+  }
+
+  setPerspective(perspective: ListenerPerspective): void {
+    this.perspective = perspective;
+    this.essNode?.port.postMessage({ type: "perspective", perspective });
+  }
+
+  getPerspective(): ListenerPerspective {
+    return this.perspective;
+  }
+
+  setStemGains(stems: Partial<StemGains>): void {
+    this.stemGains = { ...this.stemGains, ...stems };
+    this.essNode?.port.postMessage({ type: "stems", stems: this.stemGains });
+  }
+
+  getTelemetry(): EngineTelemetry | null {
+    return this.telemetry;
+  }
+
+  getEngineInfo() {
+    return this.engineInfo;
+  }
+
+  isPhysicalCoreActive(): boolean {
+    return this.usesPhysicalCore();
   }
 
   setThrottle(throttle: number): void {
+    if (this.usesPhysicalCore()) {
+      this.state.throttle = Math.max(0, Math.min(1, throttle));
+      this.postControls();
+      return;
+    }
     const previous = this.state.throttle;
     this.state.throttle = Math.max(0, Math.min(1, throttle));
     const idleRpm = 850;
@@ -1674,10 +1829,11 @@ export class AudioEngine {
 
   setLoad(load: number): void {
     this.state.load = Math.max(0, Math.min(1, load));
+    if (this.usesPhysicalCore()) this.postControls();
   }
 
   getState(): PlaybackState {
-    return { ...this.state };
+    return { ...this.state, driveMode: this.usesPhysicalCore() ? this.driveMode : undefined, telemetry: this.telemetry ?? undefined };
   }
 
   getContext(): AudioContext | null {
@@ -1710,8 +1866,10 @@ export class AudioEngine {
   }
 
   async renderOffline(config: EngineConfiguration, durationSec: number, options?: { normalize?: boolean; sampleRate?: number }): Promise<AudioBuffer> {
-    const sampleRate = options?.sampleRate || 44100;
-    const pcm = generateEnginePcm(config, { durationSec, sampleRate, normalize: options?.normalize, profile: "sweep" });
+    const sampleRate = options?.sampleRate || 48000;
+    const pcm = isPhysicalSoundProfile(config.soundProfile)
+      ? renderEssPcm(config, { durationSec, sampleRate, normalize: options?.normalize, program: "sweep" })
+      : generateEnginePcm(config, { durationSec, sampleRate, normalize: options?.normalize, profile: "sweep" });
     if (typeof OfflineAudioContext === "undefined") {
       throw new Error("Offline audio rendering is not available in this browser.");
     }

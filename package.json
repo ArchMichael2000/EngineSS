@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "audit:render": "vite-node scripts/renderBaseline.ts --"
+    "audit:render": "vite-node scripts/renderBaseline.ts --",
+    "audit:render16": "vite-node scripts/renderV16.ts --"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.83.0",

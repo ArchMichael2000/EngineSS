@@ -15,6 +15,10 @@ interface PlaybackControllerProps {
   onRpmChange: (value: number) => void;
   redline: number;
   resetKey: string;
+  /** v16 physical core active: throttle drives a real engine; RPM is held only on the dyno. */
+  physical?: boolean;
+  driveMode?: 'free' | 'dyno';
+  onDriveModeChange?: (mode: 'free' | 'dyno') => void;
 }
 
 export function PlaybackController({
@@ -27,7 +31,11 @@ export function PlaybackController({
   onRpmChange,
   redline,
   resetKey,
+  physical = false,
+  driveMode = 'free',
+  onDriveModeChange,
 }: PlaybackControllerProps) {
+  const blipRef = useRef<number | null>(null);
   const [sweepActive, setSweepActive] = useState(false);
   const sweepRef = useRef<number | null>(null);
   const holdTimeoutRef = useRef<number | null>(null);
@@ -52,8 +60,51 @@ export function PlaybackController({
     clearSweepTimers();
     setSweepActive(false);
     onThrottleChange(0);
-    onRpmChange(800);
-  }, [clearSweepTimers, onThrottleChange, onRpmChange]);
+    if (physical) onDriveModeChange?.('free');
+    else onRpmChange(800);
+  }, [clearSweepTimers, onThrottleChange, onRpmChange, physical, onDriveModeChange]);
+
+  /** v16: full-throttle dyno pull to redline, then lift off the throttle and let the engine run free. */
+  const startPhysicalSweep = useCallback(() => {
+    if (!isPlaying) return;
+    clearSweepTimers();
+    setSweepActive(true);
+    const sweepRunId = sweepRunIdRef.current + 1;
+    sweepRunIdRef.current = sweepRunId;
+    const startRpm = Math.max(1000, playbackState.rpm || 1000);
+    onRpmChange(startRpm);
+    onThrottleChange(1);
+    const duration = 6000;
+    const t0 = performance.now();
+    const animate = (now: number) => {
+      if (sweepRunId !== sweepRunIdRef.current) return;
+      const progress = Math.min((now - t0) / duration, 1);
+      onRpmChange(startRpm + (redline - startRpm) * progress);
+      if (progress < 1) {
+        sweepRef.current = requestAnimationFrame(animate);
+      } else {
+        sweepRef.current = null;
+        holdTimeoutRef.current = window.setTimeout(() => {
+          if (sweepRunId !== sweepRunIdRef.current) return;
+          onThrottleChange(0);
+          onDriveModeChange?.('free');
+          setSweepActive(false);
+          holdTimeoutRef.current = null;
+        }, 400);
+      }
+    };
+    sweepRef.current = requestAnimationFrame(animate);
+  }, [clearSweepTimers, isPlaying, onDriveModeChange, onRpmChange, onThrottleChange, playbackState.rpm, redline]);
+
+  const blip = useCallback(() => {
+    if (blipRef.current !== null) window.clearTimeout(blipRef.current);
+    onDriveModeChange?.('free');
+    onThrottleChange(0.85);
+    blipRef.current = window.setTimeout(() => {
+      onThrottleChange(0);
+      blipRef.current = null;
+    }, 260);
+  }, [onDriveModeChange, onThrottleChange]);
 
   const startSweep = useCallback(() => {
     if (!isPlaying) return;
@@ -155,6 +206,23 @@ export function PlaybackController({
         </Button>
       </div>
 
+      {physical && (
+        <div className="grid grid-cols-2 gap-2">
+          {(['free', 'dyno'] as const).map((mode) => (
+            <Button
+              key={mode}
+              variant="outline"
+              size="sm"
+              disabled={!isPlaying || sweepActive}
+              onClick={() => onDriveModeChange?.(mode)}
+              className={`text-xs font-[Rajdhani] uppercase tracking-wide ${driveMode === mode ? 'border-neon-cyan text-neon-cyan bg-neon-cyan/10' : 'border-hud-line'}`}
+            >
+              {mode === 'free' ? 'Free rev' : 'Dyno hold'}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {/* Throttle Control */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -234,7 +302,7 @@ export function PlaybackController({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">
-              Direct RPM
+              {physical ? (driveMode === 'dyno' ? 'Dyno RPM set-point' : 'Engine RPM (free running)') : 'Direct RPM'}
             </label>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -246,11 +314,11 @@ export function PlaybackController({
             </Tooltip>
           </div>
           <span className="text-xs font-[Orbitron] text-foreground/60">
-            {Math.round(playbackState.targetRpm)}
+            {Math.round(physical && driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm)}
           </span>
         </div>
         <Slider
-          value={[playbackState.targetRpm]}
+          value={[physical && driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm]}
           onValueChange={([v]) => onRpmChange(v)}
           min={600}
           max={redline}
@@ -266,7 +334,7 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => { onThrottleChange(0); onRpmChange(800); }}
+          onClick={() => { onThrottleChange(0); if (physical) onDriveModeChange?.('free'); else onRpmChange(800); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-cyan/50 hover:text-neon-cyan"
         >
           Idle
@@ -275,19 +343,19 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => onThrottleChange(0.5)}
+          onClick={() => (physical ? blip() : onThrottleChange(0.5))}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-cyan/50 hover:text-neon-cyan"
         >
-          Rev
+          {physical ? 'Blip' : 'Rev'}
         </Button>
         <Button
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => onThrottleChange(1)}
+          onClick={() => { if (physical) onDriveModeChange?.('free'); onThrottleChange(1); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-pink/50 hover:text-neon-pink"
         >
-          Redline
+          {physical ? 'Full throttle' : 'Redline'}
         </Button>
       </div>
 
@@ -296,7 +364,7 @@ export function PlaybackController({
         variant="outline"
         size="sm"
         disabled={!isPlaying}
-        onClick={sweepActive ? stopSweep : startSweep}
+        onClick={sweepActive ? stopSweep : physical ? startPhysicalSweep : startSweep}
         className={`w-full text-xs font-[Rajdhani] uppercase tracking-wide transition-all duration-200 ${
           sweepActive
             ? 'border-neon-pink text-neon-pink bg-neon-pink/10 box-glow-pink'
@@ -304,7 +372,7 @@ export function PlaybackController({
         }`}
       >
         <TrendingUp className="w-3.5 h-3.5 mr-1.5" />
-        {sweepActive ? 'Stop Sweep' : 'RPM Sweep (Idle → Redline)'}
+        {sweepActive ? 'Stop Sweep' : physical ? 'Dyno Pull (WOT → Redline, Lift)' : 'RPM Sweep (Idle → Redline)'}
       </Button>
 
       {/* Engine Telemetry */}
@@ -338,6 +406,30 @@ export function PlaybackController({
             </p>
           </div>
         </div>
+        {physical && playbackState.telemetry && (
+          <div className="grid grid-cols-3 gap-1.5 pt-1">
+            {(() => {
+              const t = playbackState.telemetry;
+              const cells: Array<[string, string]> = [
+                ['Brake torque', `${Math.round(t.brakeTorqueNm)} N·m`],
+                ['Power', `${Math.round(t.powerKw)} kW`],
+                ['MAP', `${Math.round(t.mapKpa)} kPa`],
+                ['EGT', `${Math.round(t.egtC)} °C`],
+                ['IMEP', `${t.imepBar.toFixed(1)} bar`],
+                ['P peak', `${Math.round(t.peakPressureBar)} bar @ ${Math.round(t.peakPressureAngle)}°`],
+                ['Vol. eff.', `${Math.round(t.volumetricEfficiency * 100)} %`],
+                ['SPL @ mic', `${t.splDb.toFixed(0)} dB`],
+                ['State', t.limiter ? 'LIMITER' : t.fuelCut ? 'FUEL CUT' : t.afterfire ? `${t.afterfire} pops` : 'firing'],
+              ];
+              return cells.map(([label, value]) => (
+                <div key={label} className="rounded p-1.5 border border-hud-line/20">
+                  <span className="block text-[9px] font-[Rajdhani] text-muted-foreground uppercase">{label}</span>
+                  <span className="text-[11px] font-[Orbitron] text-foreground/90">{value}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
       </div>
     </div>
   );
