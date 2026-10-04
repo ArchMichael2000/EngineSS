@@ -317,6 +317,18 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 17 },
     },
   },
+  "toyota-fa20-vortech": {
+    name: "Toyota/Subaru FA20 2.0 flat-4 + Vortech V3",
+    description: "GT86 / BRZ / FR-S boxer, equal-length header, port + direct injection, aftermarket centrifugal supercharger (~0.5 bar)",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    config: {
+      ...v16,
+      quick: { layout: "flat", cylinderCount: 4, displacement: 1.998, crankshaft: "flat-plane", aspiration: "supercharged", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 7450 },
+      advanced: { bore: 86, stroke: 86, firingOrder: [1, 3, 2, 4], headerGeometry: "equal-length" },
+      physical: { compressionRatio: 12.5 },
+      forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 7, whineIntensity: 0.6 },
+    },
+  },
   "psa-dv5-bluehdi": {
     name: "PSA DV5 1.5 BlueHDi 130",
     description: "Common-rail inline-4 diesel (2018+ Peugeot/Citroën), pilot injection, VGT; free revs cap at 4000 rpm in neutral",

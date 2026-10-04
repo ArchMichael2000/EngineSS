@@ -86,10 +86,12 @@ def main() -> None:
             prefix = out / f"{cid}-{persp}"
             r = ["npx", "vite-node", "scripts/renderForCompare.ts", "--", case["engine"], persp]
             r += ["idle", "12", str(prefix)] if case["mode"] == "idle" else ["replay", str(rec_json), str(prefix)]
-            env = None
+            import os
+            env = {**os.environ}
             if "patch" in case:
-                import os
-                env = {**os.environ, "PATCH": json.dumps(case["patch"])}
+                env["PATCH"] = json.dumps(case["patch"])
+            if "replay_throttle" in case:
+                env["REPLAY_THROTTLE"] = str(case["replay_throttle"])
             run(r, env)
             sim_json = out / f"{cid}-{persp}-sim.json"
             b = ["python3", "scripts/compareRecording.py", "analyse", f"{prefix}.wav", "--cylinders", str(case["cylinders"]), "--rpm-track", f"{prefix}.track.json", "--out", str(sim_json)]

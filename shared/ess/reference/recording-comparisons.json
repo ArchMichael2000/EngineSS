@@ -119,6 +119,26 @@
    "rpm_min": 1000,
    "rpm_max": 7000,
    "highpass_hz": 40
+  },
+  {
+   "id": "fa20-vortech-dyno-pull",
+   "recording": "reference-audio/fa20-vortech-dyno.ogg",
+   "engine": "toyota-fa20-vortech",
+   "cylinders": 4,
+   "mode": "replay",
+   "replay_throttle": 1,
+   "t0": 23,
+   "t1": 35,
+   "rpm_start": 3000,
+   "rpm_min": 2500,
+   "rpm_max": 7600,
+   "max_step": 0.03,
+   "highpass_hz": 30,
+   "perspectives": [
+    "exterior-rear",
+    "engine-bay",
+    "dyno-tailpipe"
+   ]
   }
  ]
 }

@@ -431,6 +431,26 @@
    "reference_engine": null,
    "cylinders": null,
    "fire_order": null
+  },
+  {
+   "key": "FA20-Vortech",
+   "file": "fa20-vortech-dyno.ogg",
+   "url": "https://cdn.freesound.org/previews/191/191194_89652-hq.ogg",
+   "source_url": "https://freesound.org/people/dezoris/sounds/191194/",
+   "sha256": "d7a3c370243fa3c65ba1a0249839be8f118990e7282c81b8da28abbbd726e755",
+   "license": "CC-BY-4.0",
+   "creator": "dezoris",
+   "title": "FR-S BRZ GT-86 Vortech Supercharged Dyno Run",
+   "platform": "GT86 / BRZ / FR-S, FA20 + Vortech centrifugal supercharger",
+   "source_kind": "dyno-recording",
+   "conditions": [
+    "gears",
+    "4th-gear-pull-3000-7200"
+   ],
+   "reference_engine": "toyota-fa20-vortech",
+   "cylinders": 4,
+   "fire_order": null,
+   "attribution": "\"FR-S BRZ GT-86 Vortech Supercharged Dyno Run\" by dezoris (https://freesound.org/people/dezoris/sounds/191194/), licensed CC-BY-4.0"
   }
  ],
  "local_only": [

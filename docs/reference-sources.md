@@ -136,6 +136,7 @@ Found on freesound.org with `scripts/searchFreesound.py` (public pages and previ
 | CRM250 | Honda CRM250 two-stroke: kick start, free revs | CC-BY 4.0 | honda-crm250 |
 | CRM250-onboard | Honda CRM250 onboard pull-away | CC0 | honda-crm250 |
 | MZ-ETZ250 | MZ ETZ 250 two-stroke: start, revs | CC-BY 4.0 | mz-etz250 |
+| FA20-Vortech | GT86 / BRZ / FR-S with a Vortech centrifugal supercharger on a chassis dyno, 4th-gear pull 3000→7200 rpm (exhaust, engine and interior microphones mixed) | CC-BY 4.0 | toyota-fa20-vortech |
 | CX9-cabin, diesel-cabin, cabin-accel, cabin-idle-fast | Interior recordings, driving and accelerating (cars or engines not stated) | CC0 / CC-BY 3.0 | (none) |
 
 **No open-licensed Wankel recording was found.** Freesound has one (Sampling+, an unidentified rotary race car), which is listed under `local_only` and never committed. Wikimedia Commons and the Internet Archive returned nothing usable, and the RX-7 libraries that exist are commercial.
@@ -263,11 +264,13 @@ Two measurement fixes came first. A phone microphone rolls off steeply below abo
 | beetle-tdi-revs | replay | 9.8 / 7.7 / **5.7** | -4.6 / -2.7 | -14.0 / -16.7 … 12.6 |
 | mercedes-190d-revs | replay | 28.8 / 21.6 / **15.5** | -9.5 / -24.1 | -13.4 / -43.7 … -10.4 |
 | crm250-revs | replay | 18.5 / 16.7 / **13.7** | -5.8 / -12.6 | -0.8 / -25.3 … -14.2 |
+| fa20-vortech-dyno-pull | replay (WOT) | 10.3 (rear) / 9.1 (dyno tailpipe) / **7.9** | -4.4 / -6.6 | -14.9 / -23.5 … -1.5 |
 | mz-etz250-revs | replay | 14.4 / 14.7 / **12.7** | -5.6 / -10.6 | -0.6 / -30.1 … -17.0 |
 
 What it shows:
 
 * **Diesels match at 5.7–9 dB from the engine bay**, the position consistent with phone clips made next to the vehicle: Cummins idle 7.0, PSA idle 6.4 and revs 5.9, Octavia idle 5.9, Beetle idle 9.0 and revs 5.7 (the 2JZ dyno pull is 4.9). The recorded tilt (−7 to −18 dB) falls between the simulated exterior-side and rear values, so the microphones were probably a few metres away; whether the simulated clatter is too bright at the engine bay cannot be told from these clips.
+* **An identified four-stroke under load:** the supercharged FA20 dyno pull matches at 7.9 dB (engine bay; the recording mixes three microphones). As with the diesels, the real engine carries more energy between the firing orders (−4.4 dB against −6.6 to −12.7).
 * **The 190 D does not match (15.5 dB, off-firing share 15 dB low).** The real OM601 is a prechamber engine with a much softer, rougher burn, and the car may be the five-cylinder 2.5; the model injects directly.
 * **Two-strokes are too dull at every perspective.** The recordings' tilt is about −1 dB; the renders are −14 to −30 dB, and the error is 12–14 dB. Soloing the stems on the CRM250 at 7000 rpm WOT (engine bay) gives intake −29 dB (tilt −16), exhaust −34 dB (tilt −9), structure −42 dB (tilt 0) and outlet jet −78 dB: the high-velocity stinger jet and the sharp port blowdown that make a two-stroke rasp are far too weak. This is the main open two-stroke sound gap.
 * **Bug found: four-stroke timing-chain whine on two-strokes.** The structure model's order-21 timing-drive tone ran on every engine, and stood 15 dB above the CRM250 recording at order 21. Two-strokes now have no tooth tone and half the friction excitation (the engine-bay error rises from 11.2 to 13.7 dB, because the false tone had been filling the missing high orders).

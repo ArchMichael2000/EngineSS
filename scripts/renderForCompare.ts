@@ -64,7 +64,9 @@ if (mode === "sweep") {
     const time = o / SR;
     // Speed rising: pedal open (a free rev in neutral is near full throttle); falling: closed.
     const slope = (at(time + 0.08) - at(time - 0.08)) / 0.16;
-    sim.setControls({ targetRpm: at(time), throttle: Math.max(0, Math.min(1, 0.08 + slope / 1500)) });
+    // REPLAY_THROTTLE pins the pedal (a loaded dyno pull is full throttle whatever the sweep rate).
+    const pedal = process.env.REPLAY_THROTTLE ? Number(process.env.REPLAY_THROTTLE) : Math.max(0, Math.min(1, 0.08 + slope / 1500));
+    sim.setControls({ targetRpm: at(time), throttle: pedal });
     sim.process(L, R, Math.min(chunk, n - o), o);
     t.push(time);
     rpm.push(sim.rpm);
