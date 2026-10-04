@@ -7,7 +7,7 @@
  * The cylinder never synthesises sound. The exhaust and intake waves are the
  * pressure and volume velocity its valve flows impose on the ducts.
  */
-import type { CamSpec } from "./spec";
+import type { CamSpec, TwoStrokeSpec } from "./spec";
 import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, lerpTable, orificeMassFlow, waveExponents } from "./gas";
 import type { Port } from "./waveguide";
 import { arriving } from "./waveguide";
@@ -93,6 +93,41 @@ export interface CylinderParams {
   wallTempK: number;
   /** Direct-injection compression ignition (no fuel in the intake, no spark). */
   diesel: { cetane: number; pilot: boolean } | null;
+  /** Crank degrees per working cycle: 720 four-stroke, 360 two-stroke. */
+  cycleDeg: number;
+  /** Piston-ported, crankcase-scavenged two-stroke gas exchange (replaces the valves). */
+  twoStroke: TwoStrokeSpec | null;
+}
+
+/** Crankcase of a crankcase-scavenged two-stroke: the pump that feeds the transfer ports. */
+class Crankcase {
+  volume = 0;
+  mass = 0;
+  energy = 0;
+  pressure = P_AMBIENT;
+  temperature = 320;
+  massAir = 0;
+  massFuel = 0;
+  massBurned = 0;
+  /** Reed petal opening 0..1. */
+  reed = 0;
+  constructor(readonly volumeMax: number) {}
+  init(volume: number): void {
+    this.volume = volume;
+    this.temperature = 320;
+    this.pressure = P_AMBIENT;
+    this.mass = (P_AMBIENT * volume) / (R_AIR * 320);
+    this.energy = this.mass * CV_GAS * 320;
+    // A stopped two-stroke's crankcase holds carburetted mixture, ready for the first transfers.
+    this.massFuel = this.mass / 15.7;
+    this.massAir = this.mass - this.massFuel;
+    this.massBurned = 0;
+  }
+  update(): void {
+    this.mass = Math.max(1e-9, this.mass);
+    this.temperature = Math.max(200, this.energy / (this.mass * CV_GAS));
+    this.pressure = (this.mass * R_AIR * this.temperature) / this.volume;
+  }
 }
 
 export interface CombustionCommand {
@@ -188,6 +223,33 @@ export class Cylinder {
   /** Ignition delay of the last injection, crank degrees. */
   lastIgnitionDelayDeg = 0;
   private ringPending = 0;
+  // Two-stroke ports and crankcase
+  private readonly crankcase: Crankcase | null = null;
+  private readonly cycleDeg: number;
+  private readonly sExhaustOpen: number = 0;
+  private readonly sTransferOpen: number = 0;
+  private readonly sIntakeOpen: number = 0;
+  private readonly exhaustPortWidth: number = 0;
+  private readonly transferPortWidth: number = 0;
+  private readonly reedArea: number = 0;
+  /** Effective transfer flow area this sample (m²). */
+  transferCdA = 0;
+  /** Two-stroke cycle metrics (Blair): delivery ratio (air inducted / ρ_ref·V_swept), trapping efficiency (trapped / delivered air). */
+  lastDeliveryRatio = 0;
+  lastTrappingEfficiency = 0;
+  private cycleInducted = 0;
+  /** Two-stroke header slug: composition of the gas just outside the exhaust port (kg). */
+  private headerAir = 0;
+  private headerFuel = 0;
+  private headerBurned = 0;
+  /** Gas mass the slug holds (≈ the header's volume at exhaust density), set by the engine. */
+  headerCapacity = 0;
+  /** Temperature of the fresh-charge zone during scavenging (transfer inflow temperature), K. */
+  private freshChargeK = 350;
+  /** Crankcase pressure (Pa), two-strokes only. */
+  get crankcasePressure(): number {
+    return this.crankcase ? this.crankcase.pressure : P_AMBIENT;
+  }
 
   // Knock: Livengood–Wu integral of the end gas, compressed isentropically from the spark state.
   /** Spark retard this cylinder's knock controller currently applies, degrees. */
@@ -274,6 +336,31 @@ export class Cylinder {
     }
     this.intakeLobe = this.lowIntake;
     this.exhaustLobe = this.lowExhaust;
+    this.cycleDeg = params.cycleDeg;
+    const ts = params.twoStroke;
+    if (ts) {
+      this.sExhaustOpen = this.kinematics(ts.exhaustPortOpenDeg)[0];
+      this.sTransferOpen = this.kinematics(ts.transferPortOpenDeg)[0];
+      this.sIntakeOpen = this.kinematics(360 - ts.intakePortOpenBtdcDeg)[0];
+      this.exhaustPortWidth = ts.exhaustPortWidthRatio * boreM;
+      this.transferPortWidth = ts.transferPortWidthRatio * boreM;
+      // Reed cage flow area ≈ 1.3 × the carburettor bore area (≈ 0.55 × bore diameter).
+      this.reedArea = 1.3 * (Math.PI / 4) * Math.pow(0.55 * boreM, 2);
+      const cr = Math.max(1.1, ts.crankcaseCompressionRatio);
+      this.crankcase = new Crankcase((this.sweptVolume * cr) / (cr - 1));
+    }
+  }
+
+  /**
+   * Flow area of a piston-controlled port whose top edge the crown uncovers at displacement
+   * `sOpen`; ports run to BDC. Radiused top corners (≈ 2 mm) make the area grow as h²/2r first,
+   * so the port opens without a step. Cd ≈ 0.72 (Blair's port discharge data at high Δp).
+   */
+  private portArea(s: number, sOpen: number, width: number): number {
+    const h = s - sOpen;
+    if (h <= 0) return 0;
+    const rc = 0.002;
+    return 0.72 * width * (h - rc * (1 - Math.exp(-h / rc)));
   }
 
   /**
@@ -316,6 +403,7 @@ export class Cylinder {
     this.pressure = pressurePa;
     this.temperature = temperatureK;
     this.prevAlpha = alphaDeg;
+    if (this.crankcase) this.crankcase.init(this.crankcase.volumeMax - this.area * s);
   }
 
   private updateState(): void {
@@ -356,12 +444,14 @@ export class Cylinder {
     this.energy -= this.pressure * dV;
     this.volume = newVolume;
 
-    // ---- Spark event (crossing of the spark angle, handling the 720° wrap), or diesel injection
+    // ---- Spark event (crossing of the spark angle, handling the cycle wrap), or diesel injection
+    const cyc = this.cycleDeg;
+    const ts = this.params.twoStroke;
     if (this.params.diesel) {
-      if (crossed(prev, alphaDeg, 720 - combustion.injectionAdvanceDeg)) this.inject(combustion, omega);
+      if (crossed(prev, alphaDeg, cyc - combustion.injectionAdvanceDeg)) this.inject(combustion, omega);
     } else {
       this.effectiveAdvance = combustion.sparkAdvanceDeg - (combustion.knockControl ? this.knockRetard : 0);
-      const sparkAngle = 720 - this.effectiveAdvance;
+      const sparkAngle = cyc - this.effectiveAdvance;
       if (crossed(prev, alphaDeg, sparkAngle)) this.ignite(combustion, omega, dilutionCovGain);
     }
 
@@ -369,9 +459,9 @@ export class Cylinder {
     this.heatReleaseRate = 0;
     if (this.burning) {
       let theta = alphaDeg - this.burnStartDeg;
-      if (theta < -360) theta += 720;
-      else if (theta > 360) theta -= 720;
-      const exhaustOpening = this.exhaustLobe.lift(alphaDeg) > 0.0003;
+      if (theta < -cyc / 2) theta += cyc;
+      else if (theta > cyc / 2) theta -= cyc;
+      const exhaustOpening = ts ? s > this.sExhaustOpen : this.exhaustLobe.lift(alphaDeg) > 0.0003;
       if (theta > 0 && !exhaustOpening) {
         if (this.ringPending > 0) this.startRinging(this.ringPending, dt);
         const x = this.params.diesel
@@ -402,19 +492,21 @@ export class Cylinder {
     this.updateState();
     if ((this.heatTick++ & 7) === 0) {
       const meanPistonSpeed = (2 * this.params.strokeM * omega) / (2 * Math.PI);
-      const w = (alphaDeg < 180 || alphaDeg > 540 ? 2.28 : 6.18) * meanPistonSpeed + (this.burnFraction > 0 && this.burnFraction < 0.999 ? 4 : 0);
+      const closed = ts ? alphaDeg < ts.exhaustPortOpenDeg || alphaDeg > 360 - ts.exhaustPortOpenDeg : alphaDeg < 180 || alphaDeg > 540;
+      const w = (closed ? 2.28 : 6.18) * meanPistonSpeed + (this.burnFraction > 0 && this.burnFraction < 0.999 ? 4 : 0);
       this.hWoschni = this.woschniBore * Math.pow((this.pressure / 1000) * Math.max(0.5, w), 0.8) * Math.pow(this.temperature, -0.55);
     }
     const wallArea = 2 * this.area + Math.PI * this.params.boreM * (this.volume / this.area);
     this.energy -= this.hWoschni * wallArea * (this.temperature - this.params.wallTempK) * dt;
     this.updateState();
 
-    // ---- Exhaust valve
-    const exLift = this.exhaustLobe.lift(alphaDeg);
+    // ---- Exhaust valve (two-stroke: piston-uncovered exhaust port)
+    const exLift = ts ? 0 : this.exhaustLobe.lift(alphaDeg);
+    const exPortArea = ts ? this.portArea(s, this.sExhaustOpen, this.exhaustPortWidth) * this.flowScale : 0;
     this.exhaustMassFlow = 0;
     this.unburnedFuelOut = 0;
-    if (exLift > 0) {
-      const cdA = flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
+    if (exLift > 0 || exPortArea > 0) {
+      const cdA = ts ? exPortArea : flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
       this.exhaustCdA = cdA;
       this.exhaustMassFlow = this.solveValve(cdA, exhaustPort, true, dt, 0);
       this.exhaustWasOpen = true;
@@ -423,14 +515,21 @@ export class Cylinder {
       this.prevExhaustD = 0;
       this.prevExhaustD2 = 0;
       this.exhaustSend = arriving(exhaustPort); // closed valve: rigid end
-      if (this.exhaustWasOpen) this.exhaustClosed = true;
+      if (this.exhaustWasOpen) {
+        // A two-stroke's port has no valve to seat; trapping happens as the piston closes it.
+        if (ts) this.lastTrappedAir = this.massAir;
+        else this.exhaustClosed = true;
+      }
       this.exhaustWasOpen = false;
     }
 
-    // ---- Intake valve
-    const inLift = this.intakeLobe.lift(alphaDeg);
+    // ---- Intake valve (two-stroke: transfer ports from the crankcase, and the crankcase pump)
+    const inLift = ts ? 0 : this.intakeLobe.lift(alphaDeg);
     this.intakeMassFlow = 0;
-    if (inLift > 0) {
+    if (ts) {
+      this.transferFlow(s, dt);
+      this.stepCrankcase(alphaDeg, s, dt, intakePort, intakeTempK, combustion);
+    } else if (inLift > 0) {
       const cdA = flowArea(inLift, this.params.intakeValveD, this.params.intakeValves) * this.flowScale;
       this.intakeMassFlow = this.solveValve(cdA, intakePort, false, dt, intakeTempK, combustion);
       this.intakeWasOpen = true;
@@ -456,16 +555,24 @@ export class Cylinder {
       this.knockAmp *= this.knockDecay;
     }
     this.torque = (this.pressure - P_AMBIENT) * this.area * dsdth;
-    // Cycle bookkeeping (IMEP over the 720° cycle, peak pressure)
+    // Crankcase pressure acts on the piston underside (the two-stroke's pumping work).
+    if (this.crankcase) this.torque -= (this.crankcase.pressure - P_AMBIENT) * this.area * dsdth;
+    // Cycle bookkeeping (IMEP over the cycle, peak pressure)
     if (this.pressure > this.cyclePeak) {
       this.cyclePeak = this.pressure;
-      this.cyclePeakAngle = alphaDeg > 360 ? alphaDeg - 720 : alphaDeg;
+      this.cyclePeakAngle = alphaDeg > cyc / 2 ? alphaDeg - cyc : alphaDeg;
     }
     this.cycleWork += (this.pressure - P_AMBIENT) * dV;
-    if (prev > 600 && alphaDeg < 120) {
+    if (prev > cyc - 120 && alphaDeg < 120) {
       this.lastPeakPressure = this.cyclePeak;
       this.lastPeakAngle = this.cyclePeakAngle;
       this.lastImep = this.cycleWork / this.sweptVolume;
+      if (this.crankcase) {
+        const ref = (P_AMBIENT / (R_AIR * 298)) * this.sweptVolume;
+        this.lastDeliveryRatio = this.cycleInducted / ref;
+        this.lastTrappingEfficiency = this.cycleInducted > 0 ? Math.min(1.5, this.lastTrappedAir / this.cycleInducted) : 0;
+        this.cycleInducted = 0;
+      }
       this.cyclePeak = 0;
       this.cycleWork = 0;
     }
@@ -502,13 +609,138 @@ export class Cylinder {
     }
     const burnableFuel = Math.min(this.massFuel, this.massAir / this.params.stoichAfr);
     this.burnQ = burnableFuel * this.params.fuelLhv * this.burnEfficiency;
-    this.burnStartDeg = 720 - this.effectiveAdvance;
+    this.burnStartDeg = this.cycleDeg - this.effectiveAdvance;
     this.burnFraction = 0;
     this.burning = true;
     this.sparkPressure = this.pressure;
     this.sparkTemperature = this.temperature;
     this.knockIntegral = 0;
     this.knockPending = true;
+  }
+
+  /**
+   * Transfer ports: crankcase charge into the cylinder (or blow-back the other way) through the
+   * piston-uncovered transfer area, as an explicit orifice (the RC time of crankcase volume and
+   * transfer area is ≈ 1 ms, many samples).
+   */
+  private transferFlow(s: number, dt: number): void {
+    const cc = this.crankcase!;
+    const area = this.portArea(s, this.sTransferOpen, this.transferPortWidth) * this.flowScale;
+    this.transferCdA = area;
+    if (area <= 0) return;
+    let dm = orificeMassFlow(area, cc.pressure, cc.temperature, this.pressure, this.temperature) * dt;
+    dm = clamp(dm, -0.15 * this.mass, 0.15 * cc.mass);
+    if (dm > 0) {
+      const f = dm / cc.mass;
+      const air = cc.massAir * f;
+      const fuel = cc.massFuel * f;
+      const burned = cc.massBurned * f;
+      cc.massAir -= air;
+      cc.massFuel -= fuel;
+      cc.massBurned -= burned;
+      cc.mass -= dm;
+      cc.energy -= CP_GAS * cc.temperature * dm;
+      this.massAir += air;
+      this.massFuel += fuel;
+      this.massBurned += burned;
+      this.mass += dm;
+      this.energy += CP_GAS * cc.temperature * dm;
+      this.freshChargeK = cc.temperature;
+    } else if (dm < 0) {
+      const back = -dm;
+      const f = back / this.mass;
+      const air = this.massAir * f;
+      const fuel = this.massFuel * f;
+      const burned = this.massBurned * f;
+      this.massAir -= air;
+      this.massFuel -= fuel;
+      this.massBurned -= burned;
+      this.mass -= back;
+      this.energy -= CP_GAS * this.temperature * back;
+      cc.massAir += air;
+      cc.massFuel += fuel;
+      cc.massBurned += burned;
+      cc.mass += back;
+      cc.energy += CP_GAS * this.temperature * back;
+    }
+    this.intakeMassFlow = dm / dt;
+    cc.update();
+    this.updateState();
+  }
+
+  /**
+   * Crankcase pump: volume swept by the piston underside, heat exchange with the crankcase walls,
+   * and the induction flow from the intake runner through the reed valve (one-way, petal lag ≈
+   * 0.5 ms opening / 0.25 ms closing) or a piston-controlled intake port. The runner end is
+   * coupled linearly: p = 2·p_in − Z·q, solved with the orifice law by bracketed secant.
+   */
+  private stepCrankcase(alphaDeg: number, s: number, dt: number, port: Port, intakeTempK: number, combustion: CombustionCommand): void {
+    const cc = this.crankcase!;
+    const ts = this.params.twoStroke!;
+    const v = cc.volumeMax - this.area * s;
+    cc.energy -= cc.pressure * (v - cc.volume);
+    cc.volume = v;
+    cc.energy -= (cc.temperature - 330) * cc.mass * CV_GAS * Math.min(1, dt / 0.02);
+    cc.update();
+
+    const duct = port.duct;
+    const pin = arriving(port);
+    const z = duct.Z;
+    const rho = Math.max(0.2, duct.rho);
+    const pZero = P_AMBIENT + 2 * pin;
+    let area: number;
+    let oneWay = false;
+    if (ts.intake === "reed") {
+      const target = clamp((pZero - cc.pressure - 1500) / 15_000, 0, 1);
+      cc.reed += (target - cc.reed) * Math.min(1, dt / (target > cc.reed ? 5e-4 : 2.5e-4));
+      area = cc.reed * this.reedArea;
+      oneWay = true;
+    } else {
+      // Piston-port intake: the skirt uncovers it while the piston is near TDC.
+      const h = this.sIntakeOpen - s;
+      area = h > 0 ? 0.72 * 0.6 * this.params.boreM * h : 0;
+    }
+    let m = 0;
+    if (area > 1e-8) {
+      const flow = (mm: number) => {
+        const p = Math.max(0.2 * P_AMBIENT, pZero - (z * mm) / rho);
+        return mm - orificeMassFlow(area, p, intakeTempK, cc.pressure, cc.temperature);
+      };
+      let a = 0;
+      let fa = flow(0);
+      let b = -fa;
+      if (b !== 0) {
+        let fb = flow(b);
+        for (let it = 0; it < 12 && Math.abs(fb) > 1e-9; it++) {
+          const c = fb !== fa ? b - (fb * (b - a)) / (fb - fa) : 0.5 * (a + b);
+          const fc = flow(c);
+          if (Math.sign(fc) === Math.sign(fb)) { fa *= 0.5; } else { a = b; fa = fb; }
+          b = c;
+          fb = fc;
+        }
+        m = b;
+      }
+      if (oneWay && m < 0) m = 0;
+    }
+    const dm = clamp(m * dt, -0.2 * cc.mass, 0.5 * cc.mass);
+    if (dm > 0) {
+      const fuelFraction = combustion.fuelEnabled && !this.params.diesel ? 1 / (1 + (combustion.lambda * this.params.stoichAfr) / this.fuelScale) : 0;
+      this.cycleInducted += dm * (1 - fuelFraction);
+      cc.massFuel += dm * fuelFraction;
+      cc.massAir += dm * (1 - fuelFraction);
+      cc.mass += dm;
+      cc.energy += CP_GAS * intakeTempK * dm;
+    } else if (dm < 0) {
+      const f = -dm / cc.mass;
+      cc.massAir -= cc.massAir * f;
+      cc.massFuel -= cc.massFuel * f;
+      cc.massBurned -= cc.massBurned * f;
+      cc.mass += dm;
+      cc.energy += CP_GAS * cc.temperature * dm;
+    }
+    cc.update();
+    this.intakeSend = pin - (z * (dm / dt)) / rho;
+    void alphaDeg;
   }
 
   /**
@@ -561,7 +793,7 @@ export class Cylinder {
     this.lastBurnDuration = this.burnDurationDeg;
     this.burnEfficiency = 0.98;
     this.burnQ = Math.min(this.massFuel, this.massAir / this.params.stoichAfr) * this.params.fuelLhv * this.burnEfficiency;
-    this.burnStartDeg = mod720(720 - cmd.injectionAdvanceDeg + delayDeg);
+    this.burnStartDeg = modCycle(this.cycleDeg - cmd.injectionAdvanceDeg + delayDeg, this.cycleDeg);
     this.burnFraction = 0;
     this.burning = true;
     this.knockPending = false;
@@ -717,17 +949,56 @@ export class Cylinder {
     const dm = out * dt;
     if (out >= 0) {
       const frac = Math.min(0.98, dm / Math.max(1e-12, this.mass));
-      const lostAir = this.massAir * frac;
-      const lostFuel = this.massFuel * frac;
-      const lostBurned = this.massBurned * frac;
+      let lostAir = this.massAir * frac;
+      let lostFuel = this.massFuel * frac;
+      let lostBurned = this.massBurned * frac;
+      const ts = this.params.twoStroke;
+      if (isExhaust && ts && this.mass > 1e-12) {
+        // Scavenging between perfect mixing (q = 1) and displacement: the outflow's burned share is
+        // 1 − (1 − b)^q of the cylinder's burned fraction b, so fresh charge short-circuits less.
+        const b = this.massBurned / this.mass;
+        const share = Math.max(b, 1 - Math.pow(1 - b, ts.scavengeQuality));
+        const out = frac * this.mass;
+        lostBurned = Math.min(this.massBurned, out * share);
+        const fresh = out - lostBurned;
+        const freshMass = Math.max(1e-15, this.massAir + this.massFuel);
+        lostAir = Math.min(this.massAir, (fresh * this.massAir) / freshMass);
+        lostFuel = Math.min(this.massFuel, (fresh * this.massFuel) / freshMass);
+      }
+      // Outflow enthalpy. Two-stroke scavenging keeps two zones apart: fresh charge near the transfer
+      // temperature and hot burned gas, which is what leaves first, at its own (zone) temperature.
+      let outEnthalpy = CP_GAS * this.temperature * dm;
+      let outTemp = this.temperature;
+      if (isExhaust && this.params.twoStroke && this.massBurned > 1e-12) {
+        const freshMass = this.massAir + this.massFuel;
+        const tFresh = Math.min(this.temperature, this.freshChargeK);
+        const tBurned = clamp((this.energy / CV_GAS - freshMass * tFresh) / this.massBurned, this.temperature, 3500);
+        const lostFresh = lostAir + lostFuel;
+        outEnthalpy = CP_GAS * (lostBurned * tBurned + lostFresh * tFresh);
+        outTemp = outEnthalpy / (CP_GAS * Math.max(1e-15, dm));
+      }
       this.massAir -= lostAir;
       this.massFuel -= lostFuel;
       this.massBurned -= lostBurned;
-      this.energy -= CP_GAS * this.temperature * dm;
+      this.energy -= outEnthalpy;
       this.mass -= dm;
       if (isExhaust) {
         this.unburnedFuelOut = lostFuel;
-        this.exhaustGasTemp = this.temperature;
+        this.exhaustGasTemp = outTemp;
+        if (this.params.twoStroke) {
+          // Header slug: what just left stays near the port (well-mixed, header-sized), so a returning
+          // pressure wave pushes back the charge that short-circuited, the tuned pipe's plugging action.
+          this.headerAir += lostAir;
+          this.headerFuel += lostFuel;
+          this.headerBurned += lostBurned;
+          const total = this.headerAir + this.headerFuel + this.headerBurned;
+          if (total > this.headerCapacity) {
+            const k = this.headerCapacity / total;
+            this.headerAir *= k;
+            this.headerFuel *= k;
+            this.headerBurned *= k;
+          }
+        }
       } else {
         // Reversion into the intake runner: burned gas waits there and is re-inducted first;
         // beyond the runner's own capacity it spills into the shared plenum.
@@ -741,7 +1012,20 @@ export class Cylinder {
       const gain = -dm;
       this.mass += gain;
       this.energy += CP_GAS * Tduct * gain;
-      if (isExhaust) {
+      if (isExhaust && this.params.twoStroke) {
+        const total = this.headerAir + this.headerFuel + this.headerBurned;
+        const fromSlug = Math.min(total, gain);
+        const f = total > 0 ? fromSlug / total : 0;
+        const air = this.headerAir * f;
+        const fuel = this.headerFuel * f;
+        const burned = this.headerBurned * f;
+        this.headerAir -= air;
+        this.headerFuel -= fuel;
+        this.headerBurned -= burned;
+        this.massAir += air;
+        this.massFuel += fuel;
+        this.massBurned += burned + (gain - fromSlug);
+      } else if (isExhaust) {
         this.massBurned += gain; // exhaust back-flow during overlap: internal EGR
       } else {
         const fromResidual = Math.min(this.runnerResidual, gain);
@@ -813,9 +1097,9 @@ export function mbtAdvance(durationDeg: number): number {
   return 0.517 * durationDeg - 9;
 }
 
-function mod720(x: number): number {
-  const r = x % 720;
-  return r < 0 ? r + 720 : r;
+function modCycle(x: number, cycle: number): number {
+  const r = x % cycle;
+  return r < 0 ? r + cycle : r;
 }
 
 function crossed(prev: number, cur: number, target: number): boolean {

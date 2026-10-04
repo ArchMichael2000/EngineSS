@@ -213,10 +213,11 @@ export function defaultFiringOrder(layout: EssLayout, cylinders: number, crank: 
   return (key8 && table[key8]) || table[`${layout}-${cylinders}`] || [];
 }
 
-export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm">): FiringSchedule {
+export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm"> & Partial<Pick<EngineSpec, "cycle">>): FiringSchedule {
   const n = Math.max(1, Math.floor(spec.cylinders));
   const notes: string[] = [];
   const { bankAxesDeg, bankOf, throwOf } = bankLayout(spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg);
+  if (spec.cycle === "two-stroke") return twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf);
   const crank: CrankSpec = spec.crank;
   const throwCount = Math.max(...Array.from({ length: n }, (_, i) => throwOf(i + 1))) + 1;
   const pitch = (spec.borePitchMm || 100) / 1000;
@@ -288,6 +289,46 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     requestedOrderHonoured: honoured,
     notes,
   };
+}
+
+/**
+ * Two-stroke: every TDC is a firing TDC, so the cycle is one revolution. Even firing spaces the
+ * cylinders 360/n apart in firing order (parallel twins 180°, triples 120°); explicit fire angles
+ * (mod 360) are honoured, e.g. a 360° "big-bang" twin with both at 0.
+ */
+function twoStrokeSchedule(
+  spec: Pick<EngineSpec, "layout" | "crank" | "firingOrder" | "borePitchMm">,
+  n: number,
+  bankAxesDeg: number[],
+  bankOf: (cyl: number) => number,
+  throwOf: (cyl: number) => number,
+): FiringSchedule {
+  const pitch = (spec.borePitchMm || 100) / 1000;
+  const fire = new Array<number>(n).fill(0);
+  let honoured = false;
+  if (spec.crank.fireAnglesDeg?.length === n) {
+    spec.crank.fireAnglesDeg.forEach((a, i) => { fire[i] = mod(a - spec.crank.fireAnglesDeg![0], 360); });
+    honoured = true;
+  } else {
+    const order = validOrder(spec.firingOrder, n) ? spec.firingOrder : Array.from({ length: n }, (_, i) => i + 1);
+    honoured = validOrder(spec.firingOrder, n);
+    order.forEach((cyl, k) => { fire[cyl - 1] = (k * 360) / n; });
+  }
+  const cylinders: CylinderGeometry[] = Array.from({ length: n }, (_, i) => ({
+    number: i + 1,
+    bank: bankOf(i + 1),
+    throwIndex: throwOf(i + 1),
+    positionM: throwOf(i + 1) * pitch,
+    bankAxisDeg: bankAxesDeg[bankOf(i + 1)],
+    pinAngleDeg: mod(fire[i] + bankAxesDeg[bankOf(i + 1)], 360),
+    fireAngleDeg: fire[i],
+  }));
+  const sorted = cylinders.slice().sort((a, b) => a.fireAngleDeg - b.fireAngleDeg);
+  const angles = sorted.map((c) => c.fireAngleDeg);
+  const intervals = n === 1 ? [360] : angles.map((a, i) => (i + 1 < angles.length ? angles[i + 1] - a : 360 - a + angles[0]));
+  const notes: string[] = [];
+  if (intervals.some((d) => Math.abs(d - 360 / n) > 0.5)) notes.push(`Uneven firing: ${intervals.map((d) => Math.round(d)).join("/")}°.`);
+  return { cylinders, firingOrder: sorted.map((c) => c.number), intervalsDeg: intervals, bankCount: bankAxesDeg.length, bankAxesDeg, requestedOrderHonoured: honoured, notes };
 }
 
 function validOrder(order: number[] | undefined, n: number): order is number[] {

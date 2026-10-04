@@ -15,7 +15,7 @@ const TOOLTIPS = {
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
   crankshaft: 'Cross-plane creates the classic V8 burble with uneven exhaust pulses. Flat-plane produces an even, high-pitched scream. Odd-fire creates an asymmetric, distinctive rhythm.',
-  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection).',
+  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection). Two-strokes fire every revolution through piston-controlled ports; the crankcase pumps the charge and a tuned expansion chamber makes the power band.',
   aspiration: 'Naturally aspirated engines breathe freely. Turbochargers add spool whine and blow-off sounds. Superchargers add a constant mechanical whine proportional to RPM.',
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
@@ -203,6 +203,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           <SelectContent className="bg-dark-elevated border-hud-line">
             <SelectItem value="four-stroke:gasoline">Four-Stroke Gasoline</SelectItem>
             <SelectItem value="four-stroke:diesel">Four-Stroke Diesel</SelectItem>
+            <SelectItem value="two-stroke:gasoline">Two-Stroke (crankcase-scavenged)</SelectItem>
           </SelectContent>
         </Select>
       </div>

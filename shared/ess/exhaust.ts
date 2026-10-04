@@ -103,6 +103,50 @@ export class ExhaustNetwork {
     const collectorD = ex.collectorDiameterMm / 1000;
     const pipeD = ex.pipeDiameterMm / 1000;
 
+    // ---- Two-stroke: one pipe per cylinder (tuned expansion chamber or a plain pipe) to its silencer.
+    if (spec.twoStroke) {
+      this.primaries.forEach((header, i) => {
+        let port: Port = { duct: header, end: "b" };
+        let d = header.lengthM;
+        const g = this.groupOfCylinder[i];
+        if (spec.twoStroke!.expansionChamber) {
+          // Blair-style proportions of the tuned length L_t (port → middle of the baffle cone), header
+          // = 0.30·L_t: diffuser 0.40 to a belly 3.1× the header diameter, belly 0.12, baffle cone
+          // 0.36 down to a stinger 0.62× the header, stinger 0.30. Cones as stepped segments. The
+          // diffuser returns the blowdown pulse as a suction wave that pulls fresh charge through the
+          // cylinder; the baffle returns a pressure wave that plugs the port before it closes.
+          const lt = header.lengthM / 0.3;
+          const belly = primaryD * 3.1;
+          const stinger = primaryD * 0.62;
+          const cone = (from: number, to: number, length: number, steps: number, name: string) => {
+            for (let k = 0; k < steps; k++) {
+              const t = (k + 0.5) / steps;
+              const diameter = from * Math.pow(to / from, t);
+              port = this.extend(port, { lengthM: length / steps, diameterM: diameter, name: `${name}${i}.${k}` }, d + length / steps / 2, g);
+              d += length / steps;
+            }
+          };
+          cone(primaryD, belly, 0.4 * lt, 4, "diffuser");
+          port = this.extend(port, { lengthM: 0.12 * lt, diameterM: belly, name: `belly${i}` }, d + 0.06 * lt, g);
+          d += 0.12 * lt;
+          cone(belly, stinger, 0.36 * lt, 3, "baffle");
+          port = this.extend(port, { lengthM: 0.3 * lt, diameterM: stinger, name: `stinger${i}` }, d + 0.15 * lt, g);
+          d += 0.3 * lt;
+        } else {
+          port = this.extend(port, { lengthM: 0.6, diameterM: pipeD, name: `pipe${i}` }, d + 0.3, g);
+          d += 0.6;
+        }
+        if (ex.muffler.type !== "none") {
+          port = this.element(port, "muffler", ex.pipeDiameterMm / 1000, d, g);
+          d += ex.muffler.bodyLengthMm / 1000;
+        }
+        const tail = this.extend(port, { lengthM: Math.max(0.05, ex.tailpipeLengthMm / 1000), diameterM: ex.tailpipeDiameterMm / 1000, name: `tail${i}` }, d + 0.1, g);
+        const n = this.primaries.length;
+        this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: n === 1 ? 0.2 : (i / (n - 1) - 0.5) * 0.4, y: -1.0, z: 0.55 });
+      });
+      return;
+    }
+
     // ---- Open primaries (zoomies / open stacks)
     if (strategy === "none") {
       this.groups.forEach((g, gi) => {

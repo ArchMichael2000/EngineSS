@@ -193,6 +193,32 @@ export interface CalibrationSpec {
 }
 
 export type CombustionKind = "spark" | "diesel";
+export type EngineCycleKind = "four-stroke" | "two-stroke" | "rotary";
+
+/**
+ * Crankcase-scavenged, piston-ported two-stroke (Blair, *Design and Simulation of Two-Stroke
+ * Engines*, SAE 1996). Port timings are crank degrees after TDC at which the piston crown uncovers
+ * the port's top edge; ports run down to BDC level.
+ */
+export interface TwoStrokeSpec {
+  exhaustPortOpenDeg: number;
+  transferPortOpenDeg: number;
+  /** Effective exhaust port width / bore (bridged main port + auxiliaries). */
+  exhaustPortWidthRatio: number;
+  /** Summed effective transfer port width / bore. */
+  transferPortWidthRatio: number;
+  /** Crankcase primary compression ratio (V at TDC / V at BDC). */
+  crankcaseCompressionRatio: number;
+  /** Reed valve into the crankcase, or a piston-controlled intake port. */
+  intake: "reed" | "piston-port";
+  /** Piston-port intake: opens this many degrees before TDC (symmetric about TDC). */
+  intakePortOpenBtdcDeg: number;
+  /** Displacement–mixing scavenging exponent: 1 = perfect mixing, ≈1.8 loop, ≈2.5 uniflow-like. */
+  scavengeQuality: number;
+  /** Tuned expansion chamber per cylinder, tuned for peak power at `tunedRpm`. */
+  expansionChamber: boolean;
+  tunedRpm: number;
+}
 
 /** Direct-injection compression ignition. */
 export interface DieselSpec {
@@ -209,6 +235,9 @@ export interface DieselSpec {
 
 export interface EngineSpec {
   name: string;
+  /** Working cycle; crank degrees per cycle 720 (four-stroke) or 360 (two-stroke). */
+  cycle: EngineCycleKind;
+  twoStroke: TwoStrokeSpec | null;
   /** Spark ignition or compression ignition (diesel). */
   combustion: CombustionKind;
   diesel: DieselSpec | null;
@@ -242,6 +271,11 @@ export interface EngineSpec {
   fuelStoichAfr: number;
   /** Seed for every stochastic process (combustion variability, turbulence). */
   seed: number;
+}
+
+/** Crank (or eccentric-shaft) degrees per working cycle of one chamber. */
+export function cycleDegrees(spec: Pick<EngineSpec, "cycle">): number {
+  return spec.cycle === "two-stroke" ? 360 : spec.cycle === "rotary" ? 1080 : 720;
 }
 
 export function displacementLitres(spec: Pick<EngineSpec, "boreMm" | "strokeMm" | "cylinders">): number {

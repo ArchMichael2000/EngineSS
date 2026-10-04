@@ -8,7 +8,7 @@
  * structural and accessory monopoles to the chosen listener.
  */
 import type { EngineSpec } from "./spec";
-import { displacementLitres } from "./spec";
+import { cycleDegrees, displacementLitres } from "./spec";
 import { solveFiringSchedule } from "./geometry";
 import type { FiringSchedule } from "./geometry";
 import { Cylinder, mbtAdvance } from "./cylinder";
@@ -108,6 +108,8 @@ export class EngineSimulator {
   readonly sampleRate: number;
   readonly displacementL: number;
   private readonly cylinders: Cylinder[];
+  /** Crank degrees per working cycle (720 four-stroke, 360 two-stroke). */
+  private readonly cycleDeg: number;
   private readonly intake: IntakeSystem;
   private readonly exhaust: ExhaustNetwork;
   private readonly structure: StructuralRadiator;
@@ -204,6 +206,7 @@ export class EngineSimulator {
     this.sampleRate = sampleRate;
     this.rng = new Rng(spec.seed * 2654435761);
     this.schedule = solveFiringSchedule(spec);
+    this.cycleDeg = cycleDegrees(spec);
     this.displacementL = displacementLitres(spec);
     const cylParams = {
       boreM: spec.boreMm / 1000,
@@ -219,6 +222,8 @@ export class EngineSimulator {
       stoichAfr: spec.fuelStoichAfr,
       wallTempK: 440,
       diesel: spec.diesel ? { cetane: spec.diesel.cetane, pilot: spec.diesel.pilotInjection } : null,
+      cycleDeg: cycleDegrees(spec),
+      twoStroke: spec.twoStroke,
     };
     this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
@@ -261,7 +266,7 @@ export class EngineSimulator {
     const overlap = Math.max(0, spec.cam.intakeDurationDeg / 2 - spec.cam.intakeCenterlineDeg) + Math.max(0, spec.cam.exhaustDurationDeg / 2 - spec.cam.exhaustCenterlineDeg);
     const idleOmega = (spec.calibration.idleRpm / 60) * TWO_PI;
     const vd = this.displacementL / 1000;
-    const cyclesPerSec = spec.calibration.idleRpm / 120;
+    const cyclesPerSec = (spec.calibration.idleRpm / 60) * (360 / this.cycleDeg);
     const etaIdle = 0.27 / (1 + overlap / 30);
     const friction = this.frictionTorque(spec.calibration.idleRpm);
     let idleMap = 32_000;
@@ -273,13 +278,29 @@ export class EngineSimulator {
       idleMap = clamp((idleAir / (0.85 * vd * cyclesPerSec)) * 287.05 * 310, 18_000, 70_000);
     }
     this.idleMapTarget = idleMap;
-    const idleArea = idleAir / (0.78 * (P_AMBIENT / Math.sqrt(287.05 * 298)) * 0.685);
+    let idleArea = idleAir / (0.78 * (P_AMBIENT / Math.sqrt(287.05 * 298)) * 0.685);
     this.bypassAuthority = 1 + overlap / 25;
+    if (spec.twoStroke) {
+      // Two-stroke: no cams (no overlap), no throttling pumping loss to cover, and the crankcase pump
+      // keeps the manifold near 75 kPa, so the idle air passes the slide subsonically (Δp ≈ 26 kPa).
+      const gross = friction * idleOmega;
+      // ≈ 22 % gross efficiency at idle, and about half the delivered air short-circuits (trapping ≈ 0.5).
+      const air = ((gross / (0.22 * spec.fuelLhvMjKg * 1e6)) * spec.fuelStoichAfr) / 0.5;
+      idleArea = air / (0.75 * Math.sqrt(2 * 1.2 * 26_000));
+      this.bypassAuthority = 1;
+      this.idleMapTarget = 75_000;
+    }
     this.intake.setBypassScale(this.bypassAuthority);
     this.idleFeedForward = clamp(idleArea / (spec.intake.idleBypassAreaMm2 * 1e-6 * this.bypassAuthority), 0.05, 0.9);
     // Burned-gas capacity of each runner: its gas mass at idle manifold density.
     const runnerVolume = (Math.PI / 4) * Math.pow(spec.intake.runnerDiameterMm / 1000, 2) * (spec.intake.runnerLengthMm / 1000);
     for (const cyl of this.cylinders) cyl.runnerResidualCapacity = runnerVolume * (this.idleMapTarget / (287.05 * 320));
+    if (spec.twoStroke) {
+      this.cylinders.forEach((cyl, i) => {
+        const header = this.exhaust.primaries[i];
+        cyl.headerCapacity = header.area * header.lengthM * (P_AMBIENT / (287.05 * 700));
+      });
+    }
     this.plenumGasMass = (Math.max(0.3, spec.intake.plenumVolumeL) / 1000) * 1.0;
     this.idleIntegral = this.idleFeedForward;
     this.bypass = this.idleFeedForward;
@@ -292,7 +313,7 @@ export class EngineSimulator {
     this.ecuRpm = spec.calibration.idleRpm;
     this.controls.targetRpm = spec.calibration.idleRpm;
     this.intake.initialise(34_000);
-    this.cylinders.forEach((cyl) => cyl.initialise(mod720(-cyl.fireAngleDeg), 60_000, 420));
+    this.cylinders.forEach((cyl) => cyl.initialise(this.modCycle(-cyl.fireAngleDeg), 60_000, 420));
   }
 
   setControls(c: Partial<EngineControls>): void {
@@ -352,6 +373,11 @@ export class EngineSimulator {
     return (0.11 + 0.05 * this.cylinders.length + 0.004 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
   }
 
+  private modCycle(x: number): number {
+    const r = x % this.cycleDeg;
+    return r < 0 ? r + this.cycleDeg : r;
+  }
+
   get rpm(): number {
     return (this.omega * 60) / TWO_PI;
   }
@@ -394,7 +420,7 @@ export class EngineSimulator {
       this.omega = Math.max(this.running || this.cranking ? 20 : 0, this.omega + ((net + this.starterTorque(rpm)) / J) * dt);
     }
     this.crankDeg += ((this.omega * dt) / TWO_PI) * 360;
-    if (this.crankDeg >= 720) this.crankDeg -= 720;
+    if (this.crankDeg >= this.cycleDeg) this.crankDeg -= this.cycleDeg;
     this.torqueRipple = this.indicatedTorque;
 
     // ---- Duct arrivals
@@ -412,7 +438,7 @@ export class EngineSimulator {
     for (let i = 0; i < cyls.length; i++) {
       const cyl = cyls[i];
       cyl.plenumBurnedFraction = plenumFraction;
-      const alpha = mod720(this.crankDeg - cyl.fireAngleDeg);
+      const alpha = this.modCycle(this.crankDeg - cyl.fireAngleDeg);
       const cmd = this.commandFor(i);
       cyl.step(alpha, this.omega, dt, this.exhaust.primaryPorts[i], this.intake.runnerPorts[i], intakeT, cmd, dilutionGain);
       // Exhaust-valve throat jet: broadband turbulence injected at the port while the jet is fast.
@@ -527,10 +553,13 @@ export class EngineSimulator {
     const pmax = Math.max(this.telemetry.peakPressureBar, 20);
     const fmep = (0.7 + 0.005 * pmax + 0.03 * sp + 0.0016 * sp * sp + 0.3 * Math.exp(-sp / 4)) * 1e5;
     const vd = this.displacementL / 1000;
+    // Crankcase-scavenged two-strokes: no valvetrain, rolling-element main and big-end bearings
+    // (≈ 35 % less mechanical friction than the four-stroke correlation).
+    const cycleFactor = this.spec.twoStroke ? 0.65 : 1;
     // Driven accessories (alternator, water/oil/fuel pumps, steering, A/C idle load) scale with the
     // engine they serve: ~16 N·m on a 6 L V8 at idle, ~3 N·m on a 1 L motorcycle engine.
     const accessory = (2.6 + 0.00035 * rpm) * this.displacementL;
-    return (fmep * vd) / (4 * Math.PI) + accessory;
+    return (cycleFactor * fmep * vd) / (4 * Math.PI) + accessory;
   }
 
   /**
@@ -567,7 +596,7 @@ export class EngineSimulator {
         this.highCamTimer = 0;
       }
     }
-    for (const c of this.cylinders) c.setValveTiming(this.intakeCamAdvance, this.exhaustCamRetard, this.highCam, mod720(this.crankDeg - c.fireAngleDeg));
+    if (!this.spec.twoStroke) for (const c of this.cylinders) c.setValveTiming(this.intakeCamAdvance, this.exhaustCamRetard, this.highCam, this.modCycle(this.crankDeg - c.fireAngleDeg));
     const t = this.telemetry;
     t.intakeCamAdvanceDeg = this.intakeCamAdvance;
     t.exhaustCamRetardDeg = this.exhaustCamRetard;
@@ -636,7 +665,8 @@ export class EngineSimulator {
     }
     // Decel dashpot: on lift-off the idle valve opens, then bleeds back over ~1 s so the engine lands
     // on idle instead of stalling or hanging.
-    if (pedal < 0.03 && this.lastPedal >= 0.03) this.dashpot = Math.min(1, this.idleFeedForward * 2.2);
+    // (Carbureted two-strokes have neither: the slide's idle stop sets the closed-throttle airflow.)
+    if (pedal < 0.03 && this.lastPedal >= 0.03 && !this.spec.twoStroke) this.dashpot = Math.min(1, this.idleFeedForward * 2.2);
     this.dashpot *= Math.exp(-blockSec / 1.2);
     this.sinceLift = pedal < 0.03 ? this.sinceLift + blockSec : 0;
     this.lastPedal = pedal;
@@ -644,8 +674,8 @@ export class EngineSimulator {
     // Decel airflow schedule: above idle with the pedal closed, production ECUs hold the idle valve
     // (or DBW plate) open enough for ~20 kPa MAP (oil control, emissions, smooth tip-in) instead of
     // letting the manifold pull a near-vacuum. Choked feed: area ∝ the engine's swept airflow at 20 kPa.
-    if (pedal < 0.03 && rpm > cal.idleRpm + 300) {
-      const decelAir = 0.8 * (20_000 / (287.05 * 300)) * (this.displacementL / 1000) * (rpm / 120);
+    if (pedal < 0.03 && rpm > cal.idleRpm + 300 && !this.spec.twoStroke) {
+      const decelAir = 0.8 * (20_000 / (287.05 * 300)) * (this.displacementL / 1000) * (rpm / 60) * (360 / this.cycleDeg);
       const decelArea = decelAir / (0.78 * (P_AMBIENT / Math.sqrt(287.05 * 298)) * 0.685);
       const ramp = clamp((rpm - cal.idleRpm - 300) / 600, 0, 1);
       this.bypass = Math.max(this.bypass, ramp * clamp(decelArea / this.intake.bypassMaxArea, 0, 1));
@@ -800,7 +830,7 @@ export class EngineSimulator {
     if (this.dieselIdleFF === 0) {
       // Idle feed-forward from the energy balance: friction and accessories at ≈ 35 % indicated efficiency.
       const idleOmega = (cal.idleRpm / 60) * TWO_PI;
-      const cyclesPerSec = (cal.idleRpm / 120) * this.cylinders.length;
+      const cyclesPerSec = (cal.idleRpm / 60) * (360 / this.cycleDeg) * this.cylinders.length;
       this.dieselIdleFF = (this.frictionTorque(cal.idleRpm) * idleOmega) / (0.35 * this.spec.fuelLhvMjKg * 1e6 * cyclesPerSec);
       this.dieselIdleIntegral = this.dieselIdleFF;
     }
@@ -875,10 +905,7 @@ export class EngineSimulator {
   }
 }
 
-function mod720(x: number): number {
-  const r = x % 720;
-  return r < 0 ? r + 720 : r;
-}
+
 
 function softLimit(x: number): number {
   const ax = Math.abs(x);

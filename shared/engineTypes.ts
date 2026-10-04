@@ -341,6 +341,16 @@ export interface PhysicalOverrides {
   pilotInjection: boolean;
   /** Diesel fuel cetane number (EN 590 ≥ 51, US #2 ≈ 40–45). */
   cetaneNumber: number;
+  /** Two-stroke port timings (degrees ATDC the piston uncovers the port), widths and crankcase. */
+  exhaustPortOpenDeg: number;
+  transferPortOpenDeg: number;
+  exhaustPortWidthRatio: number;
+  transferPortWidthRatio: number;
+  crankcaseCompressionRatio: number;
+  twoStrokeIntake: 'reed' | 'piston-port';
+  scavengeQuality: number;
+  expansionChamber: boolean;
+  expansionChamberTunedRpm: number;
   /** Diesel full-load fuel per cylinder per cycle, mg (pump fuel-plate / calibration limit; default: smoke limit at rated boost). */
   dieselFullLoadFuelMg: number;
   /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */

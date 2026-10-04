@@ -100,8 +100,22 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {slider('rodLengthMm', 'Rod length', spec.rodLengthMm, spec.strokeMm * 1.3, spec.strokeMm * 2.4, 1, ' mm')}
       {slider('inertiaKgM2', 'Rotating inertia', spec.inertiaKgM2, 0.01, 1.5, 0.005, ' kg·m²', 3)}
 
-      {section('Valvetrain')}
-      {select('valvesPerCylinder', 'Valves / cylinder', String(spec.valves.intakeCount + spec.valves.exhaustCount), [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']])}
+      {spec.twoStroke && (<>
+        {section('Two-stroke ports & pipe')}
+        {slider('exhaustPortOpenDeg', 'Exhaust port opens', spec.twoStroke.exhaustPortOpenDeg, 70, 110, 0.5, '° ATDC', 1)}
+        {slider('transferPortOpenDeg', 'Transfer ports open', spec.twoStroke.transferPortOpenDeg, 95, 130, 0.5, '° ATDC', 1)}
+        {slider('exhaustPortWidthRatio', 'Exhaust port width / bore', spec.twoStroke.exhaustPortWidthRatio, 0.4, 0.95, 0.01, '', 2)}
+        {slider('transferPortWidthRatio', 'Transfer width / bore (total)', spec.twoStroke.transferPortWidthRatio, 0.6, 1.6, 0.01, '', 2)}
+        {slider('crankcaseCompressionRatio', 'Crankcase compression', spec.twoStroke.crankcaseCompressionRatio, 1.2, 1.7, 0.01, ':1', 2)}
+        {select('twoStrokeIntake', 'Induction', spec.twoStroke.intake, [['reed', 'Reed valve'], ['piston-port', 'Piston port']])}
+        {slider('scavengeQuality', 'Scavenging (1 = mixing … 2.5 = displacement)', spec.twoStroke.scavengeQuality, 1, 2.5, 0.05, '', 2)}
+        {toggle('expansionChamber', 'Tuned expansion chamber', spec.twoStroke.expansionChamber)}
+        {spec.twoStroke.expansionChamber && slider('expansionChamberTunedRpm', 'Pipe tuned for', spec.twoStroke.tunedRpm, 3000, 16000, 50, ' rpm')}
+      </>)}
+
+      {!spec.twoStroke && section('Valvetrain')}
+      {!spec.twoStroke && select('valvesPerCylinder', 'Valves / cylinder', String(spec.valves.intakeCount + spec.valves.exhaustCount), [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']])}
+      {!spec.twoStroke && (<>
       {slider('intakeDurationDeg', 'Intake duration @ .050"', spec.cam.intakeDurationDeg, 170, 320, 1, '°')}
       {slider('exhaustDurationDeg', 'Exhaust duration @ .050"', spec.cam.exhaustDurationDeg, 170, 320, 1, '°')}
       {slider('intakeCenterlineDeg', 'Intake centreline', spec.cam.intakeCenterlineDeg, 90, 130, 0.5, '° ATDC', 1)}
@@ -118,6 +132,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
         {slider('highCamExhaustDurationDeg', 'High-cam exhaust duration', spec.cam.liftSwitch.exhaustDurationDeg, 180, 320, 1, '°')}
         {slider('highCamIntakeLiftMm', 'High-cam intake lift', spec.cam.liftSwitch.intakeLiftMm, 4, 18, 0.1, ' mm', 1)}
         {slider('highCamExhaustLiftMm', 'High-cam exhaust lift', spec.cam.liftSwitch.exhaustLiftMm, 4, 18, 0.1, ' mm', 1)}
+      </>)}
       </>)}
 
       {section('Induction')}

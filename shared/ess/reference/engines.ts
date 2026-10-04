@@ -317,4 +317,18 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 17 },
     },
   },
+  "yamaha-rd350lc": {
+    name: "Yamaha RD350LC (4L0) two-stroke twin",
+    description: "Liquid-cooled 180° parallel twin, reed-valve induction, tuned expansion chambers",
+    provenance: { geometry: "published", exhaust: "estimated" },
+    published: { peakTorqueNm: [40, 8000], peakPowerKw: [34.6, 8500] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 2, displacement: 0.347, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 9500, cycle: "two-stroke" },
+      advanced: { bore: 64, stroke: 54 },
+      // Yamaha's 6.2:1 is the trapped ratio; ≈ 12.2:1 geometric with the exhaust port at 87° ATDC.
+      physical: { compressionRatio: 12.2, twoStrokeIntake: "reed", idleRpm: 1200 },
+      forcedInduction: { type: "na" },
+    },
+  },
 };

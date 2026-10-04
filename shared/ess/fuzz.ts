@@ -13,6 +13,8 @@ import type { EngineConfiguration } from "../engineTypes";
 export interface FuzzOptions {
   /** Allow the diesel variant draw (default true). */
   diesel?: boolean;
+  /** Allow the two-stroke variant draw (default true). */
+  twoStroke?: boolean;
 }
 
 export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfiguration {
@@ -82,6 +84,22 @@ export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfig
     ph.pilotInjection = rnd() < 0.5;
     if (rnd() < 0.3) ph.cetaneNumber = 40 + rnd() * 15;
   }
+  // Two-stroke variants (drawn last): crankcase-scavenged singles to fours, ≤ 0.5 L per cylinder,
+  // naturally aspirated spark ignition.
+  if (opts.twoStroke !== false && n <= 4 && layout !== "radial" && layout !== "w" && rnd() < 0.15) {
+    config.quick.cycle = "two-stroke";
+    config.quick.fuel = "gasoline";
+    config.quick.aspiration = "na";
+    config.forcedInduction = { type: "na" };
+    config.quick.displacement = Math.round(n * Math.min(perCyl, 0.5) * 100) / 100;
+    config.quick.redline = Math.round(Math.min(14000, Math.max(5000, redline)) / 100) * 100;
+    if (ph.compressionRatio !== undefined) ph.compressionRatio = 9 + rnd() * 6;
+    delete ph.pilotInjection;
+    delete ph.cetaneNumber;
+    ph.twoStrokeIntake = rnd() < 0.8 ? "reed" : "piston-port";
+    ph.expansionChamber = rnd() < 0.85;
+    if (rnd() < 0.3) ph.scavengeQuality = 1 + rnd() * 1.5;
+  }
   config.physical = ph as EngineConfiguration["physical"];
   return config;
 }
@@ -100,7 +118,7 @@ export function runConfig(seed: number, fs = 48000, opts: FuzzOptions = {}): Fuz
   const problems: string[] = [];
   const config = randomConfig(seed, opts);
   const q = config.quick;
-  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""} redline ${q.redline}`;
+  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""}${q.cycle === "two-stroke" ? " two-stroke" : ""} redline ${q.redline}`;
   let idleRpm = 0;
   let wotRpm = 0;
   let cpu = 0;

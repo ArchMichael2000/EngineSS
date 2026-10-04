@@ -32,6 +32,9 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Diesel ignition delay | Hardenberg–Hase `τ[°CA] = (0.36 + 0.22·Sp)·exp(Ea(1/R̃T − 1/17190) + (21.2/(p − 12.4))^0.63)`, `Ea = 618840/(CN + 25)` | Hardenberg & Hase, SAE 790493 | `cylinder.ts` `inject` |
 | Diesel heat release | Double Wiebe: premixed share `β = 1 − 0.926·φ^0.37/τ_ms^0.26` (≈ 0.7 ms spike), mixing-controlled remainder (25–110°) | Watson, Pilley & Marzouk, SAE 800029; Miyamoto et al., SAE 850107 | `cylinder.ts` |
 | Diesel combustion noise | Premixed spike rings the chamber's first circumferential mode, at 6 % of its constant-volume pressure rise (×2 when it burns in < 5°); pilot injection shortens the main delay to 30 % and halves β | Russell & Haworth, SAE 850973 (combustion noise and pressure-rise rate) | `cylinder.ts` `startRinging` |
+| Two-stroke ports | Piston-uncovered exhaust and transfer ports (width × uncovered height, 2 mm corner radius, Cd 0.72); reed valve (one-way, 0.5/0.25 ms petal lag) or piston-port induction into a crankcase pump | Blair, *Design and Simulation of Two-Stroke Engines* (SAE, 1996), ch. 2–3, 6 | `cylinder.ts` `portArea`, `transferFlow`, `stepCrankcase` |
+| Two-stroke scavenging | Outflow burned share 1 − (1 − b)^q (q 1 = perfect mixing, 1.8 loop default); fresh and burned zones keep their own temperatures in the outflow enthalpy; a header-sized slug returns short-circuited charge on backflow (pipe plugging) | Benson & Brandham (1969) mixing model; Blair's two-zone scavenging | `cylinder.ts` |
+| Expansion chamber | Header 0.30·L_t, diffuser 0.40 to a belly 3.1× header, belly 0.12, baffle 0.36 to a stinger 0.62×, stinger 0.30, cones as stepped ducts; L_t = c·(θ_exh − 40°)/(12·N), c ≈ 500 m/s | Blair (1996) ch. 5; Jennings, *Two-Stroke Tuner's Handbook* | `exhaust.ts`, `resolveSpec.ts` |
 | Radiation to listener | Monopole `p = ρQ̇/(4πr)`, ground reflection, shielding filters | Kinsler et al., *Fundamentals of Acoustics* | `observer.ts` |
 
 ### Calibrated constants and their basis
@@ -149,6 +152,8 @@ Brake output after 2.5–3 s at the stated speed, WOT. Run with `scratchpad`-sty
 | Bugatti W16 | 736 kW @ 6000 | 842 | +14 % |
 | SRT Hellcat | 881 N·m @ 4000 | 963 | +9 % |
 | SRT Hellcat | 527 kW @ 6000 | 578 | +10 % |
+| Yamaha RD350LC (two-stroke) | 40 N·m @ 8000 | 39 | −3 % |
+| Yamaha RD350LC (two-stroke) | 34.6 kW @ 8500 | 33 | −5.5 % |
 | VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 330 | −3 % |
 | VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 110 | 0 % |
 | Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 580 | +7 % |
@@ -224,6 +229,17 @@ crank, and checks it. **19 of 19 checks pass.**
 
 Spectrograms of the four events: `docs/figures/forced-induction-events.png`. Steady-state output of
 the boosted reference engines was unchanged by these fixes (within 0.3 %).
+
+### Two-stroke: what it took to make the pipe work
+
+Blair-style defaults (exhaust port at 87° ATDC on the RD350LC) first gave 16 kW at 8500 rpm. Each fix was found by tracing one cycle:
+
+1. **Intake sized for a four-stroke.** A two-stroke inducts every revolution, so throttles are sized for twice the airflow, with a short carb-and-boot runner and no airbox resonator.
+2. **Scavenging energy.** Outflow composition already favoured burned gas, but its enthalpy used the mixed temperature, so the trapped charge stayed too hot and thin. Splitting fresh and burned zones in the outflow added 20–25 % output.
+3. **Pipe timing.** Blair's L_t = c·θ/(12N) returns a wave launched at port opening right at port closing. In the model the blowdown peaks ≈ 25° after opening, so the plug arrived after the port closed and the diffuser's suction landed at closing. Sizing from the actual wave timing, L_t = c·(θ − 40°)/(12N), put the plug before closing: the RD350LC went from 26 to 33 kW at 8500 rpm, and delivery ratio stays ≈ 0.95 through the top end.
+4. **Mechanical friction.** With no valvetrain and rolling-element bearings, two-stroke friction is set to 0.65 × the four-stroke correlation.
+
+Result at 8000 rpm: the pipe adds more than 20 % over a plain exhaust (pinned by a test). Trapping efficiency 0.55 at delivery ratio 0.95. Idle runs on the residual-heavy, misfiring "four-stroking" regime the model produces on its own (residual ≈ 0.5 at idle). Idle air is metered by the slide's idle stop, with no four-stroke decel schedule or dashpot. 24 random two-strokes (singles to fours, reed and piston-port) all pass the fuzz checks.
 
 ### Random configurations and real-time cost
 

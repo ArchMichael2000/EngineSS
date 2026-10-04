@@ -6,7 +6,7 @@
  */
 import { defaultVehicle } from "./vehicle";
 import type { EngineConfiguration } from "../engineTypes";
-import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
+import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, TwoStrokeSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
 import { clamp } from "./gas";
 import { bankLayout } from "./geometry";
 
@@ -44,10 +44,11 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6;
   const aircraftLike = layout === "radial" || (q.redline <= 3200 && perCyl > 1.5);
   const diesel = q.fuel === "diesel";
+  const twoStroke = q.cycle === "two-stroke";
 
   // ---- Bore / stroke
   // Diesels are undersquare (stroke ≈ 1.1–1.2 × bore) for combustion-chamber shape and torque.
-  const defaultRatio = diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
+  const defaultRatio = twoStroke ? 1.0 : diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
   let bore: number;
   let stroke: number;
   if (adv.bore && adv.stroke) {
@@ -67,7 +68,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       stroke = bore / defaultRatio;
     }
   }
-  const rod = ph.rodLengthMm ?? stroke * (motorcycleLike ? 1.75 : 1.62);
+  const rod = ph.rodLengthMm ?? stroke * (twoStroke ? 2.0 : motorcycleLike ? 1.75 : 1.62);
 
   // ---- Crank
   const crankType: EssCrankType = ph.crankType ?? mapCrank(q.crankshaft, layout);
@@ -108,13 +109,15 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
 
   // ---- Intake
   const intakeType = adv.intakeType ?? "single-throttle-body";
-  const runnerLen = adv.intakeRunnerLengthCm ? adv.intakeRunnerLengthCm * 10 : motorcycleLike ? 160 : q.redline > 8000 ? 210 : intakeType === "itbs" || intakeType === "velocity-stacks" ? 260 : 300;
+  // Two-strokes: carburettor + reed boot ≈ 120 mm ahead of the crankcase.
+  const runnerLen = adv.intakeRunnerLengthCm ? adv.intakeRunnerLengthCm * 10 : twoStroke ? 120 : motorcycleLike ? 160 : q.redline > 8000 ? 210 : intakeType === "itbs" || intakeType === "velocity-stacks" ? 260 : 300;
   const intake = {
     type: intakeType,
     plenumVolumeL: ph.plenumVolumeL ?? clamp(displacement * 1.05, 0.8, 12),
-    throttleDiameterMm: ph.throttleDiameterMm ?? clamp(45 * Math.pow(displacement, 0.4), 28, 120),
+    // A two-stroke inducts every revolution: twice a four-stroke's airflow per rpm.
+    throttleDiameterMm: ph.throttleDiameterMm ?? clamp(45 * Math.pow(displacement * (twoStroke ? 2 : 1), 0.4), 28, 120),
     // Manifold runner plus the cylinder-head port (~1.2 × bore) — the length that sets ram tuning.
-    runnerLengthMm: runnerLen + 1.2 * bore,
+    runnerLengthMm: runnerLen + (twoStroke ? 0.8 : 1.2) * bore,
     runnerDiameterMm: ph.runnerDiameterMm ?? inD * Math.sqrt(inCount) * 0.92,
     airboxVolumeL: intakeType === "itbs" || intakeType === "velocity-stacks" ? 0 : intakeType === "carb" ? 1.2 : displacement * 1.2 + 4,
     snorkelLengthMm: intakeType === "carb" ? 60 : 380,
@@ -122,7 +125,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     filter: ph.airFilter ?? (intakeType === "velocity-stacks" ? "none" : intakeType === "itbs" ? "sock" : intakeType === "carb" ? "cone" : "oem-paper"),
     idleBypassAreaMm2: 22 * displacement + 25,
     // OEM airboxes carry a snorkel resonator against low-speed intake boom (firing frequency ≈ 2200 rpm).
-    resonatorHz: ph.intakeResonatorHz ?? ((ph.airFilter ?? "oem-paper") === "oem-paper" && intakeType === "single-throttle-body" ? (n / 2) * (2200 / 60) : 0),
+    resonatorHz: ph.intakeResonatorHz ?? ((ph.airFilter ?? "oem-paper") === "oem-paper" && intakeType === "single-throttle-body" && !twoStroke ? (n / 2) * (2200 / 60) : 0),
     resonatorVolumeL: ph.intakeResonatorVolumeL ?? clamp(0.4 * displacement, 0.4, 3),
   } as EngineSpec["intake"];
 
@@ -162,12 +165,59 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     valve: ph.exhaustValveMode && ph.exhaustValveMode !== "none" ? { openRpm: ph.exhaustValveOpenRpm ?? Math.round(q.redline * 0.45), mode: ph.exhaustValveMode } : null,
   };
 
+  // ---- Two-stroke ports and expansion chamber (Blair, Design and Simulation of Two-Stroke Engines)
+  let twoStrokeSpec: TwoStrokeSpec | null = null;
+  if (twoStroke) {
+    // Port timing and area scale with the mean piston speed at redline, from utility engines
+    // (scooter, moped: ≈ 10 m/s, exhaust ≈ 166°, transfers ≈ 122°) to GP racers (≈ 22 m/s, exhaust
+    // ≈ 200°, transfers ≈ 136°), per Blair's port-timing tables.
+    const pistonSpeed = (2 * (stroke / 1000) * q.redline) / 60;
+    const perf = clamp((pistonSpeed - 10) / 12, 0, 1);
+    const epo = ph.exhaustPortOpenDeg ?? 97 - 17 * perf;
+    const tpo = ph.transferPortOpenDeg ?? 119 - 7 * perf;
+    const tuned = ph.expansionChamberTunedRpm ?? Math.round(q.redline * 0.9);
+    twoStrokeSpec = {
+      exhaustPortOpenDeg: epo,
+      transferPortOpenDeg: Math.max(tpo, epo + 8),
+      exhaustPortWidthRatio: ph.exhaustPortWidthRatio ?? 0.62 + 0.1 * perf,
+      transferPortWidthRatio: ph.transferPortWidthRatio ?? 1.0 + 0.25 * perf,
+      crankcaseCompressionRatio: ph.crankcaseCompressionRatio ?? 1.5 - 0.12 * perf,
+      intake: ph.twoStrokeIntake ?? "reed",
+      intakePortOpenBtdcDeg: 75,
+      scavengeQuality: ph.scavengeQuality ?? 1.8,
+      expansionChamber: ph.expansionChamber ?? true,
+      tunedRpm: tuned,
+    };
+    // Header from the exhaust port's area (port width × its height down to BDC), Blair's 1.05–1.1×.
+    const r = stroke / 2;
+    const l = rod;
+    const a = (epo * Math.PI) / 180;
+    const sOpen = r * (1 - Math.cos(a)) + l - Math.sqrt(l * l - r * r * Math.sin(a) * Math.sin(a));
+    const portArea = twoStrokeSpec.exhaustPortWidthRatio * bore * (stroke - sOpen);
+    const headerD = ph.primaryDiameterMm ?? clamp(1.1 * Math.sqrt((4 * portArea) / Math.PI), 18, 80);
+    // Tuned length port → mid baffle cone from the wave timing: the blowdown pulse peaks ≈ 25° after
+    // the port opens and its baffle reflection must land ≈ 15° before it closes, so the round trip
+    // spans θ_exhaust − 40° at the tuned speed: L_t = c·(θ − 40)/(12·N), c ≈ 500 m/s in the pipe.
+    // (Blair's L_t = c·θ/(12N) with c = 520 m/s is the same rule referenced to port opening.)
+    // The header is ≈ 30 % of L_t.
+    const tunedLengthMm = ((500 * (360 - 2 * epo - 40)) / (12 * tuned)) * 1000;
+    exhaust.primaryDiameterMm = headerD;
+    exhaust.primaryLengthsMm = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : new Array(n).fill(0.3 * tunedLengthMm);
+    exhaust.collector = "none";
+    exhaust.catalyst = ph.catalyst ?? false;
+    exhaust.resonator = false;
+    exhaust.pipeDiameterMm = headerD * 0.62;
+    exhaust.tailpipeDiameterMm = ph.tailpipeDiameterMm ?? headerD * 0.7;
+    exhaust.tailpipeLengthMm = 150;
+    if (!ph.muffler) exhaust.muffler = { type: character === "straight-pipe" ? "none" : "straight-through", bodyDiameterMm: headerD * 2.2, bodyLengthMm: character === "stock" ? 380 : 300, packing: character === "stock" ? 0.85 : character === "sport" ? 0.6 : 0.4 };
+  }
+
   // ---- Forced induction
   const forcedInduction = resolveForcedInduction(config, displacement, q.redline);
 
   // ---- Calibration
   const boosted = forcedInduction.kind !== "na";
-  const idleRpm = ph.idleRpm ?? (diesel ? 760 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
+  const idleRpm = ph.idleRpm ?? (diesel ? 760 : twoStroke ? 1300 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
   const limiterRpm = adv.revLimiterRpm ?? q.redline;
   const afterfireByCharacter = { stock: 0.04, sport: 0.22, race: 0.5, "straight-pipe": 0.75 } as const;
   const calibration: EngineSpec["calibration"] = {
@@ -178,9 +228,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     fuelOctane: ph.fuelOctane ?? 95,
     knockControl: diesel ? false : ph.knockControl ?? true,
     buildTolerance: clamp(ph.buildTolerance ?? 0.5, 0, 1),
-    lambdaWot: diesel ? (boosted ? 1.4 : 1.5) : boosted ? 0.8 : 0.87,
-    lambdaPart: 1,
-    overrunFuelCut: true,
+    lambdaWot: diesel ? (boosted ? 1.4 : 1.5) : twoStroke ? 0.85 : boosted ? 0.8 : 0.87,
+    lambdaPart: twoStroke ? 0.95 : 1,
+    // Carbureted two-strokes keep fuelling on the overrun (the "ring-ding" burble).
+    overrunFuelCut: !twoStroke,
     // Diesels have no spark to light fuel in the exhaust.
     afterfireTendency: diesel ? 0 : ph.afterfireTendency ?? afterfireByCharacter[character],
   };
@@ -199,7 +250,9 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const inertia = ph.inertiaKgM2 ?? (motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
 
   return {
-    name: `${n}-cyl ${layout} ${displacement.toFixed(1)} L${diesel ? " diesel" : ""}`,
+    name: `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
+    cycle: twoStroke ? "two-stroke" : "four-stroke",
+    twoStroke: twoStrokeSpec,
     combustion: diesel ? "diesel" : "spark",
     diesel: dieselSpec,
     layout,
@@ -207,7 +260,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     boreMm: bore,
     strokeMm: stroke,
     rodLengthMm: rod,
-    compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
+    // Two-strokes: geometric ratio (makers quote the ≈ 6–7.5:1 trapped ratio from port closing).
+    compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : twoStroke ? 12 : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
     crank: {

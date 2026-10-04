@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EngineSimulator } from "./engine";
 import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
+import { cycleDegrees } from "./spec";
 import { REFERENCE_ENGINES } from "./reference/engines";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
@@ -45,10 +46,11 @@ describe("firing schedules", () => {
     expect(solveFiringSchedule(specOf("yamaha-cp4")).intervalsDeg.map(Math.round)).toEqual([90, 180, 270, 180]);
   });
 
-  it("every cycle sums to 720°", () => {
+  it("every cycle sums to its cycle length (720° four-stroke, 360° two-stroke)", () => {
     for (const key of Object.keys(REFERENCE_ENGINES)) {
-      const sum = solveFiringSchedule(specOf(key)).intervalsDeg.reduce((a, b) => a + b, 0);
-      expect(sum).toBeCloseTo(720, 3);
+      const spec = specOf(key);
+      const sum = solveFiringSchedule(spec).intervalsDeg.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(cycleDegrees(spec), 3);
     }
   });
 });
@@ -63,6 +65,8 @@ describe("reference engines against published figures", () => {
     ["vw-ea288", "power"],
     ["cummins-6bt", "torque"],
     ["cummins-6bt", "power"],
+    ["yamaha-rd350lc", "torque"],
+    ["yamaha-rd350lc", "power"],
   ];
   for (const [key, kind] of points) {
     it(`${key} peak ${kind}`, () => {
@@ -130,6 +134,19 @@ describe("diesel combustion", () => {
     expect(pilot.delay).toBeLessThan(plain.delay);
     // Pilot injection lowers combustion noise by ≈ 3–10 dB.
     expect(plain.db - pilot.db).toBeGreaterThan(3);
+  }, 60_000);
+});
+
+describe("two-stroke", () => {
+  it("fires every revolution: a parallel twin at 180°", () => {
+    expect(solveFiringSchedule(specOf("yamaha-rd350lc")).intervalsDeg.map(Math.round)).toEqual([180, 180]);
+  });
+
+  it("the tuned expansion chamber lifts output near its tuned speed", () => {
+    const tuned = dyno("yamaha-rd350lc", 8000, 2).telemetry.powerKw;
+    const plain = dyno("yamaha-rd350lc", 8000, 2, (c) => ({ ...c, physical: { ...c.physical, expansionChamber: false } })).telemetry.powerKw;
+    // Blair: a tuned pipe adds tens of percent at its tuned speed over a plain exhaust.
+    expect(tuned / plain).toBeGreaterThan(1.2);
   }, 60_000);
 });
 
@@ -244,7 +261,7 @@ describe("random configurations", () => {
   const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
   for (const [seed, diesel] of cases) {
     it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed, FS, { diesel });
+      const r = runConfig(seed, FS, { diesel, twoStroke: false });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }
