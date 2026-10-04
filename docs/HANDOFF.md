@@ -7,10 +7,11 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | | |
 |---|---|
 | Repository | `ArchMichael2000/EngineSS` |
-| Working branch | `claude/serene-wozniak-vibhtn` (all work below is pushed here) |
-| `main` | Still at the v15-era commit `b1fbc3c`. **Nothing from the v16 rebuild is merged, and no pull request exists.** |
-| Live site | GitHub Pages deploys from `main` via `.github/workflows/pages.yml`, so the public site still runs v15. Merging the branch deploys v16. |
-| Tests | `npx vitest run`: 162 tests pass (≈ 65 s, CPU-heavy) |
+| Working branch | `ccr-96a885ac-rsc0db` (the v16 work from `claude/serene-wozniak-vibhtn`, plus the legacy split and browser testing), merged to `main` |
+| `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
+| Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
+| Tests | `npx vitest run`: 166 tests pass (≈ 100 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
+| Browser | `npm run test:browser -- --url <app>/simulator --stress`: every reference engine, every control and export in Chromium. Results: `docs/browser-verification.md`. |
 | Typecheck and build | `npm run build` (runs `tsc -b`, then `vite build`) |
 | Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 20 1`: 80/80 random configurations pass across seeds 1–80 |
 
@@ -53,7 +54,7 @@ Every sound comes from physics. Nothing is a sampled or synthesised "engine tone
 | `client/src/components/PhysicsPanel.tsx` | Detailed controls: VVT/VTEC, exhaust hardware, diesel injection, two-stroke ports and pipe, rotary ports. |
 | `client/src/components/PlaybackController.tsx` | Free/Dyno/Drive modes, crank and ignition-off, shifting, launch control, brake, gear and speed readouts. |
 
-The legacy v15 procedural model (`shared/engineSoundModel.ts` and related) is still present and selectable through `soundProfile`. The default is `v16`.
+The legacy v0–v15 additive model (`legacy/engineSoundModel.ts`, its worklet, mix and profile switches) is kept in `legacy/` for A/B renders (`scripts/renderBaseline.ts`) and runs its tests with the suite. `shared/legacyIsolation.test.ts` fails on any import of it from `client/`, `shared/` or `server/`. Saved configurations with an old `soundProfile` play on v16.
 
 ### Scripts
 - `scripts/renderForCompare.ts -- <engineKey> <perspective> sweep r0 r1 secs out | idle secs out`: renders a reference engine to WAV plus a speed track. `PATCH='{json}'` deep-merges into the config.
@@ -132,7 +133,7 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
 - **Fuzz seeds:** variant draws (diesel, two-stroke, rotary) happen last, so a seed's base configuration doesn't change when a variant is added. A seed can still become a variant, so tests pin variants off where a specific engine matters (seed 34 is the gasoline 10 L turbo I8 limiter case).
 - **Prefer physical fixes over fudge factors.** Each calibrated constant is listed with its basis in `docs/reference-sources.md` §1, "Calibrated constants". Add new ones there.
 - **Git:**
-  - Develop on `claude/serene-wozniak-vibhtn` and push with `git push -u origin claude/serene-wozniak-vibhtn`.
+  - Develop on the session's designated branch and merge to `main` through a PR (the owner has given standing permission).
   - Do not open a PR unless the owner asks.
   - Commit trailers: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and `Claude-Session: <session link>`.
   - Never put model identifiers in repository content.
@@ -143,12 +144,8 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
 Ordered by priority. Each item says what "done" looks like.
 
 ### A. Ship it
-1. **Browser-test the new UI and worklet.** Changes so far were verified by typecheck, build and unit tests only.
-   - Run `npm run dev` and drive it with Playwright (Chromium is at `/opt/pw-browsers`).
-   - Check the Engine Type selector, the Rotors label, the diesel, two-stroke and rotary panels, Drive mode, start/stop, and that audio plays for every reference engine.
-   - Confirm the worklet's rate tiering works: `performance.now()`/`Date.now()` in `AudioWorkletGlobalScope`, `rate` messages, and the crossfade on step-down.
-   - Done when every reference engine plays without dropouts and every control round-trips.
-2. **Merge to `main`** (owner's decision; ask first). This deploys v16 to GitHub Pages. Check that the Pages build passes.
+1. ~~Browser-test the new UI and worklet.~~ Done; see `docs/browser-verification.md`, including the oddities seen in the captures that are still unexplained.
+2. ~~Merge to `main`.~~ Done; the owner gave standing permission to open and merge PRs to `main`.
 
 ### B. Realism against real audio (the main open goal)
 3. **Recordings for the new families.** The 10 CC0 recordings cover only four-stroke gasoline engines plus a radial.
@@ -192,9 +189,9 @@ Ordered by priority. Each item says what "done" looks like.
 ## 6. Quick start for the next session
 
 ```bash
-git fetch origin claude/serene-wozniak-vibhtn && git checkout claude/serene-wozniak-vibhtn
+git fetch origin main && git checkout main
 npm ci
-npx tsc -b && npx vitest run            # 162 tests
+npx tsc -b && npx vitest run            # 166 tests
 npx vite-node scripts/fuzzConfigs.ts -- 20 1
 npx vite-node scripts/verifyForcedInduction.ts
 npx vite-node scripts/renderForCompare.ts -- mazda-13b-fc exterior-rear sweep 1500 7500 6 /tmp/13b
