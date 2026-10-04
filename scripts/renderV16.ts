@@ -72,9 +72,15 @@ for (const [key, preset] of Object.entries(FACTORY_PRESETS)) {
     const l = new Float32Array(n);
     const r = new Float32Array(n);
     const t0 = performance.now();
-    sim.process(l, r, n);
+    // Mean speed over the render: the instantaneous value carries the firing ripple (±100 rpm at WOT).
+    let rpmSum = 0;
+    const chunk = 16;
+    for (let o = 0; o < n; o += chunk) {
+      sim.process(l, r, Math.min(chunk, n - o), o);
+      rpmSum += sim.rpm * Math.min(chunk, n - o);
+    }
     const cpu = (performance.now() - t0) / 1000 / 2.5;
-    save(`${key}__${label}`, l, r, { preset: key, label, rpm: Math.round(sim.rpm), throttle, cylinders: config.quick.cylinderCount, cpuRealtimeFactor: cpu, path: "v16", telemetry: { ...sim.telemetry } });
+    save(`${key}__${label}`, l, r, { preset: key, label, rpm: Math.round(rpmSum / n), throttle, cylinders: config.quick.cylinderCount, cpuRealtimeFactor: cpu, path: "v16", telemetry: { ...sim.telemetry } });
   }
   // WOT sweep 1000 → redline over 6 s on the dyno, then lift (overrun) for 2 s.
   const sim = new EngineSimulator(spec, SR, { perspective });

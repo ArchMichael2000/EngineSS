@@ -458,6 +458,15 @@ export class EngineSimulator {
     this.sinceLift = pedal < 0.03 ? this.sinceLift + blockSec : 0;
     this.lastPedal = pedal;
     if (pedal < 0.03) this.bypass = Math.max(this.bypass, this.dashpot);
+    // Decel airflow schedule: above idle with the pedal closed, production ECUs hold the idle valve
+    // (or DBW plate) open enough for ~20 kPa MAP (oil control, emissions, smooth tip-in) instead of
+    // letting the manifold pull a near-vacuum. Choked feed: area ∝ the engine's swept airflow at 20 kPa.
+    if (pedal < 0.03 && rpm > cal.idleRpm + 300) {
+      const decelAir = 0.8 * (20_000 / (287.05 * 300)) * (this.displacementL / 1000) * (rpm / 120);
+      const decelArea = decelAir / (0.78 * (P_AMBIENT / Math.sqrt(287.05 * 298)) * 0.685);
+      const ramp = clamp((rpm - cal.idleRpm - 300) / 600, 0, 1);
+      this.bypass = Math.max(this.bypass, ramp * clamp(decelArea / this.intake.bypassMaxArea, 0, 1));
+    }
     // Idle valve / electronic throttle actuator: ~60 ms first-order response to the command.
     this.bypassActual += (this.bypass - this.bypassActual) * (1 - Math.exp(-blockSec / 0.06));
 

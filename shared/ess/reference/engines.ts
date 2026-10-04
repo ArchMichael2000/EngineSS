@@ -223,7 +223,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       quick: { layout: "v", cylinderCount: 6, displacement: 3.8, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 7100 },
       advanced: { bore: 95.5, stroke: 88.4, bankAngle: 60 },
       physical: { compressionRatio: 9.0, turboCount: 2 },
-      forcedInduction: { type: "turbo", turboSize: "balanced", maxBoost: 11, wastegateEnabled: true, bovEnabled: true },
+      forcedInduction: { type: "turbo", turboSize: "balanced", maxBoost: 10, wastegateEnabled: true, bovEnabled: true },
     },
   },
   "hellcat-6-2": {
@@ -273,7 +273,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       quick: { layout: "w", cylinderCount: 16, displacement: 7.99, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 6700 },
       advanced: { bore: 86, stroke: 86, bankAngle: 90 },
       physical: { compressionRatio: 9.0, vrAngleDeg: 15, turboCount: 4 },
-      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 13, wastegateEnabled: true, bovEnabled: true },
+      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 11.5, wastegateEnabled: true, bovEnabled: true },
     },
   },
   "vw-vr6": {

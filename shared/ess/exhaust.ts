@@ -269,11 +269,12 @@ export class ExhaustNetwork {
   }
 
   /** Series element joined through a mean-flow resistance. */
-  private resistive(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; name: string }, k: number, distanceM: number, group: number): Port {
+  private resistive(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; name: string }, k: number, distanceM: number, group: number, laminar?: ResistiveJoint["laminar"]): Port {
     // Short adaptor so the resistance sits between two ducts.
     const duct = this.addDuct(opts, distanceM, group);
     if (from.end !== "b") throw new Error("resistive element expects a downstream end");
     const joint = new ResistiveJoint(from.duct, duct, k);
+    if (laminar) joint.laminar = laminar;
     this.joints.push(joint);
     this.solvers.push(() => joint.solve());
     return { duct, end: "b" };
@@ -282,8 +283,10 @@ export class ExhaustNetwork {
   private element(from: Port, kind: "catalyst" | "resonator" | "muffler", pipeD: number, distance: number, group: number): Port {
     const ex = this.spec.exhaust;
     if (kind === "catalyst") {
-      // Monolith in an expanded shell: area change + channel resistance + broadband absorption.
-      const shell = this.resistive(from, { lengthM: 0.3, diameterM: pipeD * 1.85, absorption: 6, name: `cat${group}` }, 1.4, distance, group);
+      // Monolith in an expanded shell: area change, entry/exit losses, and the laminar resistance of
+      // ~400 cpsi channels (d_h ≈ 1.1 mm, 75 % open, 0.15 m brick), which damps standing waves
+      // between manifold and converter; visco-thermal absorption in the channels adds broadband loss.
+      const shell = this.resistive(from, { lengthM: 0.3, diameterM: pipeD * 1.85, absorption: 25, name: `cat${group}` }, 1.4, distance, group, { lengthM: 0.15, hydraulicDiameterM: 1.1e-3, openArea: 0.75 });
       return this.extend(shell, { lengthM: 0.15, diameterM: pipeD, name: `cat-out${group}` }, distance + 0.38, group);
     }
     if (kind === "resonator") {

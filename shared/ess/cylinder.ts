@@ -8,7 +8,7 @@
  * pressure and volume velocity its valve flows impose on the ducts.
  */
 import type { CamSpec } from "./spec";
-import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, R_AIR, Rng, clamp, lerpTable, orificeMassFlow } from "./gas";
+import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, lerpTable, orificeMassFlow, waveExponents } from "./gas";
 import type { Port } from "./waveguide";
 import { arriving } from "./waveguide";
 
@@ -116,17 +116,27 @@ export class Cylinder {
   private hWoschni = 0;
   private heatTick = 0;
   // Valve-solve scratch state (no closures in the audio loop)
-  private vsPin = 0;
-  private vsZ = 0;
-  private vsRho = 0;
+  private vsXi = 1;
+  private vsB = 1;
+  private vsN = 5;
+  private vsInvK = 7;
+  private vsK = 0;
+  private vsOut = 0;
+  private vsPm = P_AMBIENT;
+  private vsDcOut = 0;
+  private vsMeanFlow = 0;
+  private vsPowN: PowTable = waveExponents(GAMMA_GAS).n;
+  private vsPowInvK: PowTable = waveExponents(GAMMA_GAS).invK;
   private vsT = 0;
   private vsCdA = 0;
   private vsM0 = 0;
   private vsU0 = 0;
   private vsT0 = 0;
   private vsDt = 0;
-  private prevExhaustOut = 0;
-  private prevIntakeOut = 0;
+  private prevExhaustD = 0;
+  private prevIntakeD = 0;
+  private prevExhaustD2 = 0;
+  private prevIntakeD2 = 0;
 
   // Thermodynamic state
   mass = 0;
@@ -348,7 +358,8 @@ export class Cylinder {
       this.exhaustWasOpen = true;
     } else {
       this.exhaustCdA = 0;
-      this.prevExhaustOut = 0;
+      this.prevExhaustD = 0;
+      this.prevExhaustD2 = 0;
       this.exhaustSend = arriving(exhaustPort); // closed valve: rigid end
       if (this.exhaustWasOpen) this.exhaustClosed = true;
       this.exhaustWasOpen = false;
@@ -363,7 +374,8 @@ export class Cylinder {
       this.intakeWasOpen = true;
     } else {
       this.intakeSend = arriving(intakePort);
-      this.prevIntakeOut = 0;
+      this.prevIntakeD = 0;
+      this.prevIntakeD2 = 0;
       if (this.intakeWasOpen) {
         this.intakeClosed = true;
         this.lastTrappedAir = this.massAir;
@@ -475,21 +487,39 @@ export class Cylinder {
   }
 
   /**
-   * Implicit valve flow against a duct end. `out` is mass flow leaving the cylinder through
-   * this valve (kg/s). For either valve the port pressure is p = 2·p_in + Z·out/ρ: at the
-   * exhaust (duct end a) outflow travels +x into the duct; at the intake (runner end b)
-   * outflow is reversion travelling −x, which enters the end-b relation p = 2p_in − Z·q₊ₓ
-   * with q₊ₓ = −out/ρ. Returns the signed flow and stores the outgoing duct wave.
+   * Implicit valve flow against a duct end, with finite-amplitude wave superposition (Benson /
+   * Blair) for the pulsating part of the waves: each carries a pressure amplitude ratio
+   * X = (p/p_m)^k, k = (γ−1)/2γ, referred to the duct's own mean state (p_m, c). The slow (DC)
+   * parts stay linear, so the mean flow and mean pressure agree with the linear junctions. At the port the incident
+   * and outgoing waves superpose as X_s = X_i + X_r − 1, so p = p_ref·X_s^(1/k), particle velocity
+   * into the duct u = (2c/(γ−1))·(X_r − X_i) and ρ = ρ_ref·X_s^(2/(γ−1)). Suction saturates
+   * (pressure can't pass zero) and compression steepens, as in a real port; for small amplitudes
+   * it reduces to the linear relation p = 2p_in + (c/A)·ṁ used by the junctions. The secant's
+   * unknown is D = X_r − X_i; `out` (mass flow leaving the cylinder into the duct) follows from it.
    */
   private solveValve(cdA: number, port: Port, isExhaust: boolean, dt: number, intakeTempK: number, combustion?: CombustionCommand): number {
     const duct = port.duct;
     const pin = arriving(port);
-    const Z = duct.Z;
-    const rho = duct.rho;
     const Tduct = isExhaust ? duct.temperatureK : intakeTempK;
-    this.vsPin = pin;
-    this.vsZ = Z;
-    this.vsRho = rho;
+    const gam = duct.gamma;
+    const k = (gam - 1) / (2 * gam);
+    const n = 2 / (gam - 1);
+    const dcIn = duct.dcArriving(port.end);
+    const dcOut = duct.dcLeaving(port.end);
+    const pm = Math.max(0.05 * P_AMBIENT, P_AMBIENT + dcIn + dcOut);
+    const tables = waveExponents(gam);
+    this.vsPowN = tables.n;
+    this.vsPowInvK = tables.invK;
+    const xi = tables.k.at(1 + (pin - dcIn) / pm);
+    this.vsPm = pm;
+    this.vsDcOut = dcOut;
+    this.vsXi = xi;
+    this.vsB = 2 * xi - 1;
+    this.vsN = n;
+    this.vsInvK = 1 / k;
+    // ρ_m·A·u-scale: ρ_m = γ·p_m/c², u = n·c·D; plus the linear mean flow of the DC waves.
+    this.vsK = ((gam * pm) / (duct.c * duct.c)) * duct.area * n * duct.c;
+    this.vsMeanFlow = (duct.area / duct.c) * (dcOut - dcIn);
     this.vsT = Tduct;
     this.vsCdA = cdA;
     this.vsM0 = this.mass;
@@ -498,41 +528,51 @@ export class Cylinder {
     this.vsDt = dt;
     // Warm start from the previous sample (flows are smooth), secant refinement; fall back to a
     // bracketed Illinois solve between 0 and the explicit estimate if the secant misbehaves.
-    let x0 = isExhaust ? this.prevExhaustOut : this.prevIntakeOut;
+    // Linear predictor from the last two samples' solutions.
+    const dPrev = isExhaust ? this.prevExhaustD : this.prevIntakeD;
+    const dPrev2 = isExhaust ? this.prevExhaustD2 : this.prevIntakeD2;
+    let x0 = 2 * dPrev - dPrev2;
     let g0 = this.valveResidual(x0);
-    let x1 = x0 - g0;
+    let x1 = x0 - g0 / this.dOutdD(x0);
     let g1 = this.valveResidual(x1);
-    let out = x1;
+    let d = x1;
     let converged = false;
     for (let it = 0; it < 6; it++) {
-      if (Math.abs(g1) < 1e-10 + 1e-7 * Math.abs(x1)) { converged = true; out = x1; break; }
+      if (Math.abs(g1) < 1e-9 + 1e-6 * Math.abs(this.vsOut)) { converged = true; d = x1; break; }
       const denom = g1 - g0;
       if (denom === 0) break;
       const x2 = x1 - (g1 * (x1 - x0)) / denom;
       x0 = x1; g0 = g1;
       x1 = x2; g1 = this.valveResidual(x1);
-      out = x1;
+      d = x1;
     }
-    if (!converged && !(Math.abs(g1) < 1e-8 + 1e-5 * Math.abs(x1))) {
+    if (!converged && !(Math.abs(g1) < 1e-8 + 1e-5 * Math.abs(this.vsOut))) {
       let a = 0;
       let fa = this.valveResidual(0);
-      out = 0;
+      d = 0;
       if (fa !== 0) {
-        let b = -fa;
+        let b = -fa / this.dOutdD(0);
         let fb = this.valveResidual(b);
-        out = b;
+        d = b;
         if (Math.sign(fa) !== Math.sign(fb)) {
           for (let it = 0; it < 30; it++) {
-            out = fb !== fa ? b - (fb * (b - a)) / (fb - fa) : 0.5 * (a + b);
-            const fo = this.valveResidual(out);
-            if (Math.abs(fo) < 1e-10 + 1e-7 * Math.abs(out)) break;
-            if (Math.sign(fo) === Math.sign(fb)) { b = out; fb = fo; fa *= 0.5; } else { a = out; fa = fo; fb *= 0.5; }
+            d = fb !== fa ? b - (fb * (b - a)) / (fb - fa) : 0.5 * (a + b);
+            const fo = this.valveResidual(d);
+            if (Math.abs(fo) < 1e-10 + 1e-7 * Math.abs(this.vsOut)) break;
+            if (Math.sign(fo) === Math.sign(fb)) { b = d; fb = fo; fa *= 0.5; } else { a = d; fa = fo; fb *= 0.5; }
           }
         }
       }
     }
-    if (isExhaust) this.prevExhaustOut = out;
-    else this.prevIntakeOut = out;
+    this.valveResidual(d);
+    const out = this.vsOut;
+    if (isExhaust) {
+      this.prevExhaustD2 = this.prevExhaustD;
+      this.prevExhaustD = d;
+    } else {
+      this.prevIntakeD2 = this.prevIntakeD;
+      this.prevIntakeD = d;
+    }
 
     // Apply the flow to the cylinder contents.
     const dm = out * dt;
@@ -579,14 +619,28 @@ export class Cylinder {
     this.mass = Math.max(1e-9, this.mass);
     this.updateState();
 
-    const pPort = 2 * pin + (Z * out) / rho;
-    if (isExhaust) this.exhaustSend = pPort - pin;
-    else this.intakeSend = pPort - pin;
+    // Outgoing wave as its own gauge amplitude: p_ref·(X_r^(1/k) − 1).
+    const send = this.vsDcOut + this.vsPm * (this.vsPowInvK.at(this.vsXi + d) - 1);
+    if (isExhaust) this.exhaustSend = send;
+    else this.intakeSend = send;
     return isExhaust ? out : -out;
   }
 
-  /** g(out) = out − F(p_cyl(out), p_port(out)); monotone increasing in out. */
-  private valveResidual(out: number): number {
+  /** dṁ/dD at D (for scaling secant starts). */
+  private dOutdD(d: number): number {
+    const xs = Math.max(0.05, this.vsB + d);
+    const xn = this.vsPowN.at(xs);
+    return Math.max(1e-9, this.vsK * (xn + (this.vsN * d * xn) / xs));
+  }
+
+  /**
+   * g(D) = ṁ_wave(D) − F(p_cyl(ṁ), p_port(D)); monotone increasing in D. Sets vsOut = ṁ_wave.
+   */
+  private valveResidual(d: number): number {
+    const xs = Math.max(0.05, this.vsB + d);
+    const out = this.vsMeanFlow + this.vsK * d * this.vsPowN.at(xs);
+    this.vsOut = out;
+    const pPort = this.vsPm * this.vsPowInvK.at(xs);
     const dm = out * this.vsDt;
     const m0 = this.vsM0;
     const m = Math.max(m0 * 0.02, m0 - dm);
@@ -594,7 +648,6 @@ export class Cylinder {
     const Uc = Math.max(U, m * CV_GAS * 200);
     const pc = ((GAMMA_GAS - 1) * Uc) / this.volume;
     const tc = Uc / (m * CV_GAS);
-    const pPort = P_AMBIENT + 2 * this.vsPin + (this.vsZ * out) / this.vsRho;
     return out - orificeMassFlow(this.vsCdA, pc, tc, pPort, this.vsT);
   }
 }

@@ -96,6 +96,7 @@ presets = sorted({m["preset"] for m in meta["renders"].values()})
 print(f"{'preset':16} {'state':14} {'rms':>6} {'lock%':>6} {'fire%':>6} {'sub%':>6} {'cent':>6} {'flat':>7} {'cpuRT':>6}  top orders")
 for p in presets:
     for lab in ["idle", "cruise3000", "wot3000", "wot60", "wot90", "overrun60", "offline_wot60"]:
+        if f"{p}__{lab}" not in report: continue
         r = report[f"{p}__{lab}"]
         print(f"{p:16} {lab:14} {r['rms_dbfs']:6} {r['order_locked_pct']:6} {r['firing_family_pct']:6} {r['sub_firing_pct']:6} {r['centroid_hz']:6} {r['flatness']:7} {r.get('cpuRealtimeFactor', 0):6.2f}  {r['top_engine_orders']}")
     s = report[f"{p}__sweep"]

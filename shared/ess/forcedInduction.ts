@@ -53,7 +53,7 @@ const BLOWER_POSITION = { x: 0, y: 1.5, z: 0.85 };
 /**
  * Centrifugal compressor stage. Speed line in non-dimensional form, ψ = Δp/(ρ1U²) against
  * φ = ṁ/(ρ1·U·D²) (tip speed U, wheel diameter D): positive slope left of the peak (the
- * Greitzer-unstable region where surge lives), parabolic fall to choke, steep negative branch
+ * Greitzer-unstable region where surge lives), parabolic fall to choke, rising backflow branch
  * for reversed flow. Duct inertia L/A integrates the flow, so surge emerges dynamically.
  */
 class Compressor {
@@ -67,9 +67,9 @@ class Compressor {
   private readonly inertance: number;
   private readonly psiMax = 0.56;
   private readonly psiShutoff = 0.42;
-  // Exducer-based flow coefficient of modern automotive stages: surge-side peak ≈ 0.05,
-  // peak efficiency ≈ 0.09, choke ≈ 0.165.
-  private readonly phiPeak = 0.05;
+  // Exducer-based flow coefficient of modern (ported-shroud) automotive stages: surge-side peak
+  // ≈ 0.04, peak efficiency ≈ 0.09, choke ≈ 0.165.
+  private readonly phiPeak = 0.04;
   private readonly phiChoke = 0.165;
   private readonly phiDesign = 0.09;
 
@@ -87,7 +87,9 @@ class Compressor {
   characteristic(massFlow: number, tipSpeed: number, rho1: number): number {
     const phi = this.phi(massFlow, tipSpeed, rho1);
     let psi: number;
-    if (phi < 0) psi = this.psiShutoff + 6 * phi;
+    // Backflow branch rises with |φ| (Greitzer): driving air backwards through the spinning wheel
+    // takes more than shut-off head, so a surge cycle's reversed flow decelerates and recovers.
+    if (phi < 0) psi = this.psiShutoff + 25 * phi * phi;
     else if (phi < this.phiPeak) {
       const u = (this.phiPeak - phi) / this.phiPeak;
       psi = this.psiMax - (this.psiMax - this.psiShutoff) * u * u;
@@ -95,7 +97,7 @@ class Compressor {
       const u = (phi - this.phiPeak) / (this.phiChoke - this.phiPeak);
       psi = this.psiMax * (1 - u * u);
     }
-    return rho1 * tipSpeed * tipSpeed * Math.max(-0.6, psi);
+    return rho1 * tipSpeed * tipSpeed * psi;
   }
 
   step(dt: number, tipSpeed: number, p1: number, t1: number, p2: number): void {
@@ -278,7 +280,10 @@ class Turbocharger implements ForcedInductionModel {
     // Wastegate: PI on boost, pressure-referenced (spring + duty).
     const err = (this.charge.pressure - this.targetPa) / this.targetPa;
     this.wastegateIntegral = clamp(this.wastegateIntegral + err * 6 * blockSeconds, 0, 1);
-    const duty = this.t.wastegate ? clamp(this.wastegateIntegral + err * 8, 0, 1) : 0;
+    // Turbo-speed protection: the wastegate also opens as the shaft nears its tip-speed limit, so a
+    // compressor that can't quite reach target boost doesn't drive turbine inlet pressure away.
+    const overspeed = clamp((this.omega / this.maxOmega - 0.94) / 0.06, 0, 1);
+    const duty = this.t.wastegate ? clamp(Math.max(this.wastegateIntegral + err * 8, overspeed), 0, 1) : 0;
     for (const s of this.exhaust.turbines) s.wastegate = duty;
     let tIn = 0;
     for (const s of this.exhaust.turbines) tIn = Math.max(tIn, s.inletK);

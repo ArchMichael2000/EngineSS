@@ -275,8 +275,10 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
       turbineBlades: 11,
       // Total turbine nozzle area sized so the exhaust energy at the full-boost speed drives the
       // compressor: an energy balance (η_t 0.68, T3 ≈ 1100 K, PR_t ≈ 0.75·PR_c) gives ≈ 0.126 mm² per
-      // litre·rpm. Small housings reach full boost near 0.28 × redline, large ones near 0.52.
-      turbineAreaMm2: 0.126 * displacement * redline * (size === "small" ? 0.28 : size === "large" ? 0.52 : 0.38),
+      // litre·rpm, evaluated at the boost threshold, which sits ~20 % below the speed where full
+      // boost is held (the low-boost equilibrium is stable until exhaust flow can bootstrap the
+      // shaft). Small housings hold full boost near 0.28 × redline, large ones near 0.55.
+      turbineAreaMm2: 0.126 * displacement * redline * (size === "small" ? 0.22 : size === "large" ? 0.45 : 0.32),
       rotorInertiaKgM2: 2.6e-5 * Math.pow(wheel / 50, 5) * count,
       targetBoostKpa: (fi.maxBoost ?? 15) * 6.895,
       wastegate: fi.wastegateEnabled ?? true,

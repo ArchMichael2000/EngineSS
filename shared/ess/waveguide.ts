@@ -194,6 +194,16 @@ export class Duct {
     return this.dcA + this.dcB;
   }
 
+  /** Slow (DC) part of the wave arriving at `end`, Pa. */
+  dcArriving(end: "a" | "b"): number {
+    return end === "a" ? this.dcA : this.dcB;
+  }
+
+  /** Slow (DC) part of the wave leaving `end` into the duct, Pa. */
+  dcLeaving(end: "a" | "b"): number {
+    return end === "a" ? this.dcB : this.dcA;
+  }
+
   /** Characteristic impedance ρc/A. */
   get Z(): number {
     return 1 / this.Y;
@@ -447,6 +457,12 @@ export class ResistiveJoint {
   /** Mass flow through the joint this sample, kg/s. */
   massFlow = 0;
   meanVelocity = 0;
+  /**
+   * Optional laminar (Poiseuille) resistance of a capillary element such as a catalyst monolith:
+   * Δp = r·U with r = 32μL/(d_h²·OFA), Pa·s/m referred to the downstream duct's velocity. Linear in
+   * velocity, so it damps acoustic waves at any amplitude.
+   */
+  laminar: { lengthM: number; hydraulicDiameterM: number; openArea: number } | null = null;
   constructor(readonly up: Duct, readonly down: Duct, public lossCoefficient: number) {}
 
   solve(): void {
@@ -466,6 +482,13 @@ export class ResistiveJoint {
     const area = Math.min(this.up.area, this.down.area);
     this.meanVelocity = Math.abs(meanMassFlow) / (Math.max(0.05, this.down.rho) * area);
     this.R = (this.lossCoefficient * (this.meanVelocity + 2)) / (2 * area);
+    if (this.laminar) {
+      // Sutherland-type viscosity of hot gas: μ ≈ 3.3e-5·(T/700)^0.7 Pa·s.
+      const mu = 3.3e-5 * Math.pow(Math.max(250, this.down.temperatureK) / 700, 0.7);
+      const l = this.laminar;
+      const rVel = (32 * mu * l.lengthM) / (l.hydraulicDiameterM * l.hydraulicDiameterM * l.openArea);
+      this.R += rVel / (Math.max(0.05, this.down.rho) * this.down.area);
+    }
   }
 }
 

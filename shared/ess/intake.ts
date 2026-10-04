@@ -97,6 +97,11 @@ export class IntakeSystem {
   }
 
   /** Geometric throttle plate open area for pedal 0..1 (butterfly: A = A0·(1 − cos φ / cos φ0)). */
+  /** Full idle-air bypass area, m². */
+  get bypassMaxArea(): number {
+    return this.bypassMax;
+  }
+
   throttleArea(throttle: number, bypass: number): number {
     return this.plateArea(throttle, this.throttleDiameter) + this.bypassMax * clamp(bypass, 0, 1) + 2e-6;
   }

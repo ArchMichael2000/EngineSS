@@ -159,3 +159,34 @@ export function lerpTable(table: ReadonlyArray<readonly [number, number]>, x: nu
   }
   return table[table.length - 1][1];
 }
+
+/**
+ * x^e by linear interpolation over [lo, hi] (no pow() in the audio loop). Clamped to the range;
+ * with 4096 intervals over the wave-amplitude range the relative error stays below 1e-5.
+ */
+export class PowTable {
+  private readonly table: Float64Array;
+  private readonly scale: number;
+  constructor(readonly exponent: number, private readonly lo: number, private readonly hi: number, intervals = 4096) {
+    this.table = new Float64Array(intervals + 2);
+    this.scale = intervals / (hi - lo);
+    for (let i = 0; i <= intervals + 1; i++) this.table[i] = Math.pow(lo + i / this.scale, exponent);
+  }
+  at(x: number): number {
+    const u = ((x < this.lo ? this.lo : x > this.hi ? this.hi : x) - this.lo) * this.scale;
+    const i = u | 0;
+    return this.table[i] + (this.table[i + 1] - this.table[i]) * (u - i);
+  }
+}
+
+const waveTables = new Map<number, { k: PowTable; invK: PowTable; n: PowTable }>();
+/** Exponent tables for finite-amplitude waves in a gas of ratio of specific heats γ. */
+export function waveExponents(gamma: number): { k: PowTable; invK: PowTable; n: PowTable } {
+  let t = waveTables.get(gamma);
+  if (!t) {
+    const k = (gamma - 1) / (2 * gamma);
+    t = { k: new PowTable(k, 0.02, 12), invK: new PowTable(1 / k, 0.02, 1.6), n: new PowTable(2 / (gamma - 1), 0.02, 1.6) };
+    waveTables.set(gamma, t);
+  }
+  return t;
+}
