@@ -67,5 +67,5 @@ describe("essProcessor rate tiering", () => {
     const tele = messages.filter((m) => m.type === "telemetry").at(-1) as { audio: { tier: number; internalRate: number } };
     expect(tele.audio.tier).toBe(2);
     expect(tele.audio.internalRate).toBe(32000);
-  });
+  }, 60_000); // about 3 s alone; much longer on a shared CI runner
 });
