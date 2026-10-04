@@ -4,10 +4,15 @@
  *
  *   npx vite-node scripts/renderForCompare.ts -- <engineKey> <perspective> sweep <rpm0> <rpm1> <seconds> <out-prefix>
  *   npx vite-node scripts/renderForCompare.ts -- <engineKey> <perspective> idle <seconds> <out-prefix>
+ *   npx vite-node scripts/renderForCompare.ts -- <engineKey> <perspective> replay <track.json> <out-prefix>
+ *
+ * replay follows a recording's tracked speed ({t, rpm}, e.g. the rpm_track of compareRecording.py
+ * analyse output) on the dyno, with the throttle open while the speed rises and closed while it
+ * falls: free revs and pulls are reproduced at the recording's own speed history.
  *
  * Writes <out-prefix>.wav and <out-prefix>.track.json ({t, rpm}). PATCH='{json}' deep-merges into the config.
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { EngineSimulator } from "../shared/ess/engine";
 import { resolveEngineSpec } from "../shared/ess/resolveSpec";
 import { REFERENCE_ENGINES } from "../shared/ess/reference/engines";
@@ -26,8 +31,9 @@ function merge(base: any, patch: any): any {
 const config = merge(REFERENCE_ENGINES[key].config, process.env.PATCH ? JSON.parse(process.env.PATCH) : {});
 const spec = resolveEngineSpec({ ...config, seed: 11 });
 const sim = new EngineSimulator(spec, SR, { perspective: perspective as Perspective });
+const replay = mode === "replay" ? (JSON.parse(readFileSync(args[3], "utf8")).rpm_track ?? JSON.parse(readFileSync(args[3], "utf8"))) as { t: number[]; rpm: number[] } : null;
 const out = mode === "sweep" ? args[6] : args[4];
-const seconds = Number(mode === "sweep" ? args[5] : args[3]);
+const seconds = replay ? replay.t[replay.t.length - 1] + 0.3 : Number(mode === "sweep" ? args[5] : args[3]);
 const n = Math.round(seconds * SR);
 const L = new Float32Array(n);
 const R = new Float32Array(n);
@@ -43,6 +49,26 @@ if (mode === "sweep") {
     sim.setControls({ targetRpm: r0 + (r1 - r0) * (o / n) });
     sim.process(L, R, Math.min(chunk, n - o), o);
     t.push(o / SR);
+    rpm.push(sim.rpm);
+  }
+} else if (replay) {
+  const at = (time: number): number => {
+    const { t: tt, rpm: rr } = replay;
+    if (time <= tt[0]) return rr[0];
+    for (let i = 1; i < tt.length; i++) if (time <= tt[i]) return rr[i - 1] + ((rr[i] - rr[i - 1]) * (time - tt[i - 1])) / (tt[i] - tt[i - 1]);
+    return rr[rr.length - 1];
+  };
+  sim.setControls({ mode: "dyno", targetRpm: at(0), throttle: 0.1 });
+  sim.prewarm(2);
+  for (let o = 0; o < n; o += chunk) {
+    const time = o / SR;
+    // Speed rising: pedal open (a free rev in neutral is near full throttle); falling: closed.
+    const slope = (at(time + 0.08) - at(time - 0.08)) / 0.16;
+    // REPLAY_THROTTLE pins the pedal (a loaded dyno pull is full throttle whatever the sweep rate).
+    const pedal = process.env.REPLAY_THROTTLE ? Number(process.env.REPLAY_THROTTLE) : Math.max(0, Math.min(1, 0.08 + slope / 1500));
+    sim.setControls({ targetRpm: at(time), throttle: pedal });
+    sim.process(L, R, Math.min(chunk, n - o), o);
+    t.push(time);
     rpm.push(sim.rpm);
   }
 } else {

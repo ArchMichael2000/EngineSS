@@ -244,6 +244,8 @@ export interface PhysicalOverrides {
   rotaryExhaustCloseDeg: number;
   /** Diesel full-load fuel per cylinder per cycle, mg (pump fuel-plate / calibration limit; default: smoke limit at rated boost). */
   dieselFullLoadFuelMg: number;
+  /** Per-injector delivery offset (1σ, mg per stroke) left after calibration. */
+  dieselInjectorSpreadMg: number;
   /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */
   buildTolerance: number;
   /** Intake snorkel Helmholtz resonator tuned frequency (Hz, 0 = none) and cavity volume (L). */
@@ -258,6 +260,8 @@ export interface PhysicalOverrides {
   exhaustValveOpenRpm: number;
   exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
   turboCount: number;
+  /** Variable-geometry turbine (default: boosted common-rail diesels). */
+  turboVgt: boolean;
   compressorWheelMm: number;
   superchargerDisplacementL: number;
   superchargerDriveRatio: number;

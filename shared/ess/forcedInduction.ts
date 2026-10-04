@@ -163,6 +163,8 @@ class Turbocharger implements ForcedInductionModel {
   private readonly bovNoise: BandNoise;
   private readonly wgNoise: BandNoise;
   private wastegateIntegral = 0;
+  /** VGT vane controller state: open fraction 0 (closed, minimum nozzle) … 1 (full open). */
+  private vaneIntegral = 0;
   private prevChargePa = P_AMBIENT;
   private boostRate = 0;
   private bovOpen = 0;
@@ -304,6 +306,14 @@ class Turbocharger implements ForcedInductionModel {
     const overspeed = clamp((this.omega / this.maxOmega - 0.94) / 0.06, 0, 1);
     const duty = this.t.wastegate ? clamp(Math.max(this.wastegateIntegral + Math.max(err, predicted) * 8, overspeed), 0, 1) : 0;
     for (const s of this.exhaust.turbines) s.wastegate = duty;
+    if (this.t.vgt) {
+      // Same PI and anticipation as the wastegate, acting on the vanes: below target they close
+      // (smaller nozzle, more turbine work), at target they open; shaft overspeed opens them.
+      this.vaneIntegral = clamp(this.vaneIntegral + err * 6 * blockSeconds, 0, 1);
+      const open = clamp(Math.max(this.vaneIntegral + Math.max(err, predicted) * 8, overspeed), 0, 1);
+      const factor = this.t.vgtMinArea + (1 - this.t.vgtMinArea) * open;
+      for (const s of this.exhaust.turbines) s.areaFactor = factor;
+    }
     let tIn = 0;
     for (const s of this.exhaust.turbines) tIn = Math.max(tIn, s.inletK);
     this.turbineInletK = undefined;

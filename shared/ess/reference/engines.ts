@@ -292,7 +292,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-ea288": {
     name: "VW EA288 2.0 TDI (110 kW)",
-    description: "Common-rail inline-4 diesel with pilot injection, VGT-style small turbo",
+    description: "Common-rail inline-4 diesel with pilot injection and a variable-geometry turbo",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [340, 2000], peakPowerKw: [110, 3750] },
     config: {
@@ -315,6 +315,85 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       // Fuel plate from the published BMEP (11.6 bar at η_b ≈ 0.40): ≈ 66 mg per stroke.
       physical: { compressionRatio: 17.5, valvesPerCylinder: 2, pilotInjection: false, injectionAdvanceDeg: 13, idleRpm: 750, dieselFullLoadFuelMg: 66 },
       forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 17 },
+    },
+  },
+  "toyota-fa20-vortech": {
+    name: "Toyota/Subaru FA20 2.0 flat-4 + Vortech V3",
+    description: "GT86 / BRZ / FR-S boxer, equal-length header, port + direct injection, aftermarket centrifugal supercharger (~0.5 bar)",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    config: {
+      ...v16,
+      quick: { layout: "flat", cylinderCount: 4, displacement: 1.998, crankshaft: "flat-plane", aspiration: "supercharged", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 7450 },
+      advanced: { bore: 86, stroke: 86, firingOrder: [1, 3, 2, 4], headerGeometry: "equal-length" },
+      physical: { compressionRatio: 12.5 },
+      forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 7, whineIntensity: 0.6 },
+    },
+  },
+  "psa-dv5-bluehdi": {
+    name: "PSA DV5 1.5 BlueHDi 130",
+    description: "Common-rail inline-4 diesel (2018+ Peugeot/Citroën), pilot injection, VGT; free revs cap at 4000 rpm in neutral",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    published: { peakTorqueNm: [300, 1750], peakPowerKw: [96, 3750] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 4, displacement: 1.499, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 4750, fuel: "diesel" },
+      // 4000 rpm is the neutral (no-load) limit heard in the reference recording.
+      advanced: { bore: 75, stroke: 84.8, firingOrder: [1, 3, 4, 2], revLimiterRpm: 4000 },
+      physical: { compressionRatio: 16.4, pilotInjection: true, idleRpm: 800 },
+      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 20 },
+    },
+  },
+  "vw-alh-tdi": {
+    name: "VW 1.9 TDI ALH (66 kW)",
+    description: "Inline-4 diesel with an electronic VE distributor pump (no pilot injection) and a Garrett VNT-15 variable-nozzle turbo: late-1990s New Beetle / Golf IV",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    published: { peakTorqueNm: [210, 1900], peakPowerKw: [66, 4000] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 4, displacement: 1.896, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 4800, fuel: "diesel" },
+      advanced: { bore: 79.5, stroke: 95.5, firingOrder: [1, 3, 4, 2] },
+      // Pump fuel limit fitted to the published 210 N·m (the ALH is fuel-limited well below its smoke limit).
+      physical: { compressionRatio: 19.5, valvesPerCylinder: 2, pilotInjection: false, idleRpm: 900, dieselFullLoadFuelMg: 34, turboVgt: true },
+      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 13 },
+    },
+  },
+  "mercedes-om601": {
+    name: "Mercedes OM601 2.0 (190 D, W201)",
+    description: "Naturally aspirated inline-4 diesel, Bosch in-line pump, 22:1. The real engine has a prechamber; the model injects directly, so its clatter is too hard",
+    provenance: { geometry: "published", exhaust: "estimated" },
+    published: { peakTorqueNm: [123, 2800], peakPowerKw: [53, 4600] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 4, displacement: 1.997, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 5000, fuel: "diesel" },
+      advanced: { bore: 87, stroke: 84, firingOrder: [1, 3, 4, 2] },
+      physical: { compressionRatio: 22, valvesPerCylinder: 2, pilotInjection: false, idleRpm: 750 },
+      forcedInduction: { type: "na" },
+    },
+  },
+  "honda-crm250": {
+    name: "Honda CRM250R (MD24) two-stroke single",
+    description: "Liquid-cooled 249 cc single, reed-valve induction, tuned expansion chamber (the real bike's RC exhaust power valve is not modelled)",
+    provenance: { geometry: "published", exhaust: "estimated" },
+    published: { peakTorqueNm: [36, 7000], peakPowerKw: [29.4, 8000] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 1, displacement: 0.249, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 9500, cycle: "two-stroke" },
+      advanced: { bore: 66.4, stroke: 72 },
+      physical: { compressionRatio: 12.5, twoStrokeIntake: "reed", idleRpm: 1500, expansionChamberTunedRpm: 7800 },
+      forcedInduction: { type: "na" },
+    },
+  },
+  "mz-etz250": {
+    name: "MZ ETZ 250 two-stroke single",
+    description: "Air-cooled 243 cc single (1981–89), piston-port induction, mild expansion chamber",
+    provenance: { geometry: "published", exhaust: "estimated" },
+    published: { peakTorqueNm: [27.5, 5200], peakPowerKw: [15.4, 5500] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 1, displacement: 0.243, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 6500, cycle: "two-stroke" },
+      advanced: { bore: 69, stroke: 65 },
+      physical: { compressionRatio: 10.5, twoStrokeIntake: "piston-port", idleRpm: 1300, expansionChamberTunedRpm: 5500 },
+      forcedInduction: { type: "na" },
     },
   },
   "yamaha-rd350lc": {

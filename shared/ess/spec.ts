@@ -141,6 +141,13 @@ export interface TurboSpec {
   rotorInertiaKgM2: number;
   targetBoostKpa: number;
   wastegate: boolean;
+  /**
+   * Variable-geometry (variable-nozzle) turbine: the boost controller moves the vanes instead of a
+   * wastegate. turbineAreaMm2 is then the full-open area, sized for rated flow, and the closed
+   * vanes leave vgtMinArea of it, which builds boost at low speed.
+   */
+  vgt: boolean;
+  vgtMinArea: number;
   blowOffValve: boolean;
   /** Charge-pipe + intercooler volume, L. */
   chargeVolumeL: number;
@@ -231,6 +238,13 @@ export interface DieselSpec {
   smokeLambda: number;
   /** Full-load fuel per cylinder per cycle, mg (rated). */
   fullLoadFuelMg: number;
+  /**
+   * Fixed per-injector delivery offset left after calibration, 1σ in mg per stroke. Injection
+   * systems scatter by a roughly constant volume, so the relative spread is largest at idle, where
+   * it puts energy on the non-firing orders. Mechanical in-line/distributor pumps ≈ 0.5 mg;
+   * common rail with per-cylinder smooth-running control ≈ 0.12 mg.
+   */
+  injectorSpreadMg: number;
 }
 
 /**

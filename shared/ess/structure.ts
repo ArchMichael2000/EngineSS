@@ -84,6 +84,13 @@ export class StructuralRadiator {
     private readonly pistonArea: number,
     private readonly rng: Rng,
     positions: number[],
+    /**
+     * Drive train that excites the block between impacts. Four-strokes: the timing chain or belt on a
+     * 21-tooth crank sprocket plus valvetrain friction. Two-strokes have neither (no camshaft, no
+     * valves): only crank and bearing friction remain, without a tooth-pass tone. Wankels: the
+     * stationary-gear mesh and seal friction.
+     */
+    private readonly drive: { teeth: number; level: number } = { teeth: 21, level: 1 },
   ) {
     // Larger engines have lower, denser modes (block bending/breathing scale ~ size^-1/3). Modal
     // density of plate-like covers and the block rises with frequency, so modes are spaced
@@ -167,7 +174,7 @@ export class StructuralRadiator {
   private starterWhinePhase = 0;
   private mechanical(rpm: number): number {
     const k = Math.pow(Math.max(0, rpm) / 1000, 1.5);
-    this.meshPhase += (2 * Math.PI * (rpm / 60) * 21) / this.fs;
+    this.meshPhase += (2 * Math.PI * (rpm / 60) * Math.max(1, this.drive.teeth)) / this.fs;
     if (this.meshPhase > 1e4) this.meshPhase %= 2 * Math.PI;
     // Starter: pinion/ring-gear mesh (≈132 ring teeth) and commutator whine (≈13:1 reduction,
     // 24 commutator bars), bolted to the bellhousing, so it rides the block modes.
@@ -182,7 +189,8 @@ export class StructuralRadiator {
     }
     // High-frequency part of the chain tension fluctuation at the guides and tensioner, N (the
     // low-frequency part, hundreds of N, sits below the structure modes and does not radiate).
-    return k * (60 * this.rng.gaussian() + 36 * Math.sin(this.meshPhase)) + starter;
+    const tone = this.drive.teeth > 0 ? 36 * Math.sin(this.meshPhase) : 0;
+    return k * this.drive.level * (60 * this.rng.gaussian() + tone) + starter;
   }
 
   step(gaugePressures: Float64Array, scale: number, rpm = 0): void {

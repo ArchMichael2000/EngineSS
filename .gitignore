@@ -9,3 +9,5 @@ dist/
 Thumbs.db
 baseline-renders/
 browser-smoke/
+reference-audio/local/
+__pycache__/

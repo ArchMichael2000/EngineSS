@@ -148,43 +148,25 @@ Ordered by priority. Each item says what "done" looks like.
 2. ~~Merge to `main`.~~ Done; the owner gave standing permission to open and merge PRs to `main`.
 
 ### B. Realism against real audio (the main open goal)
-3. **Recordings for the new families.** The 10 CC0 recordings cover only four-stroke gasoline engines plus a radial.
-   - Find CC0/CC-BY recordings of a common-rail diesel, an old mechanical diesel, a two-stroke (road bike or dirt bike) and a rotary (13B, ideally both stock and peripheral-port).
-   - Freesound and the EngineLab manifest are good starting points.
-   - Add them to `real-audio-manifest.json` and `reference-audio/`, then compare with `compareRecording.py` the way the 2JZ was done.
-   - Done when each family has a measured order-profile error in the docs, with model fixes for whatever it exposes.
-4. **Extend the four-stroke comparisons.** The LS3 idle recording is an unidentified cammed V8, and the EJ25 and Harley order assignments are uncertain. Find tachometer-tagged or well-identified recordings: sweeps, dyno pulls, steady segments.
-5. **Interior (cabin) perspective.** The boom gain (0.00175 Pa per N·m) is unverified because there are no open interior recordings. Find any and calibrate.
+Done in October 2026: 14 open recordings added and compared (`scripts/compareCorpus.py`, results in `docs/reference-sources.md` §4). Still open:
+3. **Two-strokes are too dull.** At every listener perspective their 2–8 kHz energy is 14 dB or more short of the CRM250 and MZ recordings. Soloed stems show weak outlet-jet and port-blowdown sources. Done when the tilt matches within a few dB without breaking the RD350LC's power.
+4. **More off-firing energy in real engines.** Diesels and the FA20 carry 2–8 dB more energy between the firing orders than the renders. Candidates: log-manifold geometry (unequal pulse paths), more cylinder-to-cylinder spread. An end-collector manifold overshoots.
+5. **No open Wankel recording.** Keep looking (Freesound, Commons, Archive); the one Sampling+ clip is local-only.
+6. **Cabin perspective.** Open interior clips exist (four committed), but none names its engine or speed, so the boom gain stays unverified. An identified interior recording with known rpm would calibrate it.
+7. **Prechamber diesels** (Mercedes OM601/OM602, VW IDI): not modelled, and the 190 D comparison is the worst (15.5 dB).
 
 ### C. Known model gaps (each documented with numbers in `docs/reference-sources.md`)
-6. **Rotary:**
-   - +11 % power at 7000 rpm on the 13B: the auxiliary/6PI intake ports aren't modelled.
-   - No Renesis (side exhaust) or 13B-REW (sequential twin turbo) reference yet.
-   - Pistons have a piston-slap source, which rotaries skip; rotaries have no specific mechanical noise source (apex seals, stationary gears).
-7. **Two-stroke:**
-   - The torque curve is flatter than the real RD350LC's.
-   - No exhaust power valve (YPVS-style).
-   - Scavenging is single-zone composition with a mixing profile (exponent 1.8). A two-zone model would be more faithful.
-   - No reed-petal noise.
-   - No uniflow or blown two-stroke diesels (Detroit, marine); the fuzz forces two-strokes to gasoline.
-8. **Diesel:**
-   - Turbo is modelled with a wastegate, where real diesels use variable-geometry turbines.
-   - Full-load exterior sound is mostly broadband through the turbine/wastegate path; verify against recordings.
-   - No injector tick, EGR, cold start or glow plugs.
-9. **Forced induction:**
-   - Deep-surge frequency is 96 % of the Helmholtz frequency; Dehner & Selamet measured 63–82 %.
-   - The 2JZ is modelled as one large turbo; sequential or twin turbos aren't.
-   - No anti-lag.
-10. **High-revving NA engines** read 10–13 % low at peak power: head and port breathing at high speed.
-11. **Vehicle mode** is tested only with the LS3. The motorcycle drivetrain variant and vehicle defaults for two-strokes and rotaries are untested.
+Done: variable-geometry turbines for common-rail diesels; Drive mode for every family (limiter-aware shifts, power-based gearing); the rotary stationary-gear mesh; no more four-stroke chain whine on two-strokes or rotaries. Still open:
+8. **Rotary +11 % at 7000 rpm.** Volumetric efficiency rises with speed (79 → 88 %). Auxiliary ports would make it worse, not better; intake tuning is the suspect. No Renesis or 13B-REW reference yet; apex-seal noise relies on the port-closing impulses.
+9. **Two-stroke torque curve.** Within 5 % of peak from 4000 to 8500 rpm. Trapping efficiency (≈ 0.55) doesn't respond to pipe tuning. Fix that before adding a power valve (YPVS / RC), which would otherwise only flatten the curve further. The CRM250 reads −30 % (118 hp/L).
+10. **Turbo deep surge** stays the mild type at 96 % of Helmholtz (measured 63–82 %). It needs a measured negative-flow compressor characteristic. Sensitivities are in §1.
+11. **High-revving NA engines** read 9–15 % low above about 21 m/s mean piston speed (the S54's −31 % is limiter interference on the dyno test). Candidates are the speed-squared friction and accessory-drag terms; don't change them without friction data.
+12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
+13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
 
 ### D. Performance and housekeeping
-12. CPU (single vCPU of the build machine, 48 kHz):
-    - W16 ≈ 1.22× real time, 0.81× at the 2/3 tier.
-    - LS3 ≈ 0.71×.
-    - A 4-rotor reached 1.66× under four parallel processes.
-    The profile is flat: valve solver ≈ 20 %, duct reads ≈ 14 %. Further speedups would need algorithmic change, such as fewer secant iterations or block-rate gas-state glides.
-14. The export path (`shared/ess/render.ts`, `ExportPanel.tsx`) works through `EngineSimulator`, but it hasn't been exercised with the new families.
+14. CPU: no safe micro-optimisation left (valve tolerance tried and reverted; see §4 of the reference doc). The rate tiers hold real time (W16 at 32 kHz in Chromium). Next steps would be structural: sub-rate thermodynamics, or threads, which need cross-origin isolation that GitHub Pages can't provide.
+15. Export: exercised in the browser for diesel, two-stroke, rotary and turbo engines; it renders in a Web Worker.
 
 ## 6. Quick start for the next session
 
