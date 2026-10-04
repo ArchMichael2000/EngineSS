@@ -7,7 +7,8 @@
  * The cylinder never synthesises sound. The exhaust and intake waves are the
  * pressure and volume velocity its valve flows impose on the ducts.
  */
-import type { CamSpec, TwoStrokeSpec } from "./spec";
+import type { CamSpec, RotarySpec, TwoStrokeSpec } from "./spec";
+import { rotaryChamberVolume } from "./spec";
 import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, lerpTable, orificeMassFlow, waveExponents } from "./gas";
 import type { Port } from "./waveguide";
 import { arriving } from "./waveguide";
@@ -97,6 +98,8 @@ export interface CylinderParams {
   cycleDeg: number;
   /** Piston-ported, crankcase-scavenged two-stroke gas exchange (replaces the valves). */
   twoStroke: TwoStrokeSpec | null;
+  /** Wankel chamber (replaces slider-crank and valves). */
+  rotary: RotarySpec | null;
 }
 
 /** Crankcase of a crankcase-scavenged two-stroke: the pump that feeds the transfer ports. */
@@ -154,6 +157,9 @@ export class Cylinder {
   readonly crankRadius: number;
   readonly sweptVolume: number;
   readonly clearanceVolume: number;
+  private readonly rotaryVd: number = 0;
+  private readonly rotaryWidth: number = 0;
+  private readonly rotaryRadius: number = 0;
   /** Active lobes (low cam, or the high cam when lift switching is engaged). */
   intakeLobe: CamLobe;
   exhaustLobe: CamLobe;
@@ -337,6 +343,14 @@ export class Cylinder {
     this.intakeLobe = this.lowIntake;
     this.exhaustLobe = this.lowExhaust;
     this.cycleDeg = params.cycleDeg;
+    if (params.rotary) {
+      const rs = params.rotary;
+      this.rotaryVd = rotaryChamberVolume(rs);
+      this.sweptVolume = this.rotaryVd;
+      this.clearanceVolume = this.rotaryVd / Math.max(1.5, compressionRatio - 1);
+      this.rotaryWidth = rs.rotorWidthMm / 1000;
+      this.rotaryRadius = rs.generatingRadiusMm / 1000;
+    }
     const ts = params.twoStroke;
     if (ts) {
       this.sExhaustOpen = this.kinematics(ts.exhaustPortOpenDeg)[0];
@@ -356,6 +370,36 @@ export class Cylinder {
    * `sOpen`; ports run to BDC. Radiused top corners (≈ 2 mm) make the area grow as h²/2r first,
    * so the port opens without a step. Cd ≈ 0.72 (Blair's port discharge data at high Δp).
    */
+  /**
+   * Chamber volume (m³) and dV/dθ (m³ per radian of crank / e-shaft) at cycle angle α. Wankel:
+   * V = V_min + (V_d/2)(1 − cos(2α/3)), exact for the epitrochoid housing.
+   */
+  chamber(alphaDeg: number): [number, number] {
+    if (this.params.rotary) {
+      const a = (2 * alphaDeg * DEG) / 3;
+      return [this.clearanceVolume + 0.5 * this.rotaryVd * (1 - Math.cos(a)), (this.rotaryVd / 3) * Math.sin(a)];
+    }
+    const [s, ds] = this.kinematics(alphaDeg);
+    return [this.clearanceVolume + this.area * s, this.area * ds];
+  }
+
+  /**
+   * Wankel port opening: an apex seal sweeps across the port, so the area ramps open over `ramp`
+   * degrees after `open` and closes over `ramp` before `close` (raised-cosine ramps). Peripheral
+   * ports are crossed quickly by the apex seal (≈ 30°); side ports are uncovered gradually by the
+   * rotor flank (≈ 100°).
+   */
+  private rotaryPort(alphaDeg: number, open: number, close: number, ramp: number, area: number): number {
+    let x = alphaDeg - open;
+    if (x < 0) x += 1080;
+    const span = close - open < 0 ? close - open + 1080 : close - open;
+    if (x >= span) return 0;
+    const r = Math.min(ramp, span / 2);
+    const up = x < r ? 0.5 - 0.5 * Math.cos((Math.PI * x) / r) : 1;
+    const down = span - x < r ? 0.5 - 0.5 * Math.cos((Math.PI * (span - x)) / r) : 1;
+    return area * Math.min(up, down);
+  }
+
   private portArea(s: number, sOpen: number, width: number): number {
     const h = s - sOpen;
     if (h <= 0) return 0;
@@ -394,7 +438,7 @@ export class Cylinder {
 
   initialise(alphaDeg: number, pressurePa: number, temperatureK: number): void {
     const [s] = this.kinematics(alphaDeg);
-    this.volume = this.clearanceVolume + this.area * s;
+    this.volume = this.chamber(alphaDeg)[0];
     this.mass = (pressurePa * this.volume) / (R_AIR * temperatureK);
     this.energy = this.mass * CV_GAS * temperatureK;
     this.massAir = this.mass * 0.92;
@@ -438,9 +482,10 @@ export class Cylinder {
     this.prevAlpha = alphaDeg;
 
     // ---- Volume change: reversible piston work on the contents
-    const [s, dsdth] = this.kinematics(alphaDeg);
-    const newVolume = this.clearanceVolume + this.area * s;
+    const [s] = this.kinematics(alphaDeg);
+    const [newVolume, dVdth] = this.chamber(alphaDeg);
     const dV = newVolume - this.volume;
+    const rot = this.params.rotary;
     this.energy -= this.pressure * dV;
     this.volume = newVolume;
 
@@ -461,7 +506,11 @@ export class Cylinder {
       let theta = alphaDeg - this.burnStartDeg;
       if (theta < -cyc / 2) theta += cyc;
       else if (theta > cyc / 2) theta -= cyc;
-      const exhaustOpening = ts ? s > this.sExhaustOpen : this.exhaustLobe.lift(alphaDeg) > 0.0003;
+      const exhaustOpening = rot
+        ? this.rotaryPort(alphaDeg, rot.exhaustOpenDeg, rot.exhaustCloseDeg, 1, 1) > 0
+        : ts
+          ? s > this.sExhaustOpen
+          : this.exhaustLobe.lift(alphaDeg) > 0.0003;
       if (theta > 0 && !exhaustOpening) {
         if (this.ringPending > 0) this.startRinging(this.ringPending, dt);
         const x = this.params.diesel
@@ -492,21 +541,31 @@ export class Cylinder {
     this.updateState();
     if ((this.heatTick++ & 7) === 0) {
       const meanPistonSpeed = (2 * this.params.strokeM * omega) / (2 * Math.PI);
-      const closed = ts ? alphaDeg < ts.exhaustPortOpenDeg || alphaDeg > 360 - ts.exhaustPortOpenDeg : alphaDeg < 180 || alphaDeg > 540;
+      const closed = rot
+        ? alphaDeg > rot.intakeCloseDeg || alphaDeg < rot.exhaustOpenDeg
+        : ts
+          ? alphaDeg < ts.exhaustPortOpenDeg || alphaDeg > 360 - ts.exhaustPortOpenDeg
+          : alphaDeg < 180 || alphaDeg > 540;
       const w = (closed ? 2.28 : 6.18) * meanPistonSpeed + (this.burnFraction > 0 && this.burnFraction < 0.999 ? 4 : 0);
       this.hWoschni = this.woschniBore * Math.pow((this.pressure / 1000) * Math.max(0.5, w), 0.8) * Math.pow(this.temperature, -0.55);
     }
-    const wallArea = 2 * this.area + Math.PI * this.params.boreM * (this.volume / this.area);
+    // Wankel: two side-housing faces (each ≈ V/b) plus the rotor flank and the trochoid housing, each
+    // spanning the apex-to-apex chord √3·R across the rotor width: the rotary's high surface/volume.
+    const wallArea = rot ? (2 * this.volume) / this.rotaryWidth + 2 * Math.sqrt(3) * this.rotaryRadius * this.rotaryWidth : 2 * this.area + Math.PI * this.params.boreM * (this.volume / this.area);
     this.energy -= this.hWoschni * wallArea * (this.temperature - this.params.wallTempK) * dt;
     this.updateState();
 
     // ---- Exhaust valve (two-stroke: piston-uncovered exhaust port)
-    const exLift = ts ? 0 : this.exhaustLobe.lift(alphaDeg);
-    const exPortArea = ts ? this.portArea(s, this.sExhaustOpen, this.exhaustPortWidth) * this.flowScale : 0;
+    const exLift = ts || rot ? 0 : this.exhaustLobe.lift(alphaDeg);
+    const exPortArea = rot
+      ? this.rotaryPort(alphaDeg, rot.exhaustOpenDeg, rot.exhaustCloseDeg, rot.exhaustPort === "peripheral" ? 30 : 100, rot.exhaustAreaMm2 * 1e-6) * this.flowScale
+      : ts
+        ? this.portArea(s, this.sExhaustOpen, this.exhaustPortWidth) * this.flowScale
+        : 0;
     this.exhaustMassFlow = 0;
     this.unburnedFuelOut = 0;
     if (exLift > 0 || exPortArea > 0) {
-      const cdA = ts ? exPortArea : flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
+      const cdA = ts || rot ? exPortArea : flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
       this.exhaustCdA = cdA;
       this.exhaustMassFlow = this.solveValve(cdA, exhaustPort, true, dt, 0);
       this.exhaustWasOpen = true;
@@ -518,19 +577,20 @@ export class Cylinder {
       if (this.exhaustWasOpen) {
         // A two-stroke's port has no valve to seat; trapping happens as the piston closes it.
         if (ts) this.lastTrappedAir = this.massAir;
-        else this.exhaustClosed = true;
+        else if (!rot) this.exhaustClosed = true;
       }
       this.exhaustWasOpen = false;
     }
 
     // ---- Intake valve (two-stroke: transfer ports from the crankcase, and the crankcase pump)
-    const inLift = ts ? 0 : this.intakeLobe.lift(alphaDeg);
+    const inLift = ts || rot ? 0 : this.intakeLobe.lift(alphaDeg);
+    const inPortArea = rot ? this.rotaryPort(alphaDeg, rot.intakeOpenDeg, rot.intakeCloseDeg, rot.intakePort === "peripheral" ? 30 : 100, rot.intakeAreaMm2 * 1e-6) * this.flowScale : 0;
     this.intakeMassFlow = 0;
     if (ts) {
       this.transferFlow(s, dt);
       this.stepCrankcase(alphaDeg, s, dt, intakePort, intakeTempK, combustion);
-    } else if (inLift > 0) {
-      const cdA = flowArea(inLift, this.params.intakeValveD, this.params.intakeValves) * this.flowScale;
+    } else if (inLift > 0 || inPortArea > 0) {
+      const cdA = rot ? inPortArea : flowArea(inLift, this.params.intakeValveD, this.params.intakeValves) * this.flowScale;
       this.intakeMassFlow = this.solveValve(cdA, intakePort, false, dt, intakeTempK, combustion);
       this.intakeWasOpen = true;
     } else {
@@ -538,7 +598,7 @@ export class Cylinder {
       this.prevIntakeD = 0;
       this.prevIntakeD2 = 0;
       if (this.intakeWasOpen) {
-        this.intakeClosed = true;
+        if (!rot) this.intakeClosed = true;
         this.lastTrappedAir = this.massAir;
       }
       this.intakeWasOpen = false;
@@ -554,9 +614,9 @@ export class Cylinder {
       this.knockPressure = this.knockAmp * Math.sin(this.knockPhase);
       this.knockAmp *= this.knockDecay;
     }
-    this.torque = (this.pressure - P_AMBIENT) * this.area * dsdth;
+    this.torque = (this.pressure - P_AMBIENT) * dVdth;
     // Crankcase pressure acts on the piston underside (the two-stroke's pumping work).
-    if (this.crankcase) this.torque -= (this.crankcase.pressure - P_AMBIENT) * this.area * dsdth;
+    if (this.crankcase) this.torque -= (this.crankcase.pressure - P_AMBIENT) * dVdth;
     // Cycle bookkeeping (IMEP over the cycle, peak pressure)
     if (this.pressure > this.cyclePeak) {
       this.cyclePeak = this.pressure;

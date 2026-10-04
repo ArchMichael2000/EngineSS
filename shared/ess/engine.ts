@@ -224,6 +224,7 @@ export class EngineSimulator {
       diesel: spec.diesel ? { cetane: spec.diesel.cetane, pilot: spec.diesel.pilotInjection } : null,
       cycleDeg: cycleDegrees(spec),
       twoStroke: spec.twoStroke,
+      rotary: spec.rotary,
     };
     this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
@@ -469,7 +470,7 @@ export class EngineSimulator {
       }
       if (cyl.intakeClosed) this.structure.valveSeat(rpm, false);
       if (cyl.exhaustClosed) this.structure.valveSeat(rpm, true);
-      if (alpha > 6 && alpha < 6 + (this.omega * dt * 360) / TWO_PI + 1e-9) this.structure.pistonSlap(cyl.pressure - P_AMBIENT, cyl.crankRadius / (this.spec.rodLengthMm / 1000));
+      if (!this.spec.rotary && alpha > 6 && alpha < 6 + (this.omega * dt * 360) / TWO_PI + 1e-9) this.structure.pistonSlap(cyl.pressure - P_AMBIENT, cyl.crankRadius / (this.spec.rodLengthMm / 1000));
     }
     this.indicatedTorque = torque;
     this.blockTorque += torque - frictionTorque;
@@ -555,7 +556,10 @@ export class EngineSimulator {
     const vd = this.displacementL / 1000;
     // Crankcase-scavenged two-strokes: no valvetrain, rolling-element main and big-end bearings
     // (≈ 35 % less mechanical friction than the four-stroke correlation).
-    const cycleFactor = this.spec.twoStroke ? 0.65 : 1;
+    // Wankel: displacement here counts every face (1.5 × a four-stroke of equal airflow); no
+    // valvetrain or reciprocating mass, but apex, side and corner seals rubbing at rotor tip speed
+    // (≈ the four-stroke figure at equal airflow).
+    const cycleFactor = this.spec.twoStroke ? 0.65 : this.spec.rotary ? 0.65 : 1;
     // Driven accessories (alternator, water/oil/fuel pumps, steering, A/C idle load) scale with the
     // engine they serve: ~16 N·m on a 6 L V8 at idle, ~3 N·m on a 1 L motorcycle engine.
     const accessory = (2.6 + 0.00035 * rpm) * this.displacementL;
@@ -596,7 +600,7 @@ export class EngineSimulator {
         this.highCamTimer = 0;
       }
     }
-    if (!this.spec.twoStroke) for (const c of this.cylinders) c.setValveTiming(this.intakeCamAdvance, this.exhaustCamRetard, this.highCam, this.modCycle(this.crankDeg - c.fireAngleDeg));
+    if (!this.spec.twoStroke && !this.spec.rotary) for (const c of this.cylinders) c.setValveTiming(this.intakeCamAdvance, this.exhaustCamRetard, this.highCam, this.modCycle(this.crankDeg - c.fireAngleDeg));
     const t = this.telemetry;
     t.intakeCamAdvanceDeg = this.intakeCamAdvance;
     t.exhaustCamRetardDeg = this.exhaustCamRetard;

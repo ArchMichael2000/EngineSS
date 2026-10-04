@@ -40,6 +40,8 @@ export interface FiringSchedule {
   /** True when the requested firing order was feasible for the crank. */
   requestedOrderHonoured: boolean;
   notes: string[];
+  /** Exhaust grouping must follow banks exactly (rotary: one port per rotor shared by its faces). */
+  groupByBank?: boolean;
 }
 
 const mod = (x: number, m: number) => ((x % m) + m) % m;
@@ -218,6 +220,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
   const notes: string[] = [];
   const { bankAxesDeg, bankOf, throwOf } = bankLayout(spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg);
   if (spec.cycle === "two-stroke") return twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf);
+  if (spec.cycle === "rotary") return rotarySchedule(spec, n);
   const crank: CrankSpec = spec.crank;
   const throwCount = Math.max(...Array.from({ length: n }, (_, i) => throwOf(i + 1))) + 1;
   const pitch = (spec.borePitchMm || 100) / 1000;
@@ -331,6 +334,33 @@ function twoStrokeSchedule(
   return { cylinders, firingOrder: sorted.map((c) => c.number), intervalsDeg: intervals, bankCount: bankAxesDeg.length, bankAxesDeg, requestedOrderHonoured: honoured, notes };
 }
 
+/**
+ * Wankel: chambers numbered rotor by rotor (faces 1–3 on rotor 1, 4–6 on rotor 2, …). A rotor's
+ * faces fire 360° of e-shaft apart; rotors are phased 360/rotors apart, so a two-rotor fires every
+ * 180° (twice per revolution, like a four-cylinder four-stroke).
+ */
+function rotarySchedule(spec: Pick<EngineSpec, "borePitchMm">, n: number): FiringSchedule {
+  const rotors = Math.max(1, Math.round(n / 3));
+  const pitch = (spec.borePitchMm || 100) / 1000;
+  const cylinders: CylinderGeometry[] = Array.from({ length: n }, (_, i) => {
+    const rotor = Math.floor(i / 3);
+    const face = i % 3;
+    return {
+      number: i + 1,
+      bank: rotor,
+      throwIndex: rotor,
+      positionM: rotor * pitch,
+      bankAxisDeg: 0,
+      pinAngleDeg: mod(rotor * (360 / rotors), 360),
+      fireAngleDeg: mod(face * 360 + rotor * (360 / rotors), 1080),
+    };
+  });
+  const sorted = cylinders.slice().sort((a, b) => a.fireAngleDeg - b.fireAngleDeg);
+  const angles = sorted.map((c) => c.fireAngleDeg);
+  const intervals = angles.map((a, i) => (i + 1 < angles.length ? angles[i + 1] - a : 1080 - a + angles[0]));
+  return { cylinders, firingOrder: sorted.map((c) => c.number), intervalsDeg: intervals, bankCount: rotors, bankAxesDeg: new Array(rotors).fill(0), requestedOrderHonoured: true, notes: [], groupByBank: true };
+}
+
 function validOrder(order: number[] | undefined, n: number): order is number[] {
   if (!order || order.length !== n) return false;
   const seen = new Set(order);
@@ -402,6 +432,7 @@ export function exhaustGroups(schedule: FiringSchedule, strategy: CollectorStrat
   }
 
   function bankGroups(): ExhaustGroup[] {
+    if (schedule.groupByBank) return Array.from({ length: schedule.bankCount }, (_, bank) => ({ cylinders: byBank(bank), bank }));
     if (schedule.bankCount === 1 || schedule.cylinders.length < 3) {
       const all = cyls.map((c) => c.number);
       // Long inline engines conventionally split front/rear (e.g. 3-into-1 ×2 on an I6).

@@ -233,11 +233,34 @@ export interface DieselSpec {
   fullLoadFuelMg: number;
 }
 
+/**
+ * Wankel rotary (Mazda convention: displacement = rotors × one chamber). Each rotor has three
+ * chambers ("faces"), each completing a four-stroke cycle over 1080° of eccentric-shaft rotation.
+ * Port events are e-shaft degrees in a face's cycle: 0 = firing TDC, 270 BDC, 540 overlap TDC,
+ * 810 BDC. Chamber volume V = V_min + (V_d/2)(1 − cos(2θ/3)), V_d = 3√3·e·R·b (exact).
+ */
+export interface RotarySpec {
+  rotors: number;
+  eccentricityMm: number;
+  generatingRadiusMm: number;
+  rotorWidthMm: number;
+  exhaustPort: "peripheral" | "side";
+  intakePort: "side" | "peripheral";
+  exhaustOpenDeg: number;
+  exhaustCloseDeg: number;
+  intakeOpenDeg: number;
+  intakeCloseDeg: number;
+  /** Effective (Cd·A) port areas per rotor at full opening, mm². */
+  exhaustAreaMm2: number;
+  intakeAreaMm2: number;
+}
+
 export interface EngineSpec {
   name: string;
   /** Working cycle; crank degrees per cycle 720 (four-stroke) or 360 (two-stroke). */
   cycle: EngineCycleKind;
   twoStroke: TwoStrokeSpec | null;
+  rotary: RotarySpec | null;
   /** Spark ignition or compression ignition (diesel). */
   combustion: CombustionKind;
   diesel: DieselSpec | null;
@@ -278,7 +301,17 @@ export function cycleDegrees(spec: Pick<EngineSpec, "cycle">): number {
   return spec.cycle === "two-stroke" ? 360 : spec.cycle === "rotary" ? 1080 : 720;
 }
 
-export function displacementLitres(spec: Pick<EngineSpec, "boreMm" | "strokeMm" | "cylinders">): number {
+/** Swept volume of one Wankel chamber, m³. */
+export function rotaryChamberVolume(r: RotarySpec): number {
+  return 3 * Math.sqrt(3) * (r.eccentricityMm / 1000) * (r.generatingRadiusMm / 1000) * (r.rotorWidthMm / 1000);
+}
+
+/**
+ * Litres swept by all working chambers over one cycle each. For rotaries this counts every face
+ * (3 × rotors × chamber), which keeps airflow per revolution consistent with the cycle length.
+ */
+export function displacementLitres(spec: Pick<EngineSpec, "boreMm" | "strokeMm" | "cylinders"> & Partial<Pick<EngineSpec, "rotary">>): number {
+  if (spec.rotary) return rotaryChamberVolume(spec.rotary) * spec.cylinders * 1000;
   const bore = spec.boreMm / 1000;
   const stroke = spec.strokeMm / 1000;
   return (Math.PI / 4) * bore * bore * stroke * spec.cylinders * 1000;

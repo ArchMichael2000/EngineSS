@@ -15,6 +15,8 @@ export interface FuzzOptions {
   diesel?: boolean;
   /** Allow the two-stroke variant draw (default true). */
   twoStroke?: boolean;
+  /** Allow the rotary variant draw (default true). */
+  rotary?: boolean;
 }
 
 export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfiguration {
@@ -100,6 +102,20 @@ export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfig
     ph.expansionChamber = rnd() < 0.85;
     if (rnd() < 0.3) ph.scavengeQuality = 1 + rnd() * 1.5;
   }
+  // Rotary variants (drawn last): 1–4 rotors, 0.3–0.9 L per rotor, any aspiration and porting.
+  if (opts.rotary !== false && config.quick.cycle !== "two-stroke" && rnd() < 0.12) {
+    const rotors = 1 + Math.floor(rnd() * 4);
+    config.quick.cycle = "rotary";
+    config.quick.fuel = "gasoline";
+    config.quick.layout = "inline";
+    config.quick.cylinderCount = rotors;
+    config.quick.displacement = Math.round(rotors * (0.3 + rnd() * 0.6) * 100) / 100;
+    config.quick.redline = Math.round((6000 + rnd() * 4000) / 100) * 100;
+    if (ph.compressionRatio !== undefined) ph.compressionRatio = 8 + rnd() * 2.5;
+    delete ph.pilotInjection;
+    delete ph.cetaneNumber;
+    if (rnd() < 0.3) ph.rotaryExhaustPort = pick(["peripheral", "side"] as const);
+  }
   config.physical = ph as EngineConfiguration["physical"];
   return config;
 }
@@ -118,7 +134,7 @@ export function runConfig(seed: number, fs = 48000, opts: FuzzOptions = {}): Fuz
   const problems: string[] = [];
   const config = randomConfig(seed, opts);
   const q = config.quick;
-  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""}${q.cycle === "two-stroke" ? " two-stroke" : ""} redline ${q.redline}`;
+  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""}${q.cycle === "two-stroke" ? " two-stroke" : q.cycle === "rotary" ? " rotary" : ""} redline ${q.redline}`;
   let idleRpm = 0;
   let wotRpm = 0;
   let cpu = 0;

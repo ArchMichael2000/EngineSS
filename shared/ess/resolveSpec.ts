@@ -6,7 +6,7 @@
  */
 import { defaultVehicle } from "./vehicle";
 import type { EngineConfiguration } from "../engineTypes";
-import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, TwoStrokeSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
+import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, RotarySpec, TwoStrokeSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
 import { clamp } from "./gas";
 import { bankLayout } from "./geometry";
 
@@ -37,13 +37,16 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const adv = config.advanced ?? {};
   const ph = config.physical ?? {};
   const fiCfg = config.forcedInduction;
-  const n = clamp(Math.round(q.cylinderCount), 1, 24);
-  const layout = n === 1 ? "inline" : q.layout;
+  const rotaryEngine = q.cycle === "rotary";
+  const rotors = clamp(Math.round(q.cylinderCount), 1, 4);
+  // Rotaries: three working chambers per rotor.
+  const n = rotaryEngine ? rotors * 3 : clamp(Math.round(q.cylinderCount), 1, 24);
+  const layout = n === 1 || rotaryEngine ? "inline" : q.layout;
   const displacement = clamp(q.displacement, 0.05, 30);
-  const perCyl = displacement / n;
-  const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6;
-  const aircraftLike = layout === "radial" || (q.redline <= 3200 && perCyl > 1.5);
-  const diesel = q.fuel === "diesel";
+  const perCyl = rotaryEngine ? displacement / rotors : displacement / n;
+  const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6 && !rotaryEngine;
+  const aircraftLike = !rotaryEngine && (layout === "radial" || (q.redline <= 3200 && perCyl > 1.5));
+  const diesel = q.fuel === "diesel" && !rotaryEngine;
   const twoStroke = q.cycle === "two-stroke";
 
   // ---- Bore / stroke
@@ -68,7 +71,36 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       stroke = bore / defaultRatio;
     }
   }
-  const rod = ph.rodLengthMm ?? stroke * (twoStroke ? 2.0 : motorcycleLike ? 1.75 : 1.62);
+  // Wankel geometry from the chamber displacement with Mazda 13B proportions (R/e = 7, b/R = 0.76):
+  // V_d = 3√3·e·R·b = 0.5655·R³. The cylinder model takes an equivalent bore (flame travel along
+  // the long chamber ≈ √3·R) and stroke (π·R/3: gas velocity ≈ rotor apex speed R·ω/3).
+  let rotarySpec: RotarySpec | null = null;
+  if (rotaryEngine) {
+    const r = Math.cbrt(perCyl / 1000 / 0.5655);
+    const porting = { smooth: "stock", lumpy: "street", aggressive: "bridge", lopey: "peripheral" }[q.idleCharacter];
+    // Port events (13B-REW: intake 32° ATDC – 50° ABDC, exhaust 75° BBDC – 48° ATDC); street/bridge/
+    // peripheral ports open the intake earlier and close it later (more overlap, the "brap").
+    const io = porting === "stock" ? 572 : porting === "street" ? 555 : porting === "bridge" ? 515 : 470;
+    const ic = porting === "stock" ? 860 : porting === "street" ? 870 : porting === "bridge" ? 880 : 890;
+    const scale = Math.pow(perCyl / 0.654, 2 / 3);
+    rotarySpec = {
+      rotors,
+      eccentricityMm: (r / 7) * 1000,
+      generatingRadiusMm: r * 1000,
+      rotorWidthMm: 0.762 * r * 1000,
+      exhaustPort: ph.rotaryExhaustPort ?? "peripheral",
+      intakePort: ph.rotaryIntakePort ?? (porting === "peripheral" ? "peripheral" : "side"),
+      exhaustOpenDeg: ph.rotaryExhaustOpenDeg ?? 195,
+      exhaustCloseDeg: ph.rotaryExhaustCloseDeg ?? 588,
+      intakeOpenDeg: ph.rotaryIntakeOpenDeg ?? io,
+      intakeCloseDeg: ph.rotaryIntakeCloseDeg ?? ic,
+      exhaustAreaMm2: 1000 * scale,
+      intakeAreaMm2: (porting === "peripheral" ? 1500 : porting === "bridge" ? 1350 : 1150) * scale,
+    };
+    bore = Math.sqrt(3) * r * 1000;
+    stroke = ((Math.PI * r) / 3) * 1000;
+  }
+  const rod = ph.rodLengthMm ?? stroke * (twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
 
   // ---- Crank
   const crankType: EssCrankType = ph.crankType ?? mapCrank(q.crankshaft, layout);
@@ -212,12 +244,25 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     if (!ph.muffler) exhaust.muffler = { type: character === "straight-pipe" ? "none" : "straight-through", bodyDiameterMm: headerD * 2.2, bodyLengthMm: character === "stock" ? 380 : 300, packing: character === "stock" ? 0.85 : character === "sport" ? 0.6 : 0.4 };
   }
 
+  if (rotarySpec) {
+    // Each face's port passage is short; the faces of a rotor share its exhaust and intake runners.
+    const portD = Math.sqrt((4 * rotarySpec.exhaustAreaMm2) / Math.PI) * 1.15;
+    exhaust.primaryLengthsMm = new Array(n).fill(40);
+    exhaust.primaryDiameterMm = ph.primaryDiameterMm ?? portD;
+    exhaust.collector = "bank";
+    exhaust.collectorDiameterMm = ph.collectorDiameterMm ?? portD * 1.1;
+    exhaust.routing = adv.exhaustRouting ?? "single";
+    intake.runnerDiameterMm = ph.runnerDiameterMm ?? Math.sqrt((4 * rotarySpec.intakeAreaMm2) / Math.PI) * 1.05;
+    intake.runnerLengthMm = adv.intakeRunnerLengthCm ? adv.intakeRunnerLengthCm * 10 : 320;
+    intake.resonatorHz = ph.intakeResonatorHz ?? 0;
+  }
+
   // ---- Forced induction
   const forcedInduction = resolveForcedInduction(config, displacement, q.redline);
 
   // ---- Calibration
   const boosted = forcedInduction.kind !== "na";
-  const idleRpm = ph.idleRpm ?? (diesel ? 760 : twoStroke ? 1300 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
+  const idleRpm = ph.idleRpm ?? (diesel ? 760 : twoStroke ? 1300 : rotaryEngine ? IDLE_RPM[q.idleCharacter] + 50 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
   const limiterRpm = adv.revLimiterRpm ?? q.redline;
   const afterfireByCharacter = { stock: 0.04, sport: 0.22, race: 0.5, "straight-pipe": 0.75 } as const;
   const calibration: EngineSpec["calibration"] = {
@@ -233,7 +278,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     // Carbureted two-strokes keep fuelling on the overrun (the "ring-ding" burble).
     overrunFuelCut: !twoStroke,
     // Diesels have no spark to light fuel in the exhaust.
-    afterfireTendency: diesel ? 0 : ph.afterfireTendency ?? afterfireByCharacter[character],
+    // Rotaries pass more unburned fuel (quench along the long chamber) and pop readily.
+    afterfireTendency: diesel ? 0 : ph.afterfireTendency ?? Math.min(1, afterfireByCharacter[character] * (rotaryEngine ? 1.6 : 1) + (rotaryEngine ? 0.08 : 0)),
   };
   const smokeLambda = calibration.lambdaWot;
   const ratedAirKg = (((101.3 + (forcedInduction.kind !== "na" ? forcedInduction.targetBoostKpa : 0)) * 1000) / (287.05 * 320)) * (perCyl / 1000) * 0.9;
@@ -247,12 +293,13 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       }
     : null;
 
-  const inertia = ph.inertiaKgM2 ?? (motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
+  const inertia = ph.inertiaKgM2 ?? (rotaryEngine ? 0.07 + 0.035 * rotors : motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
 
   return {
-    name: `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
-    cycle: twoStroke ? "two-stroke" : "four-stroke",
+    name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
+    cycle: rotaryEngine ? "rotary" : twoStroke ? "two-stroke" : "four-stroke",
     twoStroke: twoStrokeSpec,
+    rotary: rotarySpec,
     combustion: diesel ? "diesel" : "spark",
     diesel: dieselSpec,
     layout,
@@ -261,7 +308,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     strokeMm: stroke,
     rodLengthMm: rod,
     // Two-strokes: geometric ratio (makers quote the ≈ 6–7.5:1 trapped ratio from port closing).
-    compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : twoStroke ? 12 : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
+    compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : twoStroke ? 12 : rotaryEngine ? (boosted ? 9.0 : 9.7) : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
     crank: {

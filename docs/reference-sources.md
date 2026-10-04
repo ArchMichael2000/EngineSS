@@ -35,6 +35,9 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Two-stroke ports | Piston-uncovered exhaust and transfer ports (width × uncovered height, 2 mm corner radius, Cd 0.72); reed valve (one-way, 0.5/0.25 ms petal lag) or piston-port induction into a crankcase pump | Blair, *Design and Simulation of Two-Stroke Engines* (SAE, 1996), ch. 2–3, 6 | `cylinder.ts` `portArea`, `transferFlow`, `stepCrankcase` |
 | Two-stroke scavenging | Outflow burned share 1 − (1 − b)^q (q 1 = perfect mixing, 1.8 loop default); fresh and burned zones keep their own temperatures in the outflow enthalpy; a header-sized slug returns short-circuited charge on backflow (pipe plugging) | Benson & Brandham (1969) mixing model; Blair's two-zone scavenging | `cylinder.ts` |
 | Expansion chamber | Header 0.30·L_t, diffuser 0.40 to a belly 3.1× header, belly 0.12, baffle 0.36 to a stinger 0.62×, stinger 0.30, cones as stepped ducts; L_t = c·(θ_exh − 40°)/(12·N), c ≈ 500 m/s | Blair (1996) ch. 5; Jennings, *Two-Stroke Tuner's Handbook* | `exhaust.ts`, `resolveSpec.ts` |
+| Wankel chamber | V = V_min + (V_d/2)(1 − cos(2θ/3)), V_d = 3√3·e·R·b; torque p·dV/dθ on the e-shaft; 1080° face cycle, faces 360° apart, rotors 360/n apart | Yamamoto, *Rotary Engine* (Toyo Kogyo/Mazda, 1981); Ansdale, *The Wankel RC Engine* (1968) | `cylinder.ts` `chamber`, `geometry.ts` `rotarySchedule` |
+| Wankel ports | Apex-seal-swept port areas with raised-cosine ramps (peripheral ≈ 30°, side ≈ 100°); 13B-REW timing (intake 32° ATDC–50° ABDC, exhaust 75° BBDC–48° ATDC) with street, bridge and peripheral porting presets; faces share each rotor's runner and exhaust port | Mazda 13B service data; porting practice | `cylinder.ts` `rotaryPort`, `intake.ts` |
+| Wankel heat transfer | Wall area 2V/b + 2√3·R·b (side housings, rotor flank, trochoid housing over the apex chord); Woschni velocity from the rotor apex speed R·ω/3 | Geometry; Woschni (1967) | `cylinder.ts` |
 | Radiation to listener | Monopole `p = ρQ̇/(4πr)`, ground reflection, shielding filters | Kinsler et al., *Fundamentals of Acoustics* | `observer.ts` |
 
 ### Calibrated constants and their basis
@@ -154,6 +157,8 @@ Brake output after 2.5–3 s at the stated speed, WOT. Run with `scratchpad`-sty
 | SRT Hellcat | 527 kW @ 6000 | 578 | +10 % |
 | Yamaha RD350LC (two-stroke) | 40 N·m @ 8000 | 39 | −3 % |
 | Yamaha RD350LC (two-stroke) | 34.6 kW @ 8500 | 33 | −5.5 % |
+| Mazda 13B (FC S5 NA rotary) | 187 N·m @ 4000 | 181 | −3 % |
+| Mazda 13B (FC S5 NA rotary) | 118 kW @ 7000 | 131 | +11 % |
 | VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 330 | −3 % |
 | VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 110 | 0 % |
 | Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 580 | +7 % |
@@ -240,6 +245,16 @@ Blair-style defaults (exhaust port at 87° ATDC on the RD350LC) first gave 16 kW
 4. **Mechanical friction.** With no valvetrain and rolling-element bearings, two-stroke friction is set to 0.65 × the four-stroke correlation.
 
 Result at 8000 rpm: the pipe adds more than 20 % over a plain exhaust (pinned by a test). Trapping efficiency 0.55 at delivery ratio 0.95. Idle runs on the residual-heavy, misfiring "four-stroking" regime the model produces on its own (residual ≈ 0.5 at idle). Idle air is metered by the slide's idle stop, with no four-stroke decel schedule or dashpot. 24 random two-strokes (singles to fours, reed and piston-port) all pass the fuzz checks.
+
+### Rotary
+
+The 13B fires every 180° of e-shaft (six chambers, two firings per revolution). It idles at 800–850 rpm, and exhaust gas runs at 790–870 °C at full load. Its torque curve is flatter than the real Series 5's at the top end (+11 % at 7000 rpm); the real engine's auxiliary-port switching is not modelled. Peripheral intake porting reproduces the known trade:
+
+* manifold pressure at idle rises from about 30 to 98 kPa;
+* residual gas at idle reaches 75 %, the rough "brap" idle;
+* torque falls at 4000 rpm (138 against 181 N·m) and rises at the top end.
+
+24 random rotaries (1–4 rotors, NA, turbo and supercharged, peripheral and side ports) pass the fuzz checks.
 
 ### Random configurations and real-time cost
 

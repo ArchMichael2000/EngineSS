@@ -35,6 +35,9 @@ export class IntakeSystem {
   private readonly resonatorTee?: Junction;
   private readonly resonatorCavity?: Junction;
   private readonly stacks: ReservoirOrifice[] = [];
+  /** Wankel: one runner per rotor, fed by its three faces' port passages through a junction. */
+  private readonly rotorRunners: Duct[] = [];
+  private readonly rotorPorts: Junction[] = [];
   private readonly throttleNoise: BandNoise;
   private readonly throttleDiameter: number;
   private bypassMax: number;
@@ -63,7 +66,7 @@ export class IntakeSystem {
     this.bypassMax = it.idleBypassAreaMm2 * 1e-6;
     this.throttleNoise = new BandNoise(rng, sampleRate, 0.6);
     this.runners = Array.from({ length: n }, (_, i) => new Duct(sampleRate, {
-      lengthM: it.runnerLengthMm / 1000,
+      lengthM: spec.rotary ? 0.04 : it.runnerLengthMm / 1000,
       diameterM: it.runnerDiameterMm / 1000,
       temperatureK: this.airTempK,
       gamma: 1.4,
@@ -73,12 +76,31 @@ export class IntakeSystem {
     this.hasPlenum = it.type !== "itbs" && it.type !== "velocity-stacks";
     this.boosted = spec.forcedInduction.kind !== "na";
 
+    // Wankel: the three faces of a rotor share its intake port. Each face's "runner" is then a short
+    // port passage, and the rotor's runner joins them to the plenum.
+    let upstream = this.runners;
+    if (spec.rotary) {
+      const rotors = spec.rotary.rotors;
+      this.rotorRunners = Array.from({ length: rotors }, (_, k) => new Duct(sampleRate, {
+        lengthM: it.runnerLengthMm / 1000,
+        diameterM: it.runnerDiameterMm / 1000,
+        temperatureK: this.airTempK,
+        gamma: 1.4,
+        name: `rotor-runner${k + 1}`,
+      }));
+      this.rotorPorts = this.rotorRunners.map((rotorDuct, k) => new Junction(
+        [...this.runners.slice(k * 3, k * 3 + 3).map((duct) => ({ duct, end: "a" as const })), { duct: rotorDuct, end: "b" as const }],
+        0, P_AMBIENT, 1.4,
+      ));
+      upstream = this.rotorRunners;
+    }
+
     if (this.hasPlenum) {
-      this.plenum = new Junction(this.runners.map((duct) => ({ duct, end: "a" as const })), Math.max(0.2, it.plenumVolumeL) / 1000, P_AMBIENT, 1.4);
+      this.plenum = new Junction(upstream.map((duct) => ({ duct, end: "a" as const })), Math.max(0.2, it.plenumVolumeL) / 1000, P_AMBIENT, 1.4);
       // Radiused runner entries (K ≈ 0.08); reversion jets into the plenum lose their head (K ≈ 0.9).
       this.plenum.setPortLoss(0.08, 0.9);
     } else {
-      this.stacks = this.runners.map((duct) => new ReservoirOrifice({ duct, end: "a" }, sampleRate));
+      this.stacks = upstream.map((duct) => new ReservoirOrifice({ duct, end: "a" }, sampleRate));
     }
 
     // Airbox → filter element → snorkel → mouth. Carbs and ITBs with open filters keep a small volume.
@@ -139,6 +161,7 @@ export class IntakeSystem {
    * @param bypass 0..1 idle-air-control opening
    */
   step(throttle: number, bypass: number, dt: number): void {
+    for (const j of this.rotorPorts) j.solve(0, dt);
     // Discharge coefficient rises from ~0.7 (sharp-edged gap) to ~0.86 with the plate edge-on.
     const cdA = (0.7 + 0.16 * clamp(throttle, 0, 1)) * this.throttleArea(throttle, bypass);
     if (this.plenum) {
@@ -169,9 +192,9 @@ export class IntakeSystem {
     } else {
       // ITBs / velocity stacks: each runner mouth is its own throttle (plate ≈ runner bore) and
       // radiator; the idle-air bypass and plate leakage are shared across the stacks.
-      const n = Math.max(1, this.runners.length);
       // ITB bores run ~10 % over the runner; wide open the stack is a bellmouth (Cd ≈ 0.95).
-      const itbArea = this.plateArea(throttle, 2.2 * this.runners[0].radius) + (this.bypassMax * clamp(bypass, 0, 1) + 2e-6) / n;
+      const n = Math.max(1, this.stacks.length);
+      const itbArea = this.plateArea(throttle, 2.2 * (this.rotorRunners[0] ?? this.runners[0]).radius) + (this.bypassMax * clamp(bypass, 0, 1) + 2e-6) / n;
       const perRunner = (0.7 + 0.25 * clamp(throttle, 0, 1)) * itbArea;
       const reservoir = this.boosted ? this.upstreamPa : this.airbox ? P_AMBIENT + this.airbox.pressure : P_AMBIENT;
       let acc = 0;
@@ -204,13 +227,14 @@ export class IntakeSystem {
   /** Block-rate housekeeping: duct gas state follows manifold pressure and charge temperature. */
   updateBlock(): void {
     for (const r of this.runners) r.setTemperature(this.airTempK, Math.max(0.05 * P_AMBIENT, P_AMBIENT + r.staticGauge));
+    for (const r of this.rotorRunners) r.setTemperature(this.airTempK, Math.max(0.05 * P_AMBIENT, P_AMBIENT + r.staticGauge));
     this.flowFilterState = this.flowFilterState * 0.9 + this.throttleMassFlow * 0.1;
     this.smoothFlow = this.flowFilterState;
     if (this.filterJoint) this.filterJoint.updateResistance(this.smoothFlow);
   }
 
   ducts(): Duct[] {
-    const list = [...this.runners];
+    const list = [...this.runners, ...this.rotorRunners];
     if (this.filterDuct) list.push(this.filterDuct);
     if (this.snorkel) list.push(this.snorkel);
     if (this.snorkelInner) list.push(this.snorkelInner);
@@ -224,7 +248,7 @@ export class IntakeSystem {
       this.plenum.pressure = mapPa - P_AMBIENT;
       this.mapPa = mapPa;
     }
-    for (const r of this.runners) r.setTemperature(this.airTempK, this.hasPlenum ? mapPa : P_AMBIENT);
+    for (const r of [...this.runners, ...this.rotorRunners]) r.setTemperature(this.airTempK, this.hasPlenum ? mapPa : P_AMBIENT);
   }
 
   /** Compressor inlet (airbox) absolute pressure. */

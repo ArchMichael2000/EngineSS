@@ -15,7 +15,7 @@ const TOOLTIPS = {
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
   crankshaft: 'Cross-plane creates the classic V8 burble with uneven exhaust pulses. Flat-plane produces an even, high-pitched scream. Odd-fire creates an asymmetric, distinctive rhythm.',
-  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection). Two-strokes fire every revolution through piston-controlled ports; the crankcase pumps the charge and a tuned expansion chamber makes the power band.',
+  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection). Two-strokes fire every revolution through piston-controlled ports; the crankcase pumps the charge and a tuned expansion chamber makes the power band. Wankel rotaries fire each rotor once per e-shaft revolution through ports the apex seals sweep open; idle character selects the porting (stock side ports → street → bridgeport → peripheral port).',
   aspiration: 'Naturally aspirated engines breathe freely. Turbochargers add spool whine and blow-off sounds. Superchargers add a constant mechanical whine proportional to RPM.',
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
@@ -122,7 +122,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cylinders</label>
+            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{config.quick.cycle === 'rotary' ? 'Rotors' : 'Cylinders'}</label>
             <InfoTooltip text={TOOLTIPS.cylinderCount} />
           </div>
           <span className="text-xs font-[Orbitron] text-neon-cyan">{config.quick.cylinderCount}</span>
@@ -131,7 +131,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           value={[config.quick.cylinderCount]}
           onValueChange={([v]) => updateQuick('cylinderCount', v)}
           min={1}
-          max={16}
+          max={config.quick.cycle === 'rotary' ? 4 : 16}
           step={1}
           className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan [&_[role=slider]]:shadow-[0_0_6px_oklch(0.75_0.18_195/0.5)]"
         />
@@ -193,6 +193,8 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
                 fuel: fuel as FuelType,
                 // Diesels are governed far lower than spark engines.
                 ...(fuel === 'diesel' && config.quick.redline > 5200 && { redline: 4800 }),
+                // Rotary: the count is rotors (displacement = rotors × one chamber, Mazda convention).
+                ...(cycle === 'rotary' && config.quick.cylinderCount > 4 && { cylinderCount: 2, displacement: 1.3 }),
               },
             });
           }}
@@ -204,6 +206,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <SelectItem value="four-stroke:gasoline">Four-Stroke Gasoline</SelectItem>
             <SelectItem value="four-stroke:diesel">Four-Stroke Diesel</SelectItem>
             <SelectItem value="two-stroke:gasoline">Two-Stroke (crankcase-scavenged)</SelectItem>
+            <SelectItem value="rotary:gasoline">Wankel Rotary</SelectItem>
           </SelectContent>
         </Select>
       </div>

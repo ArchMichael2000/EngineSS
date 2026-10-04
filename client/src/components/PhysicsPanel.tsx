@@ -85,7 +85,9 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
   return (
     <div className="space-y-2.5">
       <div className="rounded border border-hud-line/30 p-2 text-[11px] font-[Rajdhani] text-foreground/80 space-y-0.5">
-        <div>Bore × stroke {spec.boreMm.toFixed(1)} × {spec.strokeMm.toFixed(1)} mm · rod {spec.rodLengthMm.toFixed(0)} mm · bank {spec.bankAngleDeg}°</div>
+        {spec.rotary
+          ? <div>{spec.rotary.rotors} rotor{spec.rotary.rotors > 1 ? 's' : ''} × {(3 * Math.sqrt(3) * spec.rotary.eccentricityMm * spec.rotary.generatingRadiusMm * spec.rotary.rotorWidthMm / 1000).toFixed(0)} cc chamber, 3 faces each</div>
+          : <div>Bore × stroke {spec.boreMm.toFixed(1)} × {spec.strokeMm.toFixed(1)} mm · rod {spec.rodLengthMm.toFixed(0)} mm · bank {spec.bankAngleDeg}°</div>}
         <div>Firing order {schedule.firingOrder.join('-')}</div>
         <div>Intervals {schedule.intervalsDeg.map((d) => Math.round(d)).join(' / ')}°</div>
         {schedule.notes.map((n) => <div key={n} className="text-neon-pink/80">{n}</div>)}
@@ -113,9 +115,20 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
         {spec.twoStroke.expansionChamber && slider('expansionChamberTunedRpm', 'Pipe tuned for', spec.twoStroke.tunedRpm, 3000, 16000, 50, ' rpm')}
       </>)}
 
-      {!spec.twoStroke && section('Valvetrain')}
-      {!spec.twoStroke && select('valvesPerCylinder', 'Valves / cylinder', String(spec.valves.intakeCount + spec.valves.exhaustCount), [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']])}
-      {!spec.twoStroke && (<>
+      {spec.rotary && (<>
+        {section('Rotary ports')}
+        <div className="text-[11px] font-[Rajdhani] text-foreground/70">R {spec.rotary.generatingRadiusMm.toFixed(1)} mm · e {spec.rotary.eccentricityMm.toFixed(1)} mm · b {spec.rotary.rotorWidthMm.toFixed(1)} mm (e-shaft degrees: 0 firing TDC, 540 overlap TDC)</div>
+        {select('rotaryExhaustPort', 'Exhaust port', spec.rotary.exhaustPort, [['peripheral', 'Peripheral'], ['side', 'Side (Renesis-style)']])}
+        {select('rotaryIntakePort', 'Intake port', spec.rotary.intakePort, [['side', 'Side'], ['peripheral', 'Peripheral']])}
+        {slider('rotaryIntakeOpenDeg', 'Intake opens', spec.rotary.intakeOpenDeg, 440, 600, 1, '°')}
+        {slider('rotaryIntakeCloseDeg', 'Intake closes', spec.rotary.intakeCloseDeg, 820, 920, 1, '°')}
+        {slider('rotaryExhaustOpenDeg', 'Exhaust opens', spec.rotary.exhaustOpenDeg, 160, 240, 1, '°')}
+        {slider('rotaryExhaustCloseDeg', 'Exhaust closes', spec.rotary.exhaustCloseDeg, 540, 640, 1, '°')}
+      </>)}
+
+      {!spec.twoStroke && !spec.rotary && section('Valvetrain')}
+      {!spec.twoStroke && !spec.rotary && select('valvesPerCylinder', 'Valves / cylinder', String(spec.valves.intakeCount + spec.valves.exhaustCount), [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']])}
+      {!spec.twoStroke && !spec.rotary && (<>
       {slider('intakeDurationDeg', 'Intake duration @ .050"', spec.cam.intakeDurationDeg, 170, 320, 1, '°')}
       {slider('exhaustDurationDeg', 'Exhaust duration @ .050"', spec.cam.exhaustDurationDeg, 170, 320, 1, '°')}
       {slider('intakeCenterlineDeg', 'Intake centreline', spec.cam.intakeCenterlineDeg, 90, 130, 0.5, '° ATDC', 1)}

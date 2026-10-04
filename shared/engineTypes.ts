@@ -351,6 +351,13 @@ export interface PhysicalOverrides {
   scavengeQuality: number;
   expansionChamber: boolean;
   expansionChamberTunedRpm: number;
+  /** Rotary: porting (exhaust peripheral/side, intake side/peripheral) and port events in e-shaft degrees of a face's 1080° cycle. */
+  rotaryExhaustPort: 'peripheral' | 'side';
+  rotaryIntakePort: 'side' | 'peripheral';
+  rotaryIntakeOpenDeg: number;
+  rotaryIntakeCloseDeg: number;
+  rotaryExhaustOpenDeg: number;
+  rotaryExhaustCloseDeg: number;
   /** Diesel full-load fuel per cylinder per cycle, mg (pump fuel-plate / calibration limit; default: smoke limit at rated boost). */
   dieselFullLoadFuelMg: number;
   /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */

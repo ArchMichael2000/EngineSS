@@ -67,6 +67,8 @@ describe("reference engines against published figures", () => {
     ["cummins-6bt", "power"],
     ["yamaha-rd350lc", "torque"],
     ["yamaha-rd350lc", "power"],
+    ["mazda-13b-fc", "torque"],
+    ["mazda-13b-fc", "power"],
   ];
   for (const [key, kind] of points) {
     it(`${key} peak ${kind}`, () => {
@@ -147,6 +149,27 @@ describe("two-stroke", () => {
     const plain = dyno("yamaha-rd350lc", 8000, 2, (c) => ({ ...c, physical: { ...c.physical, expansionChamber: false } })).telemetry.powerKw;
     // Blair: a tuned pipe adds tens of percent at its tuned speed over a plain exhaust.
     expect(tuned / plain).toBeGreaterThan(1.2);
+  }, 60_000);
+});
+
+describe("rotary", () => {
+  it("a two-rotor fires every 180° of e-shaft (three faces per rotor, rotors 180° apart)", () => {
+    const s = solveFiringSchedule(specOf("mazda-13b-fc"));
+    expect(s.cylinders.length).toBe(6);
+    expect(s.intervalsDeg.map(Math.round)).toEqual([180, 180, 180, 180, 180, 180]);
+  });
+
+  it("peripheral intake ports trade idle vacuum and dilution for top-end breathing", () => {
+    const pp = (c: EngineConfiguration) => ({ ...c, quick: { ...c.quick, idleCharacter: "lopey" as const } });
+    const idleStock = new EngineSimulator(specOf("mazda-13b-fc"), FS);
+    const idlePP = new EngineSimulator(specOf("mazda-13b-fc", pp), FS);
+    for (const s of [idleStock, idlePP]) {
+      s.setControls({ mode: "free", throttle: 0 });
+      s.prewarm(2);
+    }
+    // Overlap through the open ports: almost no manifold vacuum at idle.
+    expect(idlePP.telemetry.mapKpa).toBeGreaterThan(idleStock.telemetry.mapKpa + 30);
+    expect(dyno("mazda-13b-fc", 4000, 2, pp).telemetry.brakeTorqueNm).toBeLessThan(dyno("mazda-13b-fc", 4000, 2).telemetry.brakeTorqueNm);
   }, 60_000);
 });
 
@@ -261,7 +284,7 @@ describe("random configurations", () => {
   const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
   for (const [seed, diesel] of cases) {
     it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed, FS, { diesel, twoStroke: false });
+      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }

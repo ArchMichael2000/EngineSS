@@ -331,4 +331,17 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "na" },
     },
   },
+  "mazda-13b-fc": {
+    name: "Mazda 13B (FC RX-7 Series 5 NA)",
+    description: "Two-rotor Wankel, 2 × 654 cc, side intake ports, peripheral exhaust ports",
+    provenance: { geometry: "published", induction: "estimated", exhaust: "estimated" },
+    published: { peakTorqueNm: [187, 4000], peakPowerKw: [118, 7000] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 2, displacement: 1.308, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 8000, cycle: "rotary" },
+      // R = 105 mm, e = 15 mm, b = 80 mm follow from the 654 cc chamber with 13B proportions.
+      physical: { compressionRatio: 9.7, idleRpm: 800 },
+      forcedInduction: { type: "na" },
+    },
+  },
 };
