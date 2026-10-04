@@ -1127,7 +1127,7 @@ export class AudioEngine {
   private perspective: ListenerPerspective = "exterior-rear";
   private stemGains: Partial<StemGains> = {};
   private telemetry: EngineTelemetry | null = null;
-  private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number } | null = null;
+  private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number; internalRate?: number } | null = null;
 
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
   private state: PlaybackState = {
@@ -1416,7 +1416,11 @@ export class AudioEngine {
         this.state.rpm = msg.telemetry.rpm;
         this.state.boost = Math.max(0, msg.telemetry.boostKpa / 6.895);
       } else if (msg.type === "ready") {
-        this.engineInfo = { firingOrder: msg.firingOrder, intervals: msg.intervals, notes: msg.notes, displacementL: msg.displacementL };
+        this.engineInfo = { firingOrder: msg.firingOrder, intervals: msg.intervals, notes: msg.notes, displacementL: msg.displacementL, internalRate: msg.internalRate };
+      } else if (msg.type === "rate") {
+        // The worklet stepped the simulator's internal rate down to hold real time on this machine.
+        if (this.engineInfo) this.engineInfo = { ...this.engineInfo, internalRate: msg.internalRate };
+        console.info(`v16 core: internal rate ${msg.internalRate} Hz (audio thread load ${(msg.load * 100).toFixed(0)} %)`);
       } else if (msg.type === "error") {
         console.warn("v16 core:", msg.message);
       }

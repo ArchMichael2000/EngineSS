@@ -574,11 +574,16 @@ export class Cylinder {
     const dPrev2 = isExhaust ? this.prevExhaustD2 : this.prevIntakeD2;
     let x0 = 2 * dPrev - dPrev2;
     let g0 = this.valveResidual(x0);
-    let x1 = x0 - g0 / this.dOutdD(x0);
-    let g1 = this.valveResidual(x1);
-    let d = x1;
-    let converged = false;
-    for (let it = 0; it < 6; it++) {
+    let d = x0;
+    let converged = Math.abs(g0) < 1e-9 + 1e-6 * Math.abs(this.vsOut);
+    let x1 = x0;
+    let g1 = g0;
+    if (!converged) {
+      x1 = x0 - g0 / this.dOutdD(x0);
+      g1 = this.valveResidual(x1);
+      d = x1;
+    }
+    for (let it = 0; it < 6 && !converged; it++) {
       if (Math.abs(g1) < 1e-9 + 1e-6 * Math.abs(this.vsOut)) { converged = true; d = x1; break; }
       const denom = g1 - g0;
       if (denom === 0) break;
@@ -605,7 +610,7 @@ export class Cylinder {
         }
       }
     }
-    this.valveResidual(d);
+    // Every path above ends with the residual evaluated at d, so vsOut already holds its flow.
     const out = this.vsOut;
     if (isExhaust) {
       this.prevExhaustD2 = this.prevExhaustD;

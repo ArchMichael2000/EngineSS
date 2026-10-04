@@ -168,6 +168,7 @@ export class EngineSimulator {
   private fuelCut = false;
   private limiterActive = false;
   private softCutFraction = 0;
+  private readonly command: CombustionCommand = { sparkAdvanceDeg: 0, lambda: 1, fuelEnabled: true, sparkEnabled: true, fuelOctane: 95, knockControl: true };
   private sparkAdvance = 15;
   private lambdaTarget = 1;
   private readonly sparkCuts: Uint8Array;
@@ -335,6 +336,16 @@ export class EngineSimulator {
     this.drivetrain.requestShift(dir);
   }
 
+  /**
+   * Estimated CPU cost as a real-time factor on the reference machine (fit over the reference
+   * engines: 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers at 48 kHz, ±25 %).
+   * Scales with the sample rate; the worklet multiplies it by a measured machine factor.
+   */
+  get costEstimate(): number {
+    const turbos = this.fi ? this.fi.sourceVolumeAccelerations.length : 0;
+    return (0.11 + 0.05 * this.cylinders.length + 0.004 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
+  }
+
   get rpm(): number {
     return (this.omega * 60) / TWO_PI;
   }
@@ -464,11 +475,27 @@ export class EngineSimulator {
     const cut = this.sparkCuts[i] === 1;
     const lim = this.spec.calibration.revLimiter;
     const fuelEnabled = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && !(cut && lim === "soft");
-    const ignitionCut = (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
+    // Soft limiter: a cut cylinder loses spark as well as fuel, so the cut acts on the charge
+    // already inducted instead of one cycle later. Every strategy keeps a hard ignition backstop on
+    // instantaneous speed 150 rpm past the limiter (overspeed protection in production ECUs).
+    const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + 150 && this.running;
+    const ignitionCut =
+      overspeed ||
+      (cut && lim === "soft") ||
+      (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) ||
+      (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
     const live = this.running || this.cranking;
     const sparkEnabled = !ignitionCut && live;
     const cal = this.spec.calibration;
-    return { sparkAdvanceDeg: this.sparkAdvance, lambda: this.lambdaTarget, fuelEnabled: fuelEnabled && live, sparkEnabled, fuelOctane: cal.fuelOctane, knockControl: cal.knockControl };
+    // One reused command object: this runs per cylinder per sample, and cylinders never keep it.
+    const c = this.command;
+    c.sparkAdvanceDeg = this.sparkAdvance;
+    c.lambda = this.lambdaTarget;
+    c.fuelEnabled = fuelEnabled && live;
+    c.sparkEnabled = sparkEnabled;
+    c.fuelOctane = cal.fuelOctane;
+    c.knockControl = cal.knockControl;
+    return c;
   }
 
   private throttlePlate(): number {
@@ -660,7 +687,8 @@ export class EngineSimulator {
       else if (this.limiterActive && rpm < lim - 150) this.limiterActive = false;
       this.softCutFraction = 0;
     } else if (cal.revLimiter === "soft") {
-      this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 0.85);
+      // Progressive cut, reaching every cylinder 130 rpm past the limiter (high-torque engines unloaded).
+      this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 1);
       this.limiterActive = this.softCutFraction > 0;
       for (let i = 0; i < this.sparkCuts.length; i++) this.sparkCuts[i] = this.rng.next() < this.softCutFraction ? 1 : 0;
     } else {

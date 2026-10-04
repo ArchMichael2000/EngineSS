@@ -7,6 +7,7 @@ import type { EngineControls, StemGains } from "../../../../shared/ess/engine";
 import { resolveEngineSpec } from "../../../../shared/ess/resolveSpec";
 import type { Perspective } from "../../../../shared/ess/observer";
 import type { EngineConfiguration } from "../../../../shared/engineTypes";
+import { RATE_TIERS, Upsampler } from "../../../../shared/ess/resample";
 
 declare const sampleRate: number;
 declare function registerProcessor(name: string, ctor: unknown): void;
@@ -26,10 +27,35 @@ type Message =
 
 const FADE_SAMPLES = 2400;
 const TELEMETRY_INTERVAL = 2048;
+/** Target share of the audio thread's time budget the simulator may use. */
+const LOAD_TARGET = 0.6;
+/** Sustained load above this steps the running engine down one rate tier. */
+const LOAD_OVERLOAD = 0.9;
+const LOAD_WINDOW_SAMPLES = 24000;
+
+const now = (): number => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
+
+/** A simulator running at an internal rate, upsampled to the device rate when reduced. */
+class Voice {
+  readonly upsampler: Upsampler | null;
+  constructor(readonly sim: EngineSimulator, readonly tier: number) {
+    this.upsampler = tier < RATE_TIERS.length && RATE_TIERS[tier] < 1 ? new Upsampler(sim.sampleRate, sampleRate, (l, r, n) => sim.process(l, r, n)) : null;
+  }
+  render(left: Float32Array, right: Float32Array, n: number): void {
+    if (this.upsampler) this.upsampler.process(left, right, n);
+    else this.sim.process(left, right, n);
+  }
+}
 
 class EssProcessor extends AudioWorkletProcessor {
-  private sim: EngineSimulator | null = null;
-  private outgoing: EngineSimulator | null = null;
+  private voice: Voice | null = null;
+  private outgoing: Voice | null = null;
+  private config: EngineConfiguration | null = null;
+  /** Measured CPU speed relative to the reference machine the cost estimate was fitted on. */
+  private machineFactor = 0.75; // start optimistic; overloads step down and refine it
+  private loadMs = 0;
+  private loadSamples = 0;
+  private overloadWindows = 0;
   private fade = 0;
   private controls: Partial<EngineControls> = { mode: "free", throttle: 0, load: 0 };
   private perspective: Perspective = "exterior-rear";
@@ -49,43 +75,86 @@ class EssProcessor extends AudioWorkletProcessor {
       switch (msg.type) {
         case "config": {
           if (msg.perspective) this.perspective = msg.perspective;
-          const spec = resolveEngineSpec(msg.config);
-          const next = new EngineSimulator(spec, sampleRate, { perspective: this.perspective, monitorGainDb: this.monitorDb });
-          Object.assign(next.stems, this.stems);
-          next.setControls(this.controls);
-          this.outgoing = this.sim;
-          this.sim = next;
-          this.fade = 0;
-          this.port.postMessage({ type: "ready", firingOrder: next.schedule.firingOrder, intervals: next.schedule.intervalsDeg, notes: next.schedule.notes, displacementL: next.displacementL });
+          this.config = msg.config;
+          const next = this.build(msg.config, null);
+          this.port.postMessage({ type: "ready", firingOrder: next.sim.schedule.firingOrder, intervals: next.sim.schedule.intervalsDeg, notes: next.sim.schedule.notes, displacementL: next.sim.displacementL, internalRate: next.sim.sampleRate });
           break;
         }
         case "controls":
           this.controls = { ...this.controls, ...msg.controls };
-          this.sim?.setControls(this.controls);
-          this.outgoing?.setControls(this.controls);
+          this.voice?.sim.setControls(this.controls);
+          this.outgoing?.sim.setControls(this.controls);
           break;
         case "perspective":
           this.perspective = msg.perspective;
-          this.sim?.setPerspective(msg.perspective);
+          this.voice?.sim.setPerspective(msg.perspective);
           break;
         case "stems":
           this.stems = { ...this.stems, ...msg.stems };
-          if (this.sim) Object.assign(this.sim.stems, this.stems);
+          if (this.voice) Object.assign(this.voice.sim.stems, this.stems);
           break;
         case "ignition":
-          if (msg.on) this.sim?.start();
-          else this.sim?.stopEngine();
+          if (msg.on) this.voice?.sim.start();
+          else this.voice?.sim.stopEngine();
           break;
         case "shift":
-          this.sim?.shift(msg.dir);
+          this.voice?.sim.shift(msg.dir);
           break;
         case "monitorGain":
           this.monitorDb = msg.db;
-          this.sim?.setMonitorGain(msg.db);
+          this.voice?.sim.setMonitorGain(msg.db);
           break;
       }
     } catch (error) {
       this.port.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * Build a voice at the highest rate tier whose estimated load fits the budget (or at `forceTier`).
+   * Physics is rate-independent, so a reduced tier changes only the audio bandwidth.
+   */
+  private build(config: EngineConfiguration, forceTier: number | null): Voice {
+    const spec = resolveEngineSpec(config);
+    const make = (tier: number) => {
+      const sim = new EngineSimulator(spec, Math.round(sampleRate * RATE_TIERS[tier]), { perspective: this.perspective, monitorGainDb: this.monitorDb });
+      Object.assign(sim.stems, this.stems);
+      sim.setControls(this.controls);
+      return sim;
+    };
+    let tier = forceTier ?? 0;
+    let sim = make(tier);
+    if (forceTier === null) {
+      const full = sim.costEstimate * this.machineFactor;
+      while (tier < RATE_TIERS.length - 1 && full * RATE_TIERS[tier] > LOAD_TARGET) tier++;
+      if (tier > 0) sim = make(tier);
+    }
+    const voice = new Voice(sim, tier);
+    this.outgoing = this.voice;
+    this.voice = voice;
+    this.fade = 0;
+    this.loadMs = 0;
+    this.loadSamples = 0;
+    this.overloadWindows = 0;
+    return voice;
+  }
+
+  /** Learn the machine factor from measured load; step down a tier if the audio thread overruns. */
+  private measureLoad(ms: number, n: number): void {
+    const voice = this.voice;
+    if (!voice || this.outgoing) return; // crossfades run two engines: not representative
+    this.loadMs += ms;
+    this.loadSamples += n;
+    if (this.loadSamples < LOAD_WINDOW_SAMPLES) return;
+    const load = this.loadMs / ((this.loadSamples / sampleRate) * 1000);
+    this.loadMs = 0;
+    this.loadSamples = 0;
+    const measured = load / Math.max(0.01, voice.sim.costEstimate);
+    this.machineFactor += (measured - this.machineFactor) * 0.5;
+    this.overloadWindows = load > LOAD_OVERLOAD ? this.overloadWindows + 1 : 0;
+    if (this.overloadWindows >= 2 && voice.tier < RATE_TIERS.length - 1 && this.config) {
+      const next = this.build(this.config, voice.tier + 1);
+      this.port.postMessage({ type: "rate", internalRate: next.sim.sampleRate, load });
     }
   }
 
@@ -95,16 +164,19 @@ class EssProcessor extends AudioWorkletProcessor {
     const right = out[1] ?? out[0];
     if (!left) return true;
     const n = left.length;
-    if (!this.sim) {
+    const voice = this.voice;
+    if (!voice) {
       left.fill(0);
       right.fill(0);
       return true;
     }
-    this.sim.process(left, right, n);
+    const t0 = now();
+    voice.render(left, right, n);
+    this.measureLoad(now() - t0, n);
     if (this.fade < FADE_SAMPLES) {
       // Crossfade from the previous engine (config change) or fade in from silence (start).
       const old = this.outgoing;
-      if (old) old.process(this.scratchL, this.scratchR, n);
+      if (old) old.render(this.scratchL, this.scratchR, n);
       for (let i = 0; i < n; i++) {
         const g = Math.min(1, (this.fade + i) / FADE_SAMPLES);
         const w = 0.5 - 0.5 * Math.cos(Math.PI * g);
@@ -117,7 +189,7 @@ class EssProcessor extends AudioWorkletProcessor {
     this.sinceTelemetry += n;
     if (this.sinceTelemetry >= TELEMETRY_INTERVAL) {
       this.sinceTelemetry = 0;
-      this.port.postMessage({ type: "telemetry", telemetry: { ...this.sim.telemetry }, controls: this.sim.currentControls });
+      this.port.postMessage({ type: "telemetry", telemetry: { ...voice.sim.telemetry }, controls: voice.sim.currentControls });
     }
     return true;
   }

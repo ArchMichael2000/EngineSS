@@ -1,11 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { EngineSimulator } from "./engine";
 import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
 import { REFERENCE_ENGINES } from "./reference/engines";
 import type { EngineConfiguration } from "../engineTypes";
+import { runConfig } from "./fuzz";
 
 const FS = 48000;
+
+// These tests are long synchronous simulations; yield a macrotask between them so the worker can
+// answer the runner's RPC (otherwise a file running > 60 s trips vitest's onTaskUpdate timeout).
+afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 function specOf(key: string, patch: (c: EngineConfiguration) => EngineConfiguration = (c) => c) {
   return resolveEngineSpec(patch({ ...REFERENCE_ENGINES[key].config, seed: 1 }));
@@ -143,10 +148,10 @@ describe("forced induction", () => {
 });
 
 describe("numerical health", () => {
-  it("every reference engine idles with finite output near its target", () => {
-    const out = new Float32Array(4800);
-    const outR = new Float32Array(4800);
-    for (const key of Object.keys(REFERENCE_ENGINES)) {
+  for (const key of Object.keys(REFERENCE_ENGINES)) {
+    it(`${key} idles with finite output near its target`, () => {
+      const out = new Float32Array(4800);
+      const outR = new Float32Array(4800);
       const spec = specOf(key);
       const sim = new EngineSimulator(spec, FS);
       sim.setControls({ mode: "free", throttle: 0 });
@@ -155,6 +160,17 @@ describe("numerical health", () => {
       for (let i = 0; i < out.length; i++) expect(Number.isFinite(out[i])).toBe(true);
       expect(sim.rpm).toBeGreaterThan(spec.calibration.idleRpm * 0.4);
       expect(sim.rpm).toBeLessThan(spec.calibration.idleRpm * 1.8);
-    }
-  }, 120_000);
+    }, 30_000);
+  }
+});
+
+describe("random configurations", () => {
+  // A few seeds from the robustness sweep (scripts/fuzzConfigs.ts runs the full set), including
+  // seed 34, a 10 L turbo inline-8 that once overran its soft limiter.
+  for (const seed of [3, 17, 34]) {
+    it(`seed ${seed} idles, holds the dyno and respects its limiter`, () => {
+      const r = runConfig(seed);
+      expect(r.problems).toEqual([]);
+    }, 120_000);
+  }
 });

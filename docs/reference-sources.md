@@ -58,6 +58,8 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
 | Cabin boom gain | 0.00175 Pa per N·m of 25–180 Hz torque ripple | **Unverified.** No open interior recordings; set so WOT boom sits a few dB above the airborne exhaust. |
 | Afterfire | Continuous afterburning (τ ≈ 3 ms when hot with O₂) while firing; discrete pops need fuel cut, limiter cut or misfires | Matches observed behaviour: crackle on lift-off and the limiter, flame without pops under load. |
+| Rev limiter | Soft: a random share of cylinders loses spark *and* fuel, ramping from 0 at limiter − 30 rpm to all cylinders at limiter + 130 rpm, with 12° retard on the rest; every strategy has an overspeed ignition cut on instantaneous speed at limiter + 150 rpm | A fuel-only soft cut acts one cycle late. A 10 L turbo inline-8 with a light flywheel overran its 5300 rpm limiter to 6041 rpm with it. Spark cut acts on the charge already inducted. |
+| Internal rate tiers | 1, 5/6, 2/3 of the device rate; cost estimate 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers (× real time at 48 kHz on the reference machine, ±25 %) times a measured machine factor, kept under 60 % of the audio thread; 2 s above 90 % steps down one tier | Physics is rate-independent: W16 brake torque at 32 kHz is within 0.15 % of 48 kHz. Kaiser-windowed sinc upsampler (32 taps, β 8): flat to 0.75 of the reduced Nyquist, images ≤ −60 dB. |
 
 ## 2. Engine data: `shared/ess/reference/engines.ts`
 
@@ -186,6 +188,25 @@ extent; Daigle 1979, Embleton 1996), which took the 2JZ order-profile error from
 
 Speed tracking without a tachometer is reliable for slow sweeps and steady segments (≈1 % on
 known renders); fast free-revs and pass-bys (Doppler) need a speed hint or a vehicle model.
+
+### Random configurations and real-time cost
+
+`scripts/fuzzConfigs.ts` (library `shared/ess/fuzz.ts`) draws configurations across layouts,
+1–16 cylinders, 0.1–1.4 L per cylinder, 3500–16000 rpm redlines, every aspiration and random
+physical overrides. For each one it checks four things: idle (no stall, no runaway, finite output),
+a WOT dyno hold at 0.7 × redline with positive brake torque, overrun, and a free rev against the
+limiter. **80 of 80 seeds pass.** Seeds 3, 17 and 34 run in the unit tests.
+
+Measured cost per engine, as a real-time factor at 48 kHz on a single vCPU of the build machine:
+
+| Engine | Cylinders | Ducts | Real-time factor |
+|---|---|---|---|
+| Ducati 1299 | 2 | 14 | 0.24 |
+| Honda K20A | 4 | 22 | 0.40 |
+| GM LS3 | 8 | 42 | 0.71 |
+| Ferrari F140 | 12 | 40 | 0.83 |
+| Merlin V12 (supercharged) | 12 | 28 | 0.96 |
+| Bugatti W16 (quad turbo) | 16 | 56 | 1.22 → 0.81 at the 2/3 tier |
 
 ### Wave physics (from the core build)
 
