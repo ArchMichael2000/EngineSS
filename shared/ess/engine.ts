@@ -331,7 +331,7 @@ export class EngineSimulator {
       runners[i].sendB = cyl.intakeSend;
       this.plenumBurned = Math.max(0, this.plenumBurned + cyl.spilledToPlenum - cyl.takenFromPlenum);
       torque += cyl.torque;
-      this.pressureRates[i] = cyl.pressureRate;
+      this.pressureRates[i] = cyl.pressure - P_AMBIENT + cyl.knockPressure;
       if (cyl.knocked) this.telemetry.knockEvents++;
       if (cyl.exhaustMassFlow > 0) {
         this.exhaust.noteCylinderFlow(i, cyl.exhaustMassFlow, cyl.exhaustGasTemp);
@@ -344,7 +344,7 @@ export class EngineSimulator {
       }
       if (cyl.intakeClosed) this.structure.valveSeat(rpm, false);
       if (cyl.exhaustClosed) this.structure.valveSeat(rpm, true);
-      if (alpha > 6 && alpha < 6 + (this.omega * dt * 360) / TWO_PI + 1e-9) this.structure.pistonSlap(cyl.pressure, cyl.crankRadius / (this.spec.rodLengthMm / 1000));
+      if (alpha > 6 && alpha < 6 + (this.omega * dt * 360) / TWO_PI + 1e-9) this.structure.pistonSlap(cyl.pressure - P_AMBIENT, cyl.crankRadius / (this.spec.rodLengthMm / 1000));
     }
     this.indicatedTorque = torque;
     this.blockTorque += torque - frictionTorque;
@@ -358,7 +358,7 @@ export class EngineSimulator {
     this.exhaust.step(dt);
     for (let i = 0; i < ducts.length; i++) ducts[i].commit();
 
-    this.structure.step(this.pressureRates, 0.9);
+    this.structure.step(this.pressureRates, 0.9, rpm);
     if (!render) return;
 
     // ---- Radiation to the listener
@@ -372,7 +372,7 @@ export class EngineSimulator {
       const acc = this.fi.sourceVolumeAccelerations;
       for (let k = 0; k < acc.length; k++) this.sourceQdot[s++] = acc[k] * this.stems.accessory;
     }
-    this.observer.process(this.sourceQdot, this.torqueRipple, this.ear);
+    this.observer.process(this.sourceQdot, this.torqueRipple * this.stems.structure, this.ear);
     this.splAcc += this.ear[0] * this.ear[0];
     this.splN++;
   }
@@ -589,11 +589,15 @@ export class EngineSimulator {
         this.popRemaining[g] -= dt;
         continue;
       }
-      const fuel = this.exhaustFuel[g];
-      if (fuel < 2e-7 || tendency <= 0) continue;
       const hot = clamp((this.exhaust.portTemperatureK - 820) / 250, 0, 1);
       const oxygen = clamp(this.exhaustOxygen[g] * 4, 0, 1);
-      const rate = tendency * 60 * hot * oxygen * Math.min(1, fuel / 2e-6);
+      // While the engine fires, hot exhaust oxidises scavenged fuel and oxygen continuously
+      // (afterburning, a few ms): no combustible pocket builds, so no detonation. Pops need
+      // interrupted combustion (fuel cut, limiter cut, misfire streaks) to let mixture accumulate.
+      if (!cutting) this.exhaustFuel[g] *= Math.exp(-hot * oxygen * 300 * dt);
+      const fuel = this.exhaustFuel[g];
+      if (fuel < 2e-7 || tendency <= 0) continue;
+      const rate = tendency * 60 * hot * oxygen * Math.min(1, fuel / 2e-6) * (cutting ? 1 : 0.1);
       if (this.rng.next() < rate * dt) {
         const burned = fuel * (0.35 + 0.5 * this.rng.next());
         this.exhaustFuel[g] -= burned;

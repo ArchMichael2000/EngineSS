@@ -46,6 +46,10 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Compressor wheel | Redline flow at φ 0.12, 470 m/s tip speed | Puts the WOT operating line right of peak efficiency and short of choke. |
 | Idle feed-forward | Energy balance: friction + accessories + pumping at η 0.27/(1 + overlap/30) | Lands within about 10 % of the converged idle-valve opening on all 29 engines. |
 | Accessory drag | (2.6 + 0.00035·rpm) · L | About 16 N·m on a 6 L V8 at idle, about 3 N·m on a 1 L motorcycle engine. |
+| Structure excitation | Combustion F = A·p; piston slap J = m·√(2Fc/m) with 30 µm clearance; valve seating J = 0.05 kg × 0.25 m/s·(rpm/6000); timing drive 60 N noise + 36 N mesh tone (order 21) × (rpm/1000)^1.5 | Physical impulse magnitudes. Contact durations 100 µs (seat), 0.3 ms (slap), 150 µs (chain). |
+| Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
+| Cabin boom gain | 0.00175 Pa per N·m of 25–180 Hz torque ripple | **Unverified.** No open interior recordings; set so WOT boom sits a few dB above the airborne exhaust. |
+| Afterfire | Continuous afterburning (τ ≈ 3 ms when hot with O₂) while firing; discrete pops need fuel cut, limiter cut or misfires | Matches observed behaviour: crackle on lift-off and the limiter, flame without pops under load. |
 
 ## 2. Engine data: `shared/ess/reference/engines.ts`
 
@@ -136,6 +140,20 @@ The pattern: high-revving NA engines read 10–13 % low at peak power. Their rea
 All 29 engines (8 factory presets plus 21 references) settle within about 5 % of target. The 0.5 s mean speed holds a standard deviation of 18–70 rpm on multi-cylinder engines. Two groups swing more:
 * small-inertia motorcycle engines (CP3 about 200 rpm, Ducati about 125 rpm);
 * the race-cam flat-6 (about 120 rpm).
+
+### Engine-bay perspective against HL-CEAD
+
+No-load steady speed (dyno with pedal trimmed for zero absorber torque), engine-bay listener, same statistics as the corpus:
+
+| Render | Centroid (Hz) | 2–8 kHz % | Flatness | Order-locked % | Crest |
+|---|---|---|---|---|---|
+| 1.6 L i4, 1000 rpm | 3259 | 75 | 0.31 | 38 | 8.1 |
+| 1.6 L i4, 1500 rpm | 3306 | 76 | 0.30 | 25 | 6.5 |
+| 1.6 L i4, 2000 rpm | 3003 | 67 | 0.27 | 34 | 6.7 |
+| 1.0 L i3 turbo, 1500 rpm | 2844 | 60 | 0.40 | 24 | 4.9 |
+| HL-CEAD p50 (1000 / 1500 / 2000) | 3541 / 3303 / 3312 | 62 / 63 / 63 | 0.35 / 0.35 / 0.33 | 40 / 27 / 23 | 6.2 / 5.5 / 4.8 |
+
+Every render falls inside the corpus p10–p90 ranges for flatness (0.26–0.40) and crest factor (5.0–8.9).
 
 ### Wave physics (from the core build)
 

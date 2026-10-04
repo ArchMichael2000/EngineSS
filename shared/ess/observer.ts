@@ -151,8 +151,10 @@ export class Observer {
       this.boomBp1 = boom + kHi * (this.boomBp1 - boom);
       this.boomBp2 = this.boomBp1 + kLo * (this.boomBp2 - this.boomBp1);
       const band = this.boomBp1 - this.boomBp2;
-      this.boomL = band * 0.0035;
-      this.boomR = band * 0.0032;
+      // Gain: unverified against interior recordings (none open); set so WOT boom sits a few dB above
+      // the airborne exhaust contribution, as interior order analyses of sporty cars show.
+      this.boomL = band * 0.00175;
+      this.boomR = band * 0.0016;
       l += this.boomL;
       r += this.boomR;
     }

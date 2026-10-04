@@ -203,6 +203,8 @@ export class Cylinder {
   torque = 0;
   /** Rate of pressure rise (Pa/s), excitation for block structure. */
   pressureRate = 0;
+  /** Knock ringing pressure superposed on the mean chamber pressure this sample (Pa). */
+  knockPressure = 0;
   heatReleaseRate = 0;
   /** Last completed cycle diagnostics. */
   lastPeakPressure = 0;
@@ -385,10 +387,12 @@ export class Cylinder {
 
     this.updateState();
     this.pressureRate = (this.pressure - prevPressure) / dt;
+    this.knockPressure = 0;
     if (this.knockAmp > 1) {
       // Knock ringing: first circumferential chamber mode, d/dt of Δp·e^(−t/τ)·sin(ωt).
       this.knockPhase += this.knockOmega * dt;
       this.pressureRate += this.knockAmp * this.knockOmega * Math.cos(this.knockPhase);
+      this.knockPressure = this.knockAmp * Math.sin(this.knockPhase);
       this.knockAmp *= this.knockDecay;
     }
     this.torque = (this.pressure - P_AMBIENT) * this.area * dsdth;
