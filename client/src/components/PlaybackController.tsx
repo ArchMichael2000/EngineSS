@@ -100,15 +100,20 @@ export function PlaybackController({
     sweepRef.current = requestAnimationFrame(animate);
   }, [clearSweepTimers, isPlaying, onDriveModeChange, onRpmChange, onThrottleChange, playbackState.rpm, redline]);
 
+  /** Quick actions run the engine free unless the car is being driven, where they work the pedal. */
+  const leaveDyno = useCallback(() => {
+    if (driveMode !== 'vehicle') onDriveModeChange?.('free');
+  }, [driveMode, onDriveModeChange]);
+
   const blip = useCallback(() => {
     if (blipRef.current !== null) window.clearTimeout(blipRef.current);
-    onDriveModeChange?.('free');
+    leaveDyno();
     onThrottleChange(0.85);
     blipRef.current = window.setTimeout(() => {
       onThrottleChange(0);
       blipRef.current = null;
     }, 260);
-  }, [onDriveModeChange, onThrottleChange]);
+  }, [leaveDyno, onThrottleChange]);
 
   const handleStopEngine = useCallback(() => {
     stopSweep();
@@ -326,7 +331,7 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => { onThrottleChange(0); onDriveModeChange?.('free'); }}
+          onClick={() => { onThrottleChange(0); leaveDyno(); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-cyan/50 hover:text-neon-cyan"
         >
           Idle
@@ -344,7 +349,7 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => { onDriveModeChange?.('free'); onThrottleChange(1); }}
+          onClick={() => { leaveDyno(); onThrottleChange(1); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-pink/50 hover:text-neon-pink"
         >
           Full throttle

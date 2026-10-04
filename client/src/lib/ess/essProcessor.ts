@@ -56,6 +56,8 @@ class EssProcessor extends AudioWorkletProcessor {
   private loadMs = 0;
   private loadSamples = 0;
   private overloadWindows = 0;
+  /** Last measured share of the audio thread's time budget (0–1+), for telemetry. */
+  private lastLoad = 0;
   private fade = 0;
   private controls: Partial<EngineControls> = { mode: "free", throttle: 0, load: 0 };
   private perspective: Perspective = "exterior-rear";
@@ -147,6 +149,7 @@ class EssProcessor extends AudioWorkletProcessor {
     this.loadSamples += n;
     if (this.loadSamples < LOAD_WINDOW_SAMPLES) return;
     const load = this.loadMs / ((this.loadSamples / sampleRate) * 1000);
+    this.lastLoad = load;
     this.loadMs = 0;
     this.loadSamples = 0;
     const measured = load / Math.max(0.01, voice.sim.costEstimate);
@@ -189,7 +192,7 @@ class EssProcessor extends AudioWorkletProcessor {
     this.sinceTelemetry += n;
     if (this.sinceTelemetry >= TELEMETRY_INTERVAL) {
       this.sinceTelemetry = 0;
-      this.port.postMessage({ type: "telemetry", telemetry: { ...voice.sim.telemetry }, controls: voice.sim.currentControls });
+      this.port.postMessage({ type: "telemetry", telemetry: { ...voice.sim.telemetry }, controls: voice.sim.currentControls, audio: { load: this.lastLoad, machineFactor: this.machineFactor, internalRate: voice.sim.sampleRate, tier: voice.tier } });
     }
     return true;
   }

@@ -40,12 +40,18 @@ export function useAudioEngine() {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+    // Telemetry arrives about 23 times a second; re-render only when the engine state actually changed.
+    let last = '';
     const poll = () => {
       const engine = ensureEngine();
       if (engine) {
         const state = engine.getState();
-        setPlaybackState(state);
-        setIsPlaying(state.isPlaying);
+        const key = `${state.isPlaying}|${state.throttle}|${state.load}|${state.targetRpm}|${state.driveMode}|${state.rpm}|${state.boost}`;
+        if (key !== last) {
+          last = key;
+          setPlaybackState(state);
+          setIsPlaying(state.isPlaying);
+        }
       }
       animFrameRef.current = requestAnimationFrame(poll);
     };
@@ -92,8 +98,10 @@ export function useAudioEngine() {
     setPlaybackState(prev => ({ ...prev, isPlaying: false, rpm: 0 }));
   }, [ensureEngine, stopStatePolling]);
 
+  // Throttle and load update the UI immediately; the poll would otherwise lag a frame behind the input.
   const setThrottle = useCallback((value: number) => {
     ensureEngine().setThrottle(value);
+    setPlaybackState((prev) => ({ ...prev, throttle: Math.max(0, Math.min(1, value)) }));
   }, [ensureEngine]);
 
   const setRPM = useCallback((value: number) => {
@@ -102,6 +110,7 @@ export function useAudioEngine() {
 
   const setLoad = useCallback((value: number) => {
     ensureEngine().setLoad(value);
+    setPlaybackState((prev) => ({ ...prev, load: Math.max(0, Math.min(1, value)) }));
   }, [ensureEngine]);
 
   const updateConfig = useCallback((newConfig: EngineConfiguration) => {

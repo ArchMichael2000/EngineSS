@@ -7,7 +7,7 @@ export function Tabs({ value, onValueChange, children }: { value: string; onValu
 }
 
 export function TabsList({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`flex rounded-md ${className}`}>{children}</div>;
+  return <div className={`flex flex-wrap rounded-md ${className}`}>{children}</div>;
 }
 
 export function TabsTrigger({ value, children, className = "" }: { value: string; children: ReactNode; className?: string }) {
@@ -18,7 +18,7 @@ export function TabsTrigger({ value, children, className = "" }: { value: string
       type="button"
       data-state={active ? "active" : "inactive"}
       onClick={() => ctx?.onValueChange(value)}
-      className={`rounded-md px-3 py-2 transition ${active ? "bg-neon-cyan/15 text-neon-cyan" : "text-muted-foreground hover:text-foreground"} ${className}`}
+      className={`min-w-0 rounded-md px-2 py-2 transition ${active ? "bg-neon-cyan/15 text-neon-cyan" : "text-muted-foreground hover:text-foreground"} ${className}`}
     >
       {children}
     </button>

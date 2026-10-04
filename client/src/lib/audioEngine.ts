@@ -10,7 +10,7 @@
 
 import type { EngineConfiguration, ListenerPerspective, PlaybackState } from "../../../shared/engineTypes";
 import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from "../../../shared/engineTypes";
-import { renderEssPcm } from "../../../shared/ess/render";
+import type { RenderRequest, RenderResponse } from "./ess/renderWorker";
 import type { DriveMode, EngineTelemetry, StemGains } from "../../../shared/ess/engine";
 import essProcessorUrl from "./ess/essProcessor?worker&url";
 
@@ -40,7 +40,9 @@ export class AudioEngine {
   private perspective: ListenerPerspective = "exterior-rear";
   private stemGains: Partial<StemGains> = {};
   private telemetry: EngineTelemetry | null = null;
-  private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number; internalRate?: number } | null = null;
+  /** Audio-thread figures from the worklet: measured load, learned machine factor, internal rate. */
+  private audioStats: { load: number; machineFactor: number; internalRate: number; tier: number } | null = null;
+  private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number; internalRate?: number; builds: number } | null = null;
 
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
   private state: PlaybackState = {
@@ -78,13 +80,17 @@ export class AudioEngine {
   private setupAudioGraph(): void {
     if (!this.ctx) return;
 
-    // Near-transparent safety compressor: the physics sets the level, not the mix bus.
+    // Output limiter. The physics sets the level (each perspective maps a fixed dB SPL to full
+    // scale), and loud engines legitimately peak above it: a V12 at full throttle reaches about
+    // +2.5 dBFS at the rear, 3 m. Below −3 dBFS this is transparent; above, the 20:1 ratio and
+    // the node's 6 ms look-ahead hold peaks near −1 dBFS (including the spec's automatic makeup
+    // gain of about +1.7 dB), so level differences between engines survive and nothing clips.
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -1;
-    this.compressor.knee.value = 3;
-    this.compressor.ratio.value = 1.5;
-    this.compressor.attack.value = 0.0012;
-    this.compressor.release.value = 0.09;
+    this.compressor.threshold.value = -3;
+    this.compressor.knee.value = 1;
+    this.compressor.ratio.value = 20;
+    this.compressor.attack.value = 0.001;
+    this.compressor.release.value = 0.12;
 
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
@@ -125,8 +131,9 @@ export class AudioEngine {
         this.telemetry = msg.telemetry;
         this.state.rpm = msg.telemetry.rpm;
         this.state.boost = Math.max(0, msg.telemetry.boostKpa / 6.895);
+        if (msg.audio) this.audioStats = msg.audio;
       } else if (msg.type === "ready") {
-        this.engineInfo = { firingOrder: msg.firingOrder, intervals: msg.intervals, notes: msg.notes, displacementL: msg.displacementL, internalRate: msg.internalRate };
+        this.engineInfo = { firingOrder: msg.firingOrder, intervals: msg.intervals, notes: msg.notes, displacementL: msg.displacementL, internalRate: msg.internalRate, builds: (this.engineInfo?.builds ?? 0) + 1 };
       } else if (msg.type === "rate") {
         // The worklet stepped the simulator's internal rate down to hold real time on this machine.
         if (this.engineInfo) this.engineInfo = { ...this.engineInfo, internalRate: msg.internalRate };
@@ -237,6 +244,10 @@ export class AudioEngine {
     return this.engineInfo;
   }
 
+  getAudioStats() {
+    return this.audioStats;
+  }
+
   setThrottle(throttle: number): void {
     this.state.throttle = Math.max(0, Math.min(1, throttle));
     this.postControls();
@@ -287,7 +298,7 @@ export class AudioEngine {
 
   async renderOffline(config: EngineConfiguration, durationSec: number, options?: { normalize?: boolean; sampleRate?: number }): Promise<AudioBuffer> {
     const sampleRate = options?.sampleRate || 48000;
-    const pcm = renderEssPcm(config, { durationSec, sampleRate, normalize: options?.normalize, program: "sweep" });
+    const pcm = await renderInWorker({ config, options: { durationSec, sampleRate, normalize: options?.normalize, program: "sweep" } });
     if (typeof OfflineAudioContext === "undefined") {
       throw new Error("Offline audio rendering is not available in this browser.");
     }
@@ -351,6 +362,23 @@ export class AudioEngine {
     this.analyserNode = null;
     this.isInitialized = false;
   }
+}
+
+/** Renders a clip in a Web Worker (client/src/lib/ess/renderWorker.ts) and resolves with the PCM. */
+function renderInWorker(request: RenderRequest): Promise<{ left: Float32Array; right: Float32Array }> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./ess/renderWorker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (event: MessageEvent<RenderResponse>) => {
+      worker.terminate();
+      if (event.data.ok) resolve({ left: event.data.left, right: event.data.right });
+      else reject(new Error(event.data.message));
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "The export renderer failed to start."));
+    };
+    worker.postMessage(request);
+  });
 }
 
 let engineInstance: AudioEngine | null = null;
