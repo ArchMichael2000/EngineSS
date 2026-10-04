@@ -33,7 +33,7 @@ def decode(path):
     return np.frombuffer(raw, dtype="<f4").astype(np.float64)
 
 
-def track_rpm(x, rpm_min, rpm_max, cylinders, rpm_start=None, fire_order=None, hop_s=0.05, win_s=0.3, smooth=3.0):
+def track_rpm(x, rpm_min, rpm_max, cylinders, rpm_start=None, fire_order=None, max_step=None, hop_s=0.05, win_s=0.3, smooth=3.0):
     """Harmonic-sum salience over the half-order comb on a log-frequency axis, plus Viterbi.
 
     The magnitude spectrum is mapped to a log-frequency axis and max-pooled over ±1.5 %, so a
@@ -88,6 +88,9 @@ def track_rpm(x, rpm_min, rpm_max, cylinders, rpm_start=None, fire_order=None, h
     # which only a wrong harmonic branch would need, are expensive.
     dl = np.abs(lg[:, None] - lg[None, :])
     jump = 0.1 * dl / np.log(1.05) + smooth * np.maximum(0, dl - np.log(1.04)) / np.log(1.01)
+    if max_step:
+        # Hard limit for slow sweeps (dyno pulls): no path may change faster than this per hop.
+        jump[dl > np.log(1 + max_step)] = 1e12
     score = sal[0].copy()
     if rpm_start:
         # Anchor: the first frame must lie within ±15 % of the supplied starting speed.
@@ -143,14 +146,37 @@ def order_frames(x, times, rpm, revs=20, samples_per_rev=512, hop_revs=5, zpad=4
     return out
 
 
+def steady_rpm(x, rpm_approx, fire):
+    """Constant speed from the dominant order's peak within ±12 % of the expected frequency."""
+    from scipy.signal import welch
+    f, p = welch(x, SR, nperseg=1 << 16)
+    f0 = fire * rpm_approx / 60
+    m = (f > f0 / 1.12) & (f < f0 * 1.12)
+    i = np.argmax(p[m])
+    fi = f[m]
+    # Parabolic refinement on the log spectrum.
+    lp = np.log(p[m] + 1e-30)
+    if 0 < i < len(lp) - 1:
+        d = 0.5 * (lp[i - 1] - lp[i + 1]) / (lp[i - 1] - 2 * lp[i] + lp[i + 1])
+        fpk = fi[i] + d * (fi[1] - fi[0])
+    else:
+        fpk = fi[i]
+    return fpk * 60 / fire
+
+
 def analyse(args):
     x = decode(args.audio)
     x = x - x.mean()
-    if args.rpm_track:
+    if args.t0 is not None or args.t1 is not None:
+        x = x[int((args.t0 or 0) * SR): int(args.t1 * SR) if args.t1 else None]
+    if args.steady:
+        r = steady_rpm(x, args.rpm_start, args.fire_order or args.cylinders / 2)
+        times, rpm = np.array([0.0, len(x) / SR]), np.array([r, r])
+    elif args.rpm_track:
         tr = json.load(open(args.rpm_track))
         times, rpm = np.array(tr["t"], dtype=float), np.array(tr["rpm"], dtype=float)
     else:
-        times, rpm, _ = track_rpm(x, args.rpm_min, args.rpm_max, args.cylinders, args.rpm_start, args.fire_order)
+        times, rpm, _ = track_rpm(x, args.rpm_min, args.rpm_max, args.cylinders, args.rpm_start, args.fire_order, args.max_step)
     frames = order_frames(x, times, rpm)
     res = {"source": args.audio, "orders": ORDERS.tolist(), "rpm_track": {"t": times.round(3).tolist(), "rpm": rpm.round(1).tolist()}, "frames": frames}
     json.dump(res, open(args.out, "w"))
@@ -198,23 +224,27 @@ def compare(args):
     slope = lambda D: float(np.polyfit(np.log2(ra), [D[k]["total"] for k in common], 1)[0]) if len(common) > 2 else float("nan")
     summary = {"bins": rows, "mean_order_err_db": round(float(np.mean(errs)), 2),
                "loudness_db_per_rpm_doubling": [round(slope(A), 1), round(slope(B), 1)]}
-    print(json.dumps(summary, indent=1))
+    print(f"{'rpm':>6} {'order err dB':>12} {'corr':>6} {'order share rec/sim':>20}  top orders rec | sim")
+    for r in rows:
+        print(f"{r['rpm']:6} {r['order_err_db']:12} {r['profile_corr']:6} {r['order_share'][0]:>9}/{r['order_share'][1]:<9}  {r['top_orders'][0]} | {r['top_orders'][1]}")
+    print(f"mean order-profile error {summary['mean_order_err_db']} dB; loudness slope rec/sim {summary['loudness_db_per_rpm_doubling']} dB per rpm doubling")
     if args.png:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(1, 3, figsize=(15, 4.5), sharey=True)
         orders = np.array(a["orders"])
+        lo, hi = (ra[0], ra[-1]) if ra[-1] > ra[0] else (ra[0] - args.bin / 2, ra[0] + args.bin / 2)
         for i, (D, title) in enumerate([(A, "recording"), (B, "render")]):
             img = np.array([D[k]["orders"] for k in common]).T
             ax[i].imshow(img, aspect="auto", origin="lower", vmin=-40, vmax=0, cmap="magma",
-                         extent=[ra[0], ra[-1], orders[0], orders[-1]])
+                         extent=[lo, hi, orders[0], orders[-1]])
             ax[i].set_title(f"{title}: order level re frame total (dB)")
             ax[i].set_xlabel("rpm")
         ax[0].set_ylabel("engine order")
         diff = np.array([B[k]["orders"] - A[k]["orders"] for k in common]).T
         im = ax[2].imshow(diff, aspect="auto", origin="lower", vmin=-15, vmax=15, cmap="coolwarm",
-                          extent=[ra[0], ra[-1], orders[0], orders[-1]])
+                          extent=[lo, hi, orders[0], orders[-1]])
         ax[2].set_title("render − recording (dB)")
         ax[2].set_xlabel("rpm")
         fig.colorbar(im, ax=ax[2])
@@ -234,6 +264,10 @@ def main():
     a.add_argument("--fire-order", type=float, help="dominant engine order if not n/2 (odd-fire, twins, 90° V10/V6)")
     a.add_argument("--rpm-start", type=float, help="approximate speed at the start of the file (anchors the track)")
     a.add_argument("--rpm-track", help="JSON {t: [...], rpm: [...]} with the known speed (renders); skips tracking")
+    a.add_argument("--t0", type=float, help="segment start (s)")
+    a.add_argument("--t1", type=float, help="segment end (s)")
+    a.add_argument("--steady", action="store_true", help="constant-speed segment: speed from the dominant order's peak near --rpm-start")
+    a.add_argument("--max-step", type=float, help="hard per-50 ms speed-change limit, e.g. 0.03 for slow dyno pulls")
     a.add_argument("--rpm-min", type=float, default=500)
     a.add_argument("--rpm-max", type=float, default=9000)
     c = sub.add_parser("compare")

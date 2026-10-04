@@ -143,6 +143,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {slider('idleRpm', 'Idle speed', spec.calibration.idleRpm, 400, 1600, 10, ' rpm')}
       {slider('afterfireTendency', 'Afterfire tendency', spec.calibration.afterfireTendency, 0, 1, 0.01, '', 2)}
       {slider('fuelOctane', 'Fuel octane (RON)', spec.calibration.fuelOctane, 80, 115, 1)}
+      {slider('buildTolerance', 'Build tolerance (cyl-to-cyl spread)', spec.calibration.buildTolerance, 0, 1, 0.05, '', 2)}
       {toggle('knockControl', 'Knock control (off = audible knock)', spec.calibration.knockControl)}
 
       {fi.kind === 'turbo' && (<>

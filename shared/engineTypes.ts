@@ -328,6 +328,8 @@ export interface PhysicalOverrides {
   fuelOctane: number;
   /** Closed-loop knock control on/off. */
   knockControl: boolean;
+  /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */
+  buildTolerance: number;
   turboCount: number;
   compressorWheelMm: number;
   superchargerDisplacementL: number;

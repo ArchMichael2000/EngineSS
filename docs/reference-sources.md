@@ -156,6 +156,30 @@ No-load steady speed (dyno with pedal trimmed for zero absorber torque), engine-
 
 Every render falls inside the corpus p10–p90 ranges for flatness (0.26–0.40) and crest factor (5.0–8.9).
 
+### Real recordings: engine-order comparison
+
+The 10 CC0 recordings (section 3) are in `reference-audio/`, verified against their checksums
+(`scripts/fetchReferenceAudio.py`). `scripts/compareRecording.py` tracks speed from the audio,
+resamples to the crank-angle domain and compares order profiles (each order's level relative to
+the frame total) against a render of the matching reference engine made by
+`scripts/renderForCompare.ts` at the same operating condition.
+
+| Recording | Segment | Result |
+|---|---|---|
+| 2JZ dyno (`2jz-supra-dyno.ogg`) | 11–25.5 s full-load pull, 3000→8150 rpm | Mean order-profile error 4.9 dB over 3200–6700 rpm, profile correlation 0.7–0.86, top orders 3/6/9 on both above 5000 rpm. Recording carries 10–15 dB more energy between orders below 4000 rpm (dyno cell, turbo flow noise) and less order 1.5 (the simulated two 3-1 collectors vs a likely 6-1 manifold). |
+| LS3 idle | 0.2–2 s, 1032 rpm | 9.6 dB. The recording is an unidentified V8 with strong 3.5/4.5 sidebands (aftermarket cam lope); not a stock LS3. |
+| EJ25 idle | 0.5–7 s, 725 rpm | 6.5 dB. Order assignment uncertain without a tachometer. |
+| Harley idle | 1–17 s, 1012 rpm | 6.0 dB. Order assignment uncertain. |
+| K20 cold idle | 4–9.5 s, 1531 rpm | Not comparable: an accessory tone near order 22 dominates the recording. |
+
+What the comparison changed: the exterior listener's ground reflection was fully coherent at all
+frequencies, cutting an 18 dB notch at order 12 of the 2JZ that no field recording shows. The
+image path now stays coherent only below ~600 Hz (finite ground impedance, turbulence, source
+extent; Daigle 1979, Embleton 1996), which took the 2JZ order-profile error from 7.6 to 4.9 dB.
+
+Speed tracking without a tachometer is reliable for slow sweeps and steady segments (≈1 % on
+known renders); fast free-revs and pass-bys (Doppler) need a speed hint or a vehicle model.
+
 ### Wave physics (from the core build)
 
 * Duct resonances fall within about 1 % of `nc/2L`.

@@ -186,6 +186,14 @@ export class EngineSimulator {
       wallTempK: 440,
     };
     this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
+    // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
+    const tol = spec.calibration.buildTolerance;
+    const build = new Rng(spec.seed * 31337 + 17);
+    for (const c of this.cylinders) {
+      c.flowScale = 1 + 0.03 * tol * clamp(build.gaussian(), -2.5, 2.5);
+      c.burnScale = 1 + 0.05 * tol * clamp(build.gaussian(), -2.5, 2.5);
+      c.fuelScale = 1 + 0.025 * tol * clamp(build.gaussian(), -2.5, 2.5);
+    }
     this.intake = new IntakeSystem(spec, sampleRate, this.rng);
     this.exhaust = new ExhaustNetwork(spec, this.schedule, sampleRate, this.rng);
     this.fi = createForcedInduction(spec, sampleRate, this.rng, this.exhaust, this.intake);

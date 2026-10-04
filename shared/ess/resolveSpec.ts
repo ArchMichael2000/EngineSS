@@ -167,6 +167,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     revLimiter: adv.revLimiterType ?? "soft",
     fuelOctane: ph.fuelOctane ?? 95,
     knockControl: ph.knockControl ?? true,
+    buildTolerance: clamp(ph.buildTolerance ?? 0.5, 0, 1),
     lambdaWot: boosted ? 0.8 : 0.87,
     lambdaPart: 1,
     overrunFuelCut: true,

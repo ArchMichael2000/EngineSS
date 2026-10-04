@@ -168,6 +168,11 @@ export interface CalibrationSpec {
   fuelOctane: number;
   /** Closed-loop knock control. Off = spark stays at MBT and the engine knocks audibly where the fuel can't take it. */
   knockControl: boolean;
+  /**
+   * Cylinder-to-cylinder build tolerance, 0 (identical cylinders) … 1 (loose). At 1: valve/port
+   * flow ±3 %, burn rate ±5 %, injector flow ±2.5 % (1σ). Production engines ≈ 0.5, blueprinted race ≈ 0.2.
+   */
+  buildTolerance: number;
   /** Lambda at WOT (rich) and part load. */
   lambdaWot: number;
   lambdaPart: number;

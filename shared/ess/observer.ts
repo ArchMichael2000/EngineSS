@@ -116,7 +116,10 @@ export class Observer {
     for (const g of geometry) {
       const src = sources[g.s];
       const shield = this.def.shielding(src.kind, src.position);
-      const cutoff = shield.cutoffHz;
+      // The ground image stays coherent only at low frequency: finite ground impedance, turbulence
+      // and the source's own extent decorrelate it above a few hundred Hz at these ranges (Daigle
+      // 1979; Embleton 1996), so interference notches stay a few dB deep as in field recordings.
+      const cutoff = g.image ? (shield.cutoffHz > 0 ? Math.min(shield.cutoffHz, 600) : 600) : shield.cutoffHz;
       const k = cutoff > 0 ? Math.exp((-2 * Math.PI * cutoff) / fs) : 0;
       const gain = (RHO_AIR / (4 * Math.PI * g.r)) * Math.pow(10, shield.gainDb / 20) * (g.image ? this.def.groundReflection : 1);
       this.paths.push({ source: g.s, ear: g.e, delay: Math.max(1.5, (g.r / C_AIR) * fs), gain, filter: { k, gain: 1, s1: 0, s2: 0 } });

@@ -219,6 +219,13 @@ export class Cylinder {
   lastImep = 0;
   /** Crank angle of peak pressure, degrees after firing TDC (MBT ≈ 14–18°). */
   lastPeakAngle = 0;
+  /**
+   * Fixed manufacturing offsets of this cylinder (port/valve flow, burn rate, injector flow).
+   * Cylinder-to-cylinder spread is what puts real energy on the non-firing orders.
+   */
+  flowScale = 1;
+  burnScale = 1;
+  fuelScale = 1;
   /** Burned-gas (residual + EGR) mass fraction of the charge at the last spark. */
   lastResidualFraction = 0;
   /** Burn duration (Wiebe Δθ) the last combustion event used, before cycle-to-cycle scatter. */
@@ -384,7 +391,7 @@ export class Cylinder {
     this.exhaustMassFlow = 0;
     this.unburnedFuelOut = 0;
     if (exLift > 0) {
-      const cdA = flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves);
+      const cdA = flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
       this.exhaustCdA = cdA;
       this.exhaustMassFlow = this.solveValve(cdA, exhaustPort, true, dt, 0);
       this.exhaustWasOpen = true;
@@ -401,7 +408,7 @@ export class Cylinder {
     const inLift = this.intakeLobe.lift(alphaDeg);
     this.intakeMassFlow = 0;
     if (inLift > 0) {
-      const cdA = flowArea(inLift, this.params.intakeValveD, this.params.intakeValves);
+      const cdA = flowArea(inLift, this.params.intakeValveD, this.params.intakeValves) * this.flowScale;
       this.intakeMassFlow = this.solveValve(cdA, intakePort, false, dt, intakeTempK, combustion);
       this.intakeWasOpen = true;
     } else {
@@ -464,7 +471,7 @@ export class Cylinder {
     const cov = clamp(0.012 + dilutionCovGain * (1.6 * Math.max(0, residualFraction - 0.08) + 0.05 * lowDensity * lowDensity), 0.012, 0.5);
     const z = this.rng.gaussian();
     const durationFactor = Math.exp(cov * 1.8 * z);
-    this.burnDurationDeg = clamp(baseDuration * durationFactor, 25, 160);
+    this.burnDurationDeg = clamp(baseDuration * durationFactor * this.burnScale, 25, 160);
     this.burnEfficiency = clamp(0.97 - 0.25 * Math.max(0, residualFraction - 0.2) - 0.4 * Math.max(0, lambda - 1.25), 0.4, 0.98);
     // Partial burn / misfire probability rises steeply once dilution is heavy.
     if (this.rng.next() < clamp(cov - 0.12, 0, 0.6) * 0.5) {
@@ -645,7 +652,7 @@ export class Cylinder {
         this.takenFromPlenum += fromPlenum;
         const fresh = gain - fromResidual - fromPlenum;
         this.massBurned += fromResidual + fromPlenum;
-        const fuelFraction = combustion && combustion.fuelEnabled ? 1 / (1 + combustion.lambda * this.params.stoichAfr) : 0;
+        const fuelFraction = combustion && combustion.fuelEnabled ? 1 / (1 + combustion.lambda * this.params.stoichAfr / this.fuelScale) : 0;
         this.massFuel += fresh * fuelFraction;
         this.massAir += fresh * (1 - fuelFraction);
       }
