@@ -126,6 +126,20 @@ export function useAudioEngine() {
     setConfig((prev) => ({ ...prev, listener: { ...prev.listener, perspective } }));
   }, [ensureEngine]);
 
+  const setIgnition = useCallback((on: boolean) => {
+    ensureEngine().setIgnition(on);
+  }, [ensureEngine]);
+
+  const shift = useCallback((dir: 1 | -1) => {
+    ensureEngine().shift(dir);
+  }, [ensureEngine]);
+
+  const [vehicleOptions, setVehicleOptionsState] = useState({ autoShift: true, launchControl: false, brake: 0 });
+  const setVehicleOptions = useCallback((options: Partial<{ autoShift: boolean; launchControl: boolean; brake: number }>) => {
+    ensureEngine().setVehicleOptions(options);
+    setVehicleOptionsState((prev) => ({ ...prev, ...options }));
+  }, [ensureEngine]);
+
   const setStemGains = useCallback((stems: Partial<StemGains>) => {
     ensureEngine().setStemGains(stems);
   }, [ensureEngine]);
@@ -146,6 +160,10 @@ export function useAudioEngine() {
     setDriveMode,
     setPerspective,
     setStemGains,
+    shift,
+    setIgnition,
+    vehicleOptions,
+    setVehicleOptions,
     engine: engineRef.current,
   };
 }

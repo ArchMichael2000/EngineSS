@@ -20,7 +20,9 @@ type Message =
   | { type: "controls"; controls: Partial<EngineControls> }
   | { type: "perspective"; perspective: Perspective }
   | { type: "stems"; stems: Partial<StemGains> }
-  | { type: "monitorGain"; db: number };
+  | { type: "monitorGain"; db: number }
+  | { type: "shift"; dir: 1 | -1 }
+  | { type: "ignition"; on: boolean };
 
 const FADE_SAMPLES = 2400;
 const TELEMETRY_INTERVAL = 2048;
@@ -69,6 +71,13 @@ class EssProcessor extends AudioWorkletProcessor {
         case "stems":
           this.stems = { ...this.stems, ...msg.stems };
           if (this.sim) Object.assign(this.sim.stems, this.stems);
+          break;
+        case "ignition":
+          if (msg.on) this.sim?.start();
+          else this.sim?.stopEngine();
+          break;
+        case "shift":
+          this.sim?.shift(msg.dir);
           break;
         case "monitorGain":
           this.monitorDb = msg.db;

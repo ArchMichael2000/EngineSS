@@ -17,8 +17,14 @@ interface PlaybackControllerProps {
   resetKey: string;
   /** v16 physical core active: throttle drives a real engine; RPM is held only on the dyno. */
   physical?: boolean;
-  driveMode?: 'free' | 'dyno';
-  onDriveModeChange?: (mode: 'free' | 'dyno') => void;
+  driveMode?: 'free' | 'dyno' | 'vehicle';
+  onDriveModeChange?: (mode: 'free' | 'dyno' | 'vehicle') => void;
+  /** Vehicle mode: gear shifts and options. */
+  onShift?: (dir: 1 | -1) => void;
+  /** Crank (true) or switch off (false) the simulated engine. */
+  onIgnition?: (on: boolean) => void;
+  vehicleOptions?: { autoShift: boolean; launchControl: boolean; brake: number };
+  onVehicleOptions?: (options: Partial<{ autoShift: boolean; launchControl: boolean; brake: number }>) => void;
 }
 
 export function PlaybackController({
@@ -34,6 +40,10 @@ export function PlaybackController({
   physical = false,
   driveMode = 'free',
   onDriveModeChange,
+  onShift,
+  onIgnition,
+  vehicleOptions,
+  onVehicleOptions,
 }: PlaybackControllerProps) {
   const blipRef = useRef<number | null>(null);
   const [sweepActive, setSweepActive] = useState(false);
@@ -207,8 +217,8 @@ export function PlaybackController({
       </div>
 
       {physical && (
-        <div className="grid grid-cols-2 gap-2">
-          {(['free', 'dyno'] as const).map((mode) => (
+        <div className="grid grid-cols-3 gap-2">
+          {(['free', 'dyno', 'vehicle'] as const).map((mode) => (
             <Button
               key={mode}
               variant="outline"
@@ -217,9 +227,47 @@ export function PlaybackController({
               onClick={() => onDriveModeChange?.(mode)}
               className={`text-xs font-[Rajdhani] uppercase tracking-wide ${driveMode === mode ? 'border-neon-cyan text-neon-cyan bg-neon-cyan/10' : 'border-hud-line'}`}
             >
-              {mode === 'free' ? 'Free rev' : 'Dyno hold'}
+              {mode === 'free' ? 'Free rev' : mode === 'dyno' ? 'Dyno hold' : 'Drive'}
             </Button>
           ))}
+        </div>
+      )}
+
+      {physical && (
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState !== 'off'} onClick={() => onIgnition?.(true)}
+            className="text-xs font-[Rajdhani] uppercase border-hud-line">Crank / start</Button>
+          <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState === 'off'} onClick={() => onIgnition?.(false)}
+            className="text-xs font-[Rajdhani] uppercase border-hud-line">Ignition off</Button>
+        </div>
+      )}
+
+      {physical && driveMode === 'vehicle' && (
+        <div className="space-y-2 rounded border border-hud-line/30 p-2">
+          <div className="grid grid-cols-4 gap-2 items-center">
+            <Button variant="outline" size="sm" disabled={!isPlaying} onClick={() => onShift?.(-1)} className="text-xs border-hud-line">Shift −</Button>
+            <div className="text-center">
+              <span className="block text-[9px] font-[Rajdhani] text-muted-foreground uppercase">Gear</span>
+              <span className="text-lg font-[Orbitron] text-neon-cyan">{playbackState.telemetry?.gear ?? 1}</span>
+            </div>
+            <div className="text-center">
+              <span className="block text-[9px] font-[Rajdhani] text-muted-foreground uppercase">km/h</span>
+              <span className="text-lg font-[Orbitron] text-foreground/90">{Math.round(playbackState.telemetry?.speedKmh ?? 0)}</span>
+            </div>
+            <Button variant="outline" size="sm" disabled={!isPlaying} onClick={() => onShift?.(1)} className="text-xs border-hud-line">Shift +</Button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Button variant="outline" size="sm" onClick={() => onVehicleOptions?.({ autoShift: !vehicleOptions?.autoShift })}
+              className={`text-[10px] uppercase ${vehicleOptions?.autoShift ? 'border-neon-cyan text-neon-cyan' : 'border-hud-line'}`}>Auto-shift</Button>
+            <Button variant="outline" size="sm" onClick={() => onVehicleOptions?.({ launchControl: !vehicleOptions?.launchControl })}
+              className={`text-[10px] uppercase ${vehicleOptions?.launchControl ? 'border-neon-pink text-neon-pink' : 'border-hud-line'}`}>Launch ctrl</Button>
+            <Button variant="outline" size="sm" disabled={!isPlaying}
+              onPointerDown={() => onVehicleOptions?.({ brake: 1 })} onPointerUp={() => onVehicleOptions?.({ brake: 0 })} onPointerLeave={() => onVehicleOptions?.({ brake: 0 })}
+              className="text-[10px] uppercase border-hud-line">Brake (hold)</Button>
+          </div>
+          <p className="text-[10px] font-[Rajdhani] text-muted-foreground">
+            Automated clutch: press the pedal from a standstill to launch. Flat-shifts cut ignition with the pedal held; downshifts blip to rev-match.
+          </p>
         </div>
       )}
 

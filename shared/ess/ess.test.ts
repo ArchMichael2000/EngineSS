@@ -102,6 +102,39 @@ describe("valve timing", () => {
   });
 });
 
+describe("vehicle and start/stop", () => {
+  it("an LS3 car reaches 100 km/h in a realistic time with automated shifts", () => {
+    const sim = new EngineSimulator(specOf("gm-ls3"), FS);
+    sim.setControls({ mode: "vehicle", throttle: 0, autoShift: true });
+    sim.prewarm(1.5);
+    sim.setControls({ throttle: 1 });
+    let t = 0;
+    while (sim.telemetry.speedKmh < 100 && t < 10) {
+      sim.prewarm(0.1);
+      t += 0.1;
+    }
+    // Published 0–100 km/h for LS3 cars ≈ 4.6–4.9 s.
+    expect(t).toBeGreaterThan(4.0);
+    expect(t).toBeLessThan(6.0);
+    expect(sim.telemetry.gear).toBeGreaterThanOrEqual(2);
+  }, 60_000);
+
+  it("a stopped engine cranks, catches and returns to idle", () => {
+    const spec = specOf("honda-k20a");
+    const sim = new EngineSimulator(spec, FS);
+    sim.setControls({ mode: "free", throttle: 0 });
+    sim.prewarm(1);
+    sim.stopEngine();
+    sim.prewarm(1);
+    expect(sim.rpm).toBeLessThan(5);
+    sim.start();
+    sim.prewarm(4);
+    expect(sim.telemetry.engineState).toBe("running");
+    expect(sim.rpm).toBeGreaterThan(spec.calibration.idleRpm * 0.7);
+    expect(sim.rpm).toBeLessThan(spec.calibration.idleRpm * 1.6);
+  }, 60_000);
+});
+
 describe("forced induction", () => {
   it("parallel turbos share the airflow (quad-turbo W16 builds boost)", () => {
     const t = dyno("bugatti-w16", 4000, 3).telemetry;

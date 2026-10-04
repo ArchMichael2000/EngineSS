@@ -1122,6 +1122,8 @@ export class AudioEngine {
   private essNode: AudioWorkletNode | null = null;
   private essReady = false;
   private driveMode: DriveMode = "free";
+  /** v16 vehicle mode options (auto-shift, launch control, brake, exhaust valve override). */
+  private vehicleOptions: { autoShift: boolean; launchControl: boolean; brake: number; exhaustValve?: "auto" | "open" | "closed" } = { autoShift: true, launchControl: false, brake: 0 };
   private perspective: ListenerPerspective = "exterior-rear";
   private stemGains: Partial<StemGains> = {};
   private telemetry: EngineTelemetry | null = null;
@@ -1429,7 +1431,7 @@ export class AudioEngine {
   private postControls(): void {
     this.essNode?.port.postMessage({
       type: "controls",
-      controls: { throttle: this.state.throttle, load: this.state.load, targetRpm: this.state.targetRpm, mode: this.driveMode },
+      controls: { throttle: this.state.throttle, load: this.state.load, targetRpm: this.state.targetRpm, mode: this.driveMode, ...this.vehicleOptions },
     });
   }
 
@@ -1779,6 +1781,25 @@ export class AudioEngine {
     this.driveMode = mode;
     if (mode === "dyno") this.state.targetRpm = Math.max(600, this.state.rpm || this.state.targetRpm);
     this.postControls();
+  }
+
+  /** v16: crank the engine (on) or switch the ignition off (off). */
+  setIgnition(on: boolean): void {
+    this.essNode?.port.postMessage({ type: "ignition", on });
+  }
+
+  /** v16 vehicle mode: request an up (+1) or down (−1) shift. */
+  shift(dir: 1 | -1): void {
+    this.essNode?.port.postMessage({ type: "shift", dir });
+  }
+
+  setVehicleOptions(options: Partial<{ autoShift: boolean; launchControl: boolean; brake: number; exhaustValve: "auto" | "open" | "closed" }>): void {
+    this.vehicleOptions = { ...this.vehicleOptions, ...options };
+    this.postControls();
+  }
+
+  getVehicleOptions() {
+    return { ...this.vehicleOptions };
   }
 
   getDriveMode(): DriveMode {

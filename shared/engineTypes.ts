@@ -386,7 +386,7 @@ export interface PlaybackState {
   targetRpm: number;
   boost: number; // PSI, 0 for NA
   /** v16 only: free-running or dyno-held. */
-  driveMode?: 'free' | 'dyno';
+  driveMode?: 'free' | 'dyno' | 'vehicle';
   /** v16 only: live physics telemetry from the core. */
   telemetry?: {
     rpm: number;
@@ -412,6 +412,11 @@ export interface PlaybackState {
     exhaustCamRetardDeg: number;
     highCam: boolean;
     exhaustValve: number;
+    engineState: 'running' | 'cranking' | 'off';
+    gear: number;
+    speedKmh: number;
+    clutch: number;
+    shifting: boolean;
     splDb: number;
   };
 }

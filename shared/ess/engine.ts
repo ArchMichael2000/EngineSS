@@ -19,10 +19,11 @@ import { ExhaustNetwork } from "./exhaust";
 import { StructuralRadiator } from "./structure";
 import { ENGINE_POSITION, INTAKE_MOUTH_POSITION, Observer } from "./observer";
 import type { Perspective, SourceDef } from "./observer";
+import { Drivetrain } from "./vehicle";
 import { createForcedInduction } from "./forcedInduction";
 import type { ForcedInductionModel } from "./forcedInduction";
 
-export type DriveMode = "free" | "dyno";
+export type DriveMode = "free" | "dyno" | "vehicle";
 
 export interface EngineControls {
   /** Accelerator pedal 0..1. */
@@ -34,6 +35,12 @@ export interface EngineControls {
   mode: DriveMode;
   /** Live override of a valved exhaust (sport button); defaults to the build's mode. */
   exhaustValve?: "auto" | "open" | "closed";
+  /** Vehicle mode: automatic upshifts at the shift point and coast downshifts. */
+  autoShift?: boolean;
+  /** Vehicle mode: launch control (ignition-cut hold at launch speed while standing). */
+  launchControl?: boolean;
+  /** Vehicle mode: brake pedal 0..1. */
+  brake?: number;
 }
 
 export interface EngineTelemetry {
@@ -58,6 +65,13 @@ export interface EngineTelemetry {
   volumetricEfficiency: number;
   /** Mean knock-control spark retard across cylinders, degrees. */
   knockRetardDeg: number;
+  /** Running, cranking on the starter, or off. */
+  engineState: "running" | "cranking" | "off";
+  /** Vehicle mode: engaged gear (0 = neutral), road speed and clutch engagement. */
+  gear: number;
+  speedKmh: number;
+  clutch: number;
+  shifting: boolean;
   /** Exhaust bypass flap position 0 (closed) … 1 (open); 0 when the build has no valve. */
   exhaustValve: number;
   /** Cam phaser positions (crank degrees) and lift-switch state. */
@@ -141,6 +155,15 @@ export class EngineSimulator {
   private highCamTimer = 0;
   private highCam = false;
   private exhaustValvePos = 0;
+  // Start / stop
+  /** Engine running (fuel and spark enabled by the ECU). */
+  running = true;
+  /** Starter engaged. */
+  cranking = false;
+  private crankTime = 0;
+  private startFlare = 0;
+  readonly drivetrain: Drivetrain;
+  private launchHold: number | null = null;
   private bypassActual = 0.3;
   private fuelCut = false;
   private limiterActive = false;
@@ -167,7 +190,7 @@ export class EngineSimulator {
   private splN = 0;
   readonly telemetry: EngineTelemetry = {
     rpm: 0, mapKpa: 101, boostKpa: 0, torqueNm: 0, powerKw: 0, lambda: 1, egtC: 600, throttlePlate: 0,
-    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, intakeCamAdvanceDeg: 0, exhaustCamRetardDeg: 0, highCam: false, exhaustValve: 0, splDb: 0,
+    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, intakeCamAdvanceDeg: 0, exhaustCamRetardDeg: 0, highCam: false, exhaustValve: 0, engineState: "running", gear: 0, speedKmh: 0, clutch: 0, shifting: false, splDb: 0,
   };
 
   constructor(spec: EngineSpec, sampleRate: number, options: SimulatorOptions = {}) {
@@ -202,6 +225,7 @@ export class EngineSimulator {
     this.intake = new IntakeSystem(spec, sampleRate, this.rng);
     this.exhaust = new ExhaustNetwork(spec, this.schedule, sampleRate, this.rng);
     this.fi = createForcedInduction(spec, sampleRate, this.rng, this.exhaust, this.intake);
+    this.drivetrain = new Drivetrain(spec.vehicle, spec.calibration.idleRpm, spec.calibration.redlineRpm);
     this.structure = new StructuralRadiator(sampleRate, this.displacementL, spec.cylinders, this.cylinders[0].area, this.rng, this.schedule.cylinders.map((c) => c.positionM));
     this.valveJets = this.cylinders.map(() => new BandNoise(this.rng, sampleRate, 0.5));
     this.allDucts = [...this.exhaust.ducts(), ...this.intake.ducts(), ...(this.fi?.ducts() ?? [])];
@@ -282,6 +306,35 @@ export class EngineSimulator {
     this.monitorGain = Math.pow(10, db / 20);
   }
 
+  /** Engage the starter (engine stopped): cranks until the engine catches, up to 5 s. */
+  start(): void {
+    if (this.running) return;
+    this.cranking = true;
+    this.crankTime = 0;
+  }
+
+  /** Ignition off: fuel and spark stop; the engine runs down to rest. */
+  stopEngine(): void {
+    this.running = false;
+    this.cranking = false;
+  }
+
+  /**
+   * Starter motor reflected to the crank: torque falls linearly from stall to its no-load speed
+   * (~320 crank rpm through a ~13:1 pinion/ring-gear), sized with displacement so cranking
+   * settles at 200–250 rpm against compression and breakaway friction.
+   */
+  private starterTorque(rpm: number): number {
+    if (!this.cranking) return 0;
+    const stall = 40 + 32 * this.displacementL;
+    return Math.max(0, stall * (1 - rpm / 320));
+  }
+
+  /** Vehicle mode: request an up (+1) or down (−1) shift. */
+  shift(dir: 1 | -1): void {
+    this.drivetrain.requestShift(dir);
+  }
+
   get rpm(): number {
     return (this.omega * 60) / TWO_PI;
   }
@@ -312,11 +365,17 @@ export class EngineSimulator {
     const rpm = (this.omega * 60) / TWO_PI;
     const J = this.spec.inertiaKgM2;
     const frictionTorque = this.frictionTorque(rpm);
-    const loadTorque = this.externalLoadTorque(rpm);
-    this.blockLoad += loadTorque;
     const fiTorque = this.fi ? this.fi.crankTorque : 0;
-    const net = this.indicatedTorque - frictionTorque - loadTorque - fiTorque;
-    this.omega = Math.max(20, this.omega + (net / J) * dt);
+    if (this.controls.mode === "vehicle") {
+      const out = this.drivetrain.step(dt, this.indicatedTorque - frictionTorque - fiTorque, this.omega, J, this.controls.brake ?? 0);
+      this.blockLoad += out.clutchTorque;
+      this.omega = Math.max(this.running || this.cranking ? 20 : 0, out.omega);
+    } else {
+      const loadTorque = this.externalLoadTorque(rpm);
+      this.blockLoad += loadTorque;
+      const net = this.indicatedTorque - frictionTorque - loadTorque - fiTorque;
+      this.omega = Math.max(this.running || this.cranking ? 20 : 0, this.omega + ((net + this.starterTorque(rpm)) / J) * dt);
+    }
     this.crankDeg += ((this.omega * dt) / TWO_PI) * 360;
     if (this.crankDeg >= 720) this.crankDeg -= 720;
     this.torqueRipple = this.indicatedTorque;
@@ -381,6 +440,7 @@ export class EngineSimulator {
     this.exhaust.step(dt);
     for (let i = 0; i < ducts.length; i++) ducts[i].commit();
 
+    this.structure.starterRevPerSec = this.cranking ? this.omega / TWO_PI : 0;
     this.structure.step(this.pressureRates, 0.9, rpm);
     if (!render) return;
 
@@ -404,13 +464,16 @@ export class EngineSimulator {
     const cut = this.sparkCuts[i] === 1;
     const lim = this.spec.calibration.revLimiter;
     const fuelEnabled = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && !(cut && lim === "soft");
-    const sparkEnabled = !(this.limiterActive && lim === "hard-ignition-cut");
+    const ignitionCut = (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
+    const live = this.running || this.cranking;
+    const sparkEnabled = !ignitionCut && live;
     const cal = this.spec.calibration;
-    return { sparkAdvanceDeg: this.sparkAdvance, lambda: this.lambdaTarget, fuelEnabled, sparkEnabled, fuelOctane: cal.fuelOctane, knockControl: cal.knockControl };
+    return { sparkAdvanceDeg: this.sparkAdvance, lambda: this.lambdaTarget, fuelEnabled: fuelEnabled && live, sparkEnabled, fuelOctane: cal.fuelOctane, knockControl: cal.knockControl };
   }
 
   private throttlePlate(): number {
-    const pedal = this.controls.throttle;
+    // Vehicle mode: the shift controller may blip the throttle to rev-match a downshift.
+    const pedal = this.controls.mode === "vehicle" && this.drivetrain.blipThrottle !== null ? Math.max(this.controls.throttle, this.drivetrain.blipThrottle) : this.controls.throttle;
     // Drive-by-wire progression: small pedal → finer plate control at the bottom.
     return clamp(Math.pow(pedal, 1.35), 0, 1);
   }
@@ -496,9 +559,24 @@ export class EngineSimulator {
     const pedal = this.controls.throttle;
     const blockSec = BLOCK / this.sampleRate;
 
+    // Start / stop: the engine catches once it accelerates past ~55 % of idle under its own power.
+    if (this.cranking) {
+      this.crankTime += blockSec;
+      if (rpm > Math.max(400, 0.55 * cal.idleRpm) && this.crankTime > 0.25) {
+        this.cranking = false;
+        this.running = true;
+        this.startFlare = 1;
+        this.idleIntegral = this.idleFeedForward;
+      } else if (this.crankTime > 5) this.cranking = false;
+    }
+    this.startFlare *= Math.exp(-blockSec / 1.5);
+    this.telemetry.engineState = this.cranking ? "cranking" : this.running ? "running" : "off";
+
     // Idle air control: slow PI on speed around a feed-forward opening (production IAC behaviour);
     // the fast part of idle regulation is done with spark below.
-    const idleErr = (cal.idleRpm - rpm) / cal.idleRpm;
+    // Idle target with the post-start flare (production start calibration: ~+30 % decaying over ~1.5 s).
+    const idleTarget = cal.idleRpm * (1 + 0.3 * this.startFlare);
+    const idleErr = (idleTarget - rpm) / idleTarget;
     const rpmRate = (rpm - this.lastBlockRpm) / blockSec;
     this.lastBlockRpm = rpm;
     // Slow speed estimate (~0.3 s) for the adaptation gate: a loping cam's cycle-to-cycle swings
@@ -508,8 +586,8 @@ export class EngineSimulator {
     const slowRate = (this.slowRpm - prevSlow) / blockSec;
     if (pedal < 0.03) {
       // Integrate only near idle (anti-windup during the fall from high speed).
-      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut;
-      if (this.controls.mode === "free" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + idleErr * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
+      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut && this.running && !this.cranking && rpm > 0.5 * cal.idleRpm;
+      if (this.controls.mode !== "dyno" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + idleErr * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
       const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd;
       this.bypass = clamp(this.idleIntegral + idleErr * this.idleGains.kp + damping, this.idleFeedForward * 0.12, 1);
     } else {
@@ -562,9 +640,26 @@ export class EngineSimulator {
     // Valve timing: cam phasers and lift switching.
     this.scheduleValveTiming(rpm, pedal, this.intake.mapPa / 1000, blockSec);
 
-    // Rev limiter.
-    const lim = cal.revLimiterRpm;
-    if (cal.revLimiter === "soft") {
+    // Vehicle: shift controller and launch control.
+    if (this.controls.mode === "vehicle") {
+      const vc = { autoShift: this.controls.autoShift ?? true, launchControl: this.controls.launchControl ?? false, brake: this.controls.brake ?? 0 };
+      this.drivetrain.control(blockSec, rpm, pedal, vc, this.telemetry.torqueNm - this.frictionTorque(rpm), this.spec.inertiaKgM2);
+      this.launchHold = this.drivetrain.launchHoldRpm(vc);
+      const d = this.drivetrain;
+      const t = this.telemetry;
+      t.gear = d.gear;
+      t.speedKmh = d.speed * 3.6;
+      t.clutch = d.clutch;
+      t.shifting = d.phase !== "drive";
+    } else this.launchHold = null;
+
+    // Rev limiter (launch control: an ignition-cut hold at the launch speed — the source of launch bangs).
+    const lim = this.launchHold ?? cal.revLimiterRpm;
+    if (this.launchHold !== null) {
+      if (!this.limiterActive && rpm > lim) this.limiterActive = true;
+      else if (this.limiterActive && rpm < lim - 150) this.limiterActive = false;
+      this.softCutFraction = 0;
+    } else if (cal.revLimiter === "soft") {
       this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 0.85);
       this.limiterActive = this.softCutFraction > 0;
       for (let i = 0; i < this.sparkCuts.length; i++) this.sparkCuts[i] = this.rng.next() < this.softCutFraction ? 1 : 0;
@@ -589,6 +684,7 @@ export class EngineSimulator {
     // Applies at every speed with the pedal closed, so coasting down onto idle is continuous
     // (no jump from retarded idle spark to MBT at some speed threshold).
     if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, Math.min(advance, 28));
+    if (this.cranking) advance = 5; // cranking spark: fixed near TDC
     this.sparkAdvance = clamp(advance, -5, 48);
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
 
@@ -651,7 +747,9 @@ export class EngineSimulator {
     const tendency = this.spec.calibration.afterfireTendency;
     // Port-wall fuel film evaporating after the injectors stop (overrun / fuel-cut limiter): the
     // classic source of overrun crackle. Strength set by the calibration's afterfire tendency.
-    const cutting = this.fuelCut || (this.limiterActive && this.spec.calibration.revLimiter === "hard-fuel-cut");
+    // Interrupted combustion of any kind lets mixture reach the hot exhaust: fuel cut (port-wall
+    // film), limiter or launch cuts, and ignition-cut flat shifts (unburned charge).
+    const cutting = this.fuelCut || this.limiterActive || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
     if (cutting && tendency > 0) {
       const perCycleFuel = (this.displacementL / 1000) * 1.1 / 14.7 / this.exhaustFuel.length;
       const film = tendency * 0.06 * perCycleFuel * (this.rpm / 120) * Math.exp(-this.fuelCutAge / 0.7) * dt;

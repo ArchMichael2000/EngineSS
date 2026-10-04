@@ -4,6 +4,7 @@
  * everything else is filled with family-typical engineering values. The rules
  * and their sources are listed in docs/reference-sources.md ("Spec defaults").
  */
+import { defaultVehicle } from "./vehicle";
 import type { EngineConfiguration } from "../engineTypes";
 import type { CamSpec, CollectorStrategy, CrossoverType, EngineSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
 import { clamp } from "./gas";
@@ -204,6 +205,13 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     exhaust,
     forcedInduction,
     calibration,
+    vehicle: defaultVehicle(
+      displacement,
+      q.redline,
+      calibration.idleRpm,
+      motorcycleLike || n <= 2,
+      (12e5 * (displacement / 1000) / (4 * Math.PI)) * (forcedInduction.kind === "na" ? 1 : 1 + forcedInduction.targetBoostKpa / 101.3),
+    ),
     inertiaKgM2: inertia,
     borePitchMm: bore * 1.12 + 9,
     fuelLhvMjKg: 43,

@@ -161,13 +161,28 @@ export class StructuralRadiator {
    * same speed so the two keep their ratio across engine sizes.
    */
   private meshPhase = 0;
+  /** Starter engaged: crank revolutions per second (0 = disengaged). */
+  starterRevPerSec = 0;
+  private starterMeshPhase = 0;
+  private starterWhinePhase = 0;
   private mechanical(rpm: number): number {
     const k = Math.pow(Math.max(0, rpm) / 1000, 1.5);
     this.meshPhase += (2 * Math.PI * (rpm / 60) * 21) / this.fs;
     if (this.meshPhase > 1e4) this.meshPhase %= 2 * Math.PI;
+    // Starter: pinion/ring-gear mesh (≈132 ring teeth) and commutator whine (≈13:1 reduction,
+    // 24 commutator bars), bolted to the bellhousing, so it rides the block modes.
+    let starter = 0;
+    if (this.starterRevPerSec > 0) {
+      const rps = this.starterRevPerSec;
+      this.starterMeshPhase += (2 * Math.PI * rps * 132) / this.fs;
+      this.starterWhinePhase += (2 * Math.PI * rps * 13 * 24) / this.fs;
+      if (this.starterMeshPhase > 1e4) this.starterMeshPhase %= 2 * Math.PI;
+      if (this.starterWhinePhase > 1e4) this.starterWhinePhase %= 2 * Math.PI;
+      starter = 180 * Math.sin(this.starterMeshPhase) + 90 * Math.sin(this.starterWhinePhase) + 60 * this.rng.gaussian();
+    }
     // High-frequency part of the chain tension fluctuation at the guides and tensioner, N (the
     // low-frequency part, hundreds of N, sits below the structure modes and does not radiate).
-    return k * (60 * this.rng.gaussian() + 36 * Math.sin(this.meshPhase));
+    return k * (60 * this.rng.gaussian() + 36 * Math.sin(this.meshPhase)) + starter;
   }
 
   step(gaugePressures: Float64Array, scale: number, rpm = 0): void {

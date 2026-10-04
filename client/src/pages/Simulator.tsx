@@ -40,6 +40,10 @@ export default function Simulator() {
     setDriveMode,
     setPerspective,
     setStemGains,
+    shift,
+    setIgnition,
+    vehicleOptions,
+    setVehicleOptions,
   } = useAudioEngine();
   const physical = isPhysicalSoundProfile(config.soundProfile);
   const schedule = useMemo(() => (physical ? solveFiringSchedule(resolveEngineSpec(config)) : null), [config, physical]);
@@ -304,6 +308,10 @@ export default function Simulator() {
                 physical={physical}
                 driveMode={playbackState.driveMode ?? 'free'}
                 onDriveModeChange={setDriveMode}
+                onShift={shift}
+                onIgnition={setIgnition}
+                vehicleOptions={vehicleOptions}
+                onVehicleOptions={setVehicleOptions}
               />
             </div>
 

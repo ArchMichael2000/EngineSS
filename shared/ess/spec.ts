@@ -1,3 +1,4 @@
+import type { VehicleSpec } from "./vehicle";
 /**
  * ESS v16 physical engine specification.
  *
@@ -212,6 +213,8 @@ export interface EngineSpec {
   exhaust: ExhaustSpec;
   forcedInduction: ForcedInductionSpec;
   calibration: CalibrationSpec;
+  /** Vehicle the engine drives in "vehicle" mode. */
+  vehicle: VehicleSpec;
   /** Crank + flywheel + driven accessories rotating inertia, kg·m². */
   inertiaKgM2: number;
   /** Cylinder spacing along the crank, mm (bore pitch). */
