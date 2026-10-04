@@ -349,6 +349,10 @@ Measured cost per engine, as a real-time factor at 48 kHz on a single vCPU of th
 | Merlin V12 (supercharged) | 12 | 28 | 0.96 |
 | Bugatti W16 (quad turbo) | 16 | 56 | 1.22 → 0.81 at the 2/3 tier |
 
+**October 2026 re-measure** (`scripts/cpuBench.ts`, one thread of a 4-vCPU container, 1 s idle, 1 s free rev, then dyno at 0.8 × limiter): W16 1.24–1.35 (run-to-run spread), F140 0.89, LS3 0.67, EA288 0.49–0.55, 13B 0.47–0.48, RD350LC 0.39–0.41, K20A 0.38–0.40. The cost estimate is within 10 % except the two-stroke (0.32 estimated against 0.39–0.41 measured). In Chromium the same engines run with their worklet-measured load at 25–81 % of the audio thread, and the W16 at its 32 kHz tier (`docs/browser-verification.md`).
+
+Profile of the W16 (Node `--cpu-prof`): duct sample reads 14 %, the per-sample engine loop 11 %, cylinder step 10 %, valve residuals and solver 16 %, junction solves 6 %, compressor 3 %. The valve solver averages 3.8 residual evaluations per solve (11.7 solves per sample on the W16) with its warm start, linear predictor and Newton first step. Stopping at 1e-4 of the flow instead of 1e-6 cut that to 3.2 but gave no measurable wall-clock gain, and it was reverted. Changes like this also cannot be checked sample by sample: the combustion variability makes the trajectory diverge after the first perturbed cycle (idle stays within −14 to −77 dB of the reference, then the signals decorrelate) while dyno torque moves less than 0.1 %. `scripts/nullTest.ts` and `scripts/nullCompare.py` report both. The remaining options are structural: thermodynamics at a sub-rate, or splitting the engine across threads. Threads need SharedArrayBuffer, which needs cross-origin isolation headers that GitHub Pages does not send.
+
 ### Wave physics (from the core build)
 
 * Duct resonances fall within about 1 % of `nc/2L`.
