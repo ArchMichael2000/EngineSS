@@ -256,6 +256,8 @@ The 13B fires every 180° of e-shaft (six chambers, two firings per revolution).
 
 24 random rotaries (1–4 rotors, NA, turbo and supercharged, peripheral and side ports) pass the fuzz checks.
 
+Side-by-side render of the four families (idle, full-throttle rev, lift-off; exterior rear): `docs/figures/engine-families.png`.
+
 ### Random configurations and real-time cost
 
 `scripts/fuzzConfigs.ts` (library `shared/ess/fuzz.ts`) draws configurations across layouts,
