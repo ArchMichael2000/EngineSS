@@ -141,6 +141,38 @@ describe("vehicle and start/stop", () => {
 });
 
 describe("forced induction", () => {
+  /** Lift off from full boost at a held 5000 rpm; returns the compressor mass-flow trace (1 kHz). */
+  function liftOff(bov: boolean): number[] {
+    const sim = dyno("toyota-2jz-gte", 5000, 3, (c) => ({ ...c, forcedInduction: { ...c.forcedInduction, bovEnabled: bov } }));
+    sim.setControls({ throttle: 0 });
+    const compressor = (sim as unknown as { fi: { compressor: { massFlow: number } } }).fi.compressor;
+    const flow: number[] = [];
+    for (let i = 0; i < 1500; i++) {
+      sim.prewarm(0.001);
+      flow.push(compressor.massFlow);
+    }
+    return flow;
+  }
+
+  it("without a blow-off valve the compressor deep-surges at a flutter rate after lift-off", () => {
+    const flow = liftOff(false);
+    let reversals = 0;
+    let forward = true;
+    for (const f of flow) {
+      if (forward && f < -0.01) {
+        forward = false;
+        reversals++;
+      } else if (!forward && f > 0.03) forward = true;
+    }
+    // 10–35 Hz over 1.5 s (Dehner & Selamet: deep surge just below the charge-system Helmholtz frequency).
+    expect(reversals).toBeGreaterThan(15);
+    expect(reversals).toBeLessThan(55);
+  }, 30_000);
+
+  it("a blow-off valve keeps the compressor out of surge", () => {
+    expect(Math.min(...liftOff(true))).toBeGreaterThan(0);
+  }, 30_000);
+
   it("parallel turbos share the airflow (quad-turbo W16 builds boost)", () => {
     const t = dyno("bugatti-w16", 4000, 3).telemetry;
     expect(t.mapKpa).toBeGreaterThan(160);

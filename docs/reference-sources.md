@@ -58,6 +58,9 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
 | Cabin boom gain | 0.00175 Pa per N·m of 25–180 Hz torque ripple | **Unverified.** No open interior recordings; set so WOT boom sits a few dB above the airborne exhaust. |
 | Afterfire | Continuous afterburning (τ ≈ 3 ms when hot with O₂) while firing; discrete pops need fuel cut, limiter cut or misfires | Matches observed behaviour: crackle on lift-off and the limiter, flame without pops under load. |
+| Surge duct | Greitzer inertance 1.8 m / inducer area (inlet → compressor → charge piping → throttle) | Sets the charge-system Helmholtz frequency near 20–35 Hz. Deep surge without a BOV then runs at 32 Hz on the 2JZ (96 % of Helmholtz). The OSU rig (Dehner & Selamet) measured 63–82 % of Helmholtz, so the simulated cycle sits closer to the mild-surge rate. The previous 0.6 m duct gave 70 Hz with no flow reversal. |
+| Blow-off valve | Pneumatic: cracks at 20 kPa across the throttle, fully open at 40 kPa, 12 ms travel; area 0.16·D²·count (≈ 0.45 × wheel diameter) | A fixed 24 mm valve on an 83 mm wheel balanced the wheel's flow at 220 kPa. Sized to the wheel, the compressor stays out of surge and boost halves in 250 ms, then decays with shaft speed. |
+| Wastegate | PI on boost; proportional term on boost predicted 0.15 s ahead from its filtered rise rate | Tip-in overshoot 10.5 % (17 % without anticipation); settled boost within 1.5 % of target. |
 | Rev limiter | Soft: a random share of cylinders loses spark *and* fuel, ramping from 0 at limiter − 30 rpm to all cylinders at limiter + 130 rpm, with 12° retard on the rest; every strategy has an overspeed ignition cut on instantaneous speed at limiter + 150 rpm | A fuel-only soft cut acts one cycle late. A 10 L turbo inline-8 with a light flywheel overran its 5300 rpm limiter to 6041 rpm with it. Spark cut acts on the charge already inducted. |
 | Internal rate tiers | 1, 5/6, 2/3 of the device rate; cost estimate 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers (× real time at 48 kHz on the reference machine, ±25 %) times a measured machine factor, kept under 60 % of the audio thread; 2 s above 90 % steps down one tier | Physics is rate-independent: W16 brake torque at 32 kHz is within 0.15 % of 48 kHz. Kaiser-windowed sinc upsampler (32 taps, β 8): flat to 0.75 of the reduced Nyquist, images ≤ −60 dB. |
 
@@ -188,6 +191,26 @@ extent; Daigle 1979, Embleton 1996), which took the 2JZ order-profile error from
 
 Speed tracking without a tachometer is reliable for slow sweeps and steady segments (≈1 % on
 known renders); fast free-revs and pass-bys (Doppler) need a speed hint or a vehicle model.
+
+### Forced-induction acoustics
+
+`scripts/verifyForcedInduction.ts` renders each event with only the accessory stem, on a dyno-held
+crank, and checks it. **19 of 19 checks pass.**
+
+| Check | Result | Expected |
+|---|---|---|
+| 2JZ shaft speed / tip speed at full boost | 113 krpm / 496 m/s | 90–220 krpm / 380–520 m/s (small automotive turbos; cast-wheel limit) |
+| Blade-pass tone at shaft × blades | 0.5 % off, 33 dB prominent | < 1 % |
+| BOV lift-off: minimum compressor flow | +0.15 kg/s (no surge) | > 0 |
+| BOV lift-off: boost halved | 251 ms | 50–600 ms |
+| BOV vent level / spectral centroid | +16 dB over post-vent / 1.0 kHz | broadband jet, 0.2·u/d |
+| No-BOV lift-off: deep-surge reversals in 1.5 s | 48 at 31.6 Hz | 10–35 Hz (≈ 30 Hz measured on the OSU rig) |
+| Wastegate tip-in overshoot / settled boost | 10.5 % / 101 % | ≤ 12 % / 90–106 % |
+| Hellcat twin-screw rotor speed at 4000 rpm | 10.7 krpm | ≈ 2.4–2.7 × crank |
+| Pocket tone at rotor × lobes / timing-gear mesh | 0.25 % off, 21 dB / 30 dB prominent | < 1 % |
+
+Spectrograms of the four events: `docs/figures/forced-induction-events.png`. Steady-state output of
+the boosted reference engines was unchanged by these fixes (within 0.3 %).
 
 ### Random configurations and real-time cost
 

@@ -76,8 +76,12 @@ class Compressor {
   constructor(wheelDiameterM: number) {
     this.diameter = wheelDiameterM;
     this.tipRadius = wheelDiameterM / 2;
+    // Greitzer duct: the air column that oscillates in surge runs from the inlet through the
+    // compressor and the charge piping/intercooler to the throttle, ≈ 1.8 m on a car. With the
+    // charge volume this puts the Helmholtz (mild surge) frequency near 20–35 Hz and deep surge at
+    // 50–90 % of that (Dehner & Selamet, OSU turbocharger surge rig).
     const inducerArea = Math.PI * Math.pow(wheelDiameterM * 0.36, 2);
-    this.inertance = 0.6 / inducerArea;
+    this.inertance = 1.8 / inducerArea;
   }
 
   phi(massFlow: number, tipSpeed: number, rho1: number): number {
@@ -159,11 +163,15 @@ class Turbocharger implements ForcedInductionModel {
   private readonly bovNoise: BandNoise;
   private readonly wgNoise: BandNoise;
   private wastegateIntegral = 0;
+  private prevChargePa = P_AMBIENT;
+  private boostRate = 0;
   private bovOpen = 0;
   private bovFlow = 0;
   private prevCompressorQ = 0;
   private prevBovQ = 0;
   private readonly targetPa: number;
+  /** Blow-off valve flow area (all turbos), m². */
+  private readonly bovArea: number;
 
   constructor(private readonly spec: EngineSpec, private readonly t: TurboSpec, private readonly fs: number, rng: Rng, private readonly exhaust: ExhaustNetwork, private readonly intake: IntakeSystem) {
     this.compressor = new Compressor(t.compressorWheelDiameterMm / 1000);
@@ -171,6 +179,7 @@ class Turbocharger implements ForcedInductionModel {
     // Tip speed limit ~520 m/s for cast aluminium wheels.
     this.maxOmega = 520 / this.compressor.tipRadius;
     this.targetPa = P_AMBIENT + t.targetBoostKpa * 1000;
+    this.bovArea = 0.16 * this.compressor.diameter * this.compressor.diameter * Math.max(1, t.count);
     this.whoosh = new BandNoise(rng, fs, 0.45);
     this.tipNoise = new BandNoise(rng, fs, 6);
     this.bovNoise = new BandNoise(rng, fs, 0.5);
@@ -190,7 +199,7 @@ class Turbocharger implements ForcedInductionModel {
     return [];
   }
 
-  step(dt: number, _rpm: number, _crankOmega: number, pedal: number): void {
+  step(dt: number, _rpm: number, _crankOmega: number, _pedal: number): void {
     const stages = this.exhaust.turbines;
     // Turbine power (expansion of the non-bypassed flow), η_t ≈ 0.68.
     let turbinePower = 0;
@@ -210,11 +219,15 @@ class Turbocharger implements ForcedInductionModel {
     const torque = (turbinePower / n - this.compressor.power - bearing) / Math.max(200, this.omega);
     this.omega = clamp(this.omega + (torque / J) * dt, 500, this.maxOmega * 1.05);
 
-    // BOV: diaphragm referenced to manifold vacuum.
+    // BOV: a spring-loaded piston with charge pressure underneath and manifold pressure on top, so it
+    // opens on the pressure difference across the throttle (no pedal input): cracking at 20 kPa, fully
+    // open at 40 kPa, ≈ 12 ms piston travel. Valve sized to the compressor (≈ 0.45 × wheel
+    // diameter: 22 mm on a 50 mm wheel, 38 mm on an 83 mm one) so it can pass the wheel's flow at
+    // low pressure ratio and the charge vents in a few hundred milliseconds.
     const dpThrottle = this.charge.pressure - this.intake.mapPa;
-    const bovTarget = this.t.blowOffValve && dpThrottle > 28_000 && pedal < 0.35 ? 1 : 0;
+    const bovTarget = this.t.blowOffValve ? clamp((dpThrottle - 20_000) / 20_000, 0, 1) : 0;
     this.bovOpen += (bovTarget - this.bovOpen) * Math.min(1, dt / 0.012);
-    this.bovFlow = this.t.blowOffValve ? orificeMassFlow(this.bovOpen * 4.5e-4, this.charge.pressure, this.charge.temperature, P_AMBIENT, T_AMBIENT) : 0;
+    this.bovFlow = this.t.blowOffValve ? orificeMassFlow(this.bovOpen * this.bovArea, this.charge.pressure, this.charge.temperature, P_AMBIENT, T_AMBIENT) : 0;
 
     const throttleFlow = this.intake.throttleMassFlow;
     this.charge.step(dt, n * this.compressor.massFlow, this.compressor.outletTemperature(t1), throttleFlow + this.bovFlow, 0.72);
@@ -257,8 +270,8 @@ class Turbocharger implements ForcedInductionModel {
 
     // BOV vent jet.
     const qBov = this.bovFlow / RHO_AIR;
-    const uBov = qBov / 4.5e-4;
-    this.bovNoise.setCentre(clamp((0.2 * Math.max(5, uBov)) / 0.024, 200, 9000));
+    const uBov = qBov / Math.max(1e-5, this.bovOpen * this.bovArea);
+    this.bovNoise.setCentre(clamp((0.2 * Math.max(5, uBov)) / Math.sqrt(this.bovArea), 200, 9000));
     const bovQdot = (qBov - this.prevBovQ) * this.fs;
     this.prevBovQ = qBov;
     this.sourceVolumeAccelerations[1] = this.bovNoise.next() * qBov * Math.min(1, Math.pow(uBov / 340, 2)) * 4000 + bovQdot * 0.2;
@@ -280,10 +293,16 @@ class Turbocharger implements ForcedInductionModel {
     // Wastegate: PI on boost, pressure-referenced (spring + duty).
     const err = (this.charge.pressure - this.targetPa) / this.targetPa;
     this.wastegateIntegral = clamp(this.wastegateIntegral + err * 6 * blockSeconds, 0, 1);
+    // Anticipation: the proportional term acts on boost predicted 0.15 s ahead from its rise rate
+    // (filtered), as production boost controllers do, which holds tip-in overshoot near 10 % (17 % without it).
+    const rate = (this.charge.pressure - this.prevChargePa) / Math.max(1e-4, blockSeconds);
+    this.prevChargePa = this.charge.pressure;
+    this.boostRate += (rate - this.boostRate) * Math.min(1, blockSeconds / 0.03);
+    const predicted = (this.charge.pressure + Math.max(0, this.boostRate) * 0.15 - this.targetPa) / this.targetPa;
     // Turbo-speed protection: the wastegate also opens as the shaft nears its tip-speed limit, so a
     // compressor that can't quite reach target boost doesn't drive turbine inlet pressure away.
     const overspeed = clamp((this.omega / this.maxOmega - 0.94) / 0.06, 0, 1);
-    const duty = this.t.wastegate ? clamp(Math.max(this.wastegateIntegral + err * 8, overspeed), 0, 1) : 0;
+    const duty = this.t.wastegate ? clamp(Math.max(this.wastegateIntegral + Math.max(err, predicted) * 8, overspeed), 0, 1) : 0;
     for (const s of this.exhaust.turbines) s.wastegate = duty;
     let tIn = 0;
     for (const s of this.exhaust.turbines) tIn = Math.max(tIn, s.inletK);
