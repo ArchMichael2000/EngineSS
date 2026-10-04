@@ -4,8 +4,6 @@ import {
   getDefaultFiringOrder,
   DEFAULT_ENGINE_CONFIG,
   FACTORY_PRESETS,
-  normalizeSoundProfile,
-  SOUND_PROFILE_HISTORY,
 } from "./engineTypes";
 
 describe("validateFiringOrder", () => {
@@ -87,16 +85,6 @@ describe("DEFAULT_ENGINE_CONFIG", () => {
 
   it("has valid forced induction defaults", () => {
     expect(DEFAULT_ENGINE_CONFIG.forcedInduction.type).toBe("na");
-  });
-});
-
-describe("sound profile history", () => {
-  it("keeps versioned profiles while accepting old saved aliases", () => {
-    expect(SOUND_PROFILE_HISTORY.map((profile) => profile.value)).toEqual(["v16", "v15", "v14", "v13", "v12", "v11", "v10", "v9", "v8", "v0"]);
-    expect(normalizeSoundProfile("clarity")).toBe("v9");
-    expect(normalizeSoundProfile("clean")).toBe("v8");
-    expect(normalizeSoundProfile("baseline")).toBe("v0");
-    expect(normalizeSoundProfile(undefined)).toBe("v16");
   });
 });
 

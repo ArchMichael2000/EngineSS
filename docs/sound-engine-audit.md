@@ -8,11 +8,11 @@ Status: baseline audit before the core rebuild. Every claim about current behavi
 
 | Area | Files | Role |
 |---|---|---|
-| Sound model (offline / export) | `shared/engineSoundModel.ts` (1,596 lines) | Firing-event analysis, per-event "pulse" synthesis, accessories, output shaping. Used by WAV/MP3 export and the server renderer. |
+| Sound model (offline / export) | `legacy/engineSoundModel.ts` (1,596 lines) | Firing-event analysis, per-event "pulse" synthesis, accessories, output shaping. Used by WAV/MP3 export and the server renderer. |
 | Sound model (live) | `client/src/lib/audioEngine.ts` → `COMBUSTION_PROCESSOR_CODE` (≈1,070 lines inside a template string) | Hand-maintained JavaScript copy of the same model, run as an `AudioWorkletProcessor`. This is what users hear. |
 | Host audio graph | `client/src/lib/audioEngine.ts` → `AudioEngine` | Worklet → (dry / lowpass / bandpass) → master → limiter gain → compressor. Also runs legacy turbo/supercharger oscillators, the BOV burst, the rev limiter and RPM inertia, all on `requestAnimationFrame`. |
 | Config & presets | `shared/engineTypes.ts` | Engine config schema, 8 factory presets, firing-order table, 9 "sound profile" versions (v0, v8–v15). |
-| Mix profile | `shared/realtimeAudioMix.ts` | For v9+ the live path is 98% dry; the lowpass/bandpass filters and legacy oscillators are muted (gain 0) but still running. |
+| Mix profile | `legacy/realtimeAudioMix.ts` | For v9+ the live path is 98% dry; the lowpass/bandpass filters and legacy oscillators are muted (gain 0) but still running. |
 | Capture/tuning | `shared/audioAnalysis.ts`, `client/src/lib/captureAnalysis.ts`, `shared/referenceCapture.ts` | Analyses an uploaded recording (Meyda/Essentia features) and maps summary statistics to 15 tuning weights with hand-written linear formulas. |
 | Tests | `shared/*.test.ts`, `server/engine.test.ts` (97 tests, all pass) | Guard continuity, non-silence, loudness balance and parameter sensitivity. None assert acoustic correctness against physics or recordings. |
 

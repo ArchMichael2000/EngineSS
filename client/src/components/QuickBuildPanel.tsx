@@ -2,8 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
-import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, SoundProfile, EngineCycleType, FuelType } from '../../../shared/engineTypes';
-import { SOUND_PROFILE_HISTORY, normalizeSoundProfile } from '../../../shared/engineTypes';
+import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, EngineCycleType, FuelType } from '../../../shared/engineTypes';
 
 interface QuickBuildPanelProps {
   config: EngineConfiguration;
@@ -20,7 +19,6 @@ const TOOLTIPS = {
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
   redline: 'The maximum safe RPM. Higher redlines allow more rev range but change the engine character at the top end.',
-  soundProfile: 'Choose a saved ESS audio model version. v15 is current; v14 preserves the static-clean model for A/B testing.',
 };
 
 function InfoTooltip({ text }: { text: string }) {
@@ -62,13 +60,6 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
     });
   };
 
-  const updateSoundProfile = (value: SoundProfile) => {
-    onChange({
-      ...config,
-      soundProfile: value,
-    });
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -76,26 +67,6 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           Quick Build
         </h3>
         <div className="flex-1 h-px bg-gradient-to-r from-neon-pink/40 to-transparent" />
-      </div>
-
-      {/* A/B Sound Model */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Sound Model</label>
-          <InfoTooltip text={TOOLTIPS.soundProfile} />
-        </div>
-        <Select value={normalizeSoundProfile(config.soundProfile)} onValueChange={(v) => updateSoundProfile(v as SoundProfile)}>
-          <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-dark-elevated border-hud-line">
-            {SOUND_PROFILE_HISTORY.map((profile) => (
-              <SelectItem key={profile.value} value={profile.value}>
-                {profile.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Engine Layout */}

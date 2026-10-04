@@ -15,8 +15,6 @@ interface PlaybackControllerProps {
   onRpmChange: (value: number) => void;
   redline: number;
   resetKey: string;
-  /** v16 physical core active: throttle drives a real engine; RPM is held only on the dyno. */
-  physical?: boolean;
   driveMode?: 'free' | 'dyno' | 'vehicle';
   onDriveModeChange?: (mode: 'free' | 'dyno' | 'vehicle') => void;
   /** Vehicle mode: gear shifts and options. */
@@ -37,7 +35,6 @@ export function PlaybackController({
   onRpmChange,
   redline,
   resetKey,
-  physical = false,
   driveMode = 'free',
   onDriveModeChange,
   onShift,
@@ -49,7 +46,6 @@ export function PlaybackController({
   const [sweepActive, setSweepActive] = useState(false);
   const sweepRef = useRef<number | null>(null);
   const holdTimeoutRef = useRef<number | null>(null);
-  const sweepRpmRef = useRef(800);
   const sweepRunIdRef = useRef(0);
   const resetKeyRef = useRef(resetKey);
 
@@ -63,19 +59,17 @@ export function PlaybackController({
       window.clearTimeout(holdTimeoutRef.current);
       holdTimeoutRef.current = null;
     }
-    sweepRpmRef.current = 800;
   }, []);
 
   const stopSweep = useCallback(() => {
     clearSweepTimers();
     setSweepActive(false);
     onThrottleChange(0);
-    if (physical) onDriveModeChange?.('free');
-    else onRpmChange(800);
-  }, [clearSweepTimers, onThrottleChange, onRpmChange, physical, onDriveModeChange]);
+    onDriveModeChange?.('free');
+  }, [clearSweepTimers, onThrottleChange, onDriveModeChange]);
 
-  /** v16: full-throttle dyno pull to redline, then lift off the throttle and let the engine run free. */
-  const startPhysicalSweep = useCallback(() => {
+  /** Full-throttle dyno pull to redline, then lift off the throttle and let the engine run free. */
+  const startDynoPull = useCallback(() => {
     if (!isPlaying) return;
     clearSweepTimers();
     setSweepActive(true);
@@ -115,52 +109,6 @@ export function PlaybackController({
       blipRef.current = null;
     }, 260);
   }, [onDriveModeChange, onThrottleChange]);
-
-  const startSweep = useCallback(() => {
-    if (!isPlaying) return;
-    clearSweepTimers();
-    setSweepActive(true);
-    const sweepRunId = sweepRunIdRef.current + 1;
-    sweepRunIdRef.current = sweepRunId;
-    sweepRpmRef.current = 800;
-    onRpmChange(800);
-
-    const sweepDuration = 6000; // 6 seconds idle to redline
-    const startTime = performance.now();
-    const startRpm = 800;
-    const endRpm = redline;
-
-    const animate = (now: number) => {
-      if (sweepRunId !== sweepRunIdRef.current) return;
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / sweepDuration, 1);
-      // Ease-in-out for natural feel
-      const eased = progress < 0.5
-        ? 2 * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-      
-      const currentRpm = startRpm + (endRpm - startRpm) * eased;
-      sweepRpmRef.current = currentRpm;
-      onThrottleChange(eased);
-      onRpmChange(currentRpm);
-
-      if (progress < 1) {
-        sweepRef.current = requestAnimationFrame(animate);
-      } else {
-        sweepRef.current = null;
-        // Hold at redline briefly then back to idle
-        holdTimeoutRef.current = window.setTimeout(() => {
-          if (sweepRunId !== sweepRunIdRef.current) return;
-          onThrottleChange(0);
-          onRpmChange(800);
-          setSweepActive(false);
-          holdTimeoutRef.current = null;
-        }, 500);
-      }
-    };
-
-    sweepRef.current = requestAnimationFrame(animate);
-  }, [clearSweepTimers, isPlaying, redline, onThrottleChange, onRpmChange]);
 
   const handleStopEngine = useCallback(() => {
     stopSweep();
@@ -216,33 +164,29 @@ export function PlaybackController({
         </Button>
       </div>
 
-      {physical && (
-        <div className="grid grid-cols-3 gap-2">
-          {(['free', 'dyno', 'vehicle'] as const).map((mode) => (
-            <Button
-              key={mode}
-              variant="outline"
-              size="sm"
-              disabled={!isPlaying || sweepActive}
-              onClick={() => onDriveModeChange?.(mode)}
-              className={`text-xs font-[Rajdhani] uppercase tracking-wide ${driveMode === mode ? 'border-neon-cyan text-neon-cyan bg-neon-cyan/10' : 'border-hud-line'}`}
-            >
-              {mode === 'free' ? 'Free rev' : mode === 'dyno' ? 'Dyno hold' : 'Drive'}
-            </Button>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-3 gap-2">
+        {(['free', 'dyno', 'vehicle'] as const).map((mode) => (
+          <Button
+            key={mode}
+            variant="outline"
+            size="sm"
+            disabled={!isPlaying || sweepActive}
+            onClick={() => onDriveModeChange?.(mode)}
+            className={`text-xs font-[Rajdhani] uppercase tracking-wide ${driveMode === mode ? 'border-neon-cyan text-neon-cyan bg-neon-cyan/10' : 'border-hud-line'}`}
+          >
+            {mode === 'free' ? 'Free rev' : mode === 'dyno' ? 'Dyno hold' : 'Drive'}
+          </Button>
+        ))}
+      </div>
 
-      {physical && (
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState !== 'off'} onClick={() => onIgnition?.(true)}
-            className="text-xs font-[Rajdhani] uppercase border-hud-line">Crank / start</Button>
-          <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState === 'off'} onClick={() => onIgnition?.(false)}
-            className="text-xs font-[Rajdhani] uppercase border-hud-line">Ignition off</Button>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState !== 'off'} onClick={() => onIgnition?.(true)}
+          className="text-xs font-[Rajdhani] uppercase border-hud-line">Crank / start</Button>
+        <Button variant="outline" size="sm" disabled={!isPlaying || playbackState.telemetry?.engineState === 'off'} onClick={() => onIgnition?.(false)}
+          className="text-xs font-[Rajdhani] uppercase border-hud-line">Ignition off</Button>
+      </div>
 
-      {physical && driveMode === 'vehicle' && (
+      {driveMode === 'vehicle' && (
         <div className="space-y-2 rounded border border-hud-line/30 p-2">
           <div className="grid grid-cols-4 gap-2 items-center">
             <Button variant="outline" size="sm" disabled={!isPlaying} onClick={() => onShift?.(-1)} className="text-xs border-hud-line">Shift −</Button>
@@ -350,7 +294,7 @@ export function PlaybackController({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">
-              {physical ? (driveMode === 'dyno' ? 'Dyno RPM set-point' : 'Engine RPM (free running)') : 'Direct RPM'}
+              {driveMode === 'dyno' ? 'Dyno RPM set-point' : 'Engine RPM (free running)'}
             </label>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -362,11 +306,11 @@ export function PlaybackController({
             </Tooltip>
           </div>
           <span className="text-xs font-[Orbitron] text-foreground/60">
-            {Math.round(physical && driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm)}
+            {Math.round(driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm)}
           </span>
         </div>
         <Slider
-          value={[physical && driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm]}
+          value={[driveMode === 'free' ? playbackState.rpm : playbackState.targetRpm]}
           onValueChange={([v]) => onRpmChange(v)}
           min={600}
           max={redline}
@@ -382,7 +326,7 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => { onThrottleChange(0); if (physical) onDriveModeChange?.('free'); else onRpmChange(800); }}
+          onClick={() => { onThrottleChange(0); onDriveModeChange?.('free'); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-cyan/50 hover:text-neon-cyan"
         >
           Idle
@@ -391,19 +335,19 @@ export function PlaybackController({
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => (physical ? blip() : onThrottleChange(0.5))}
+          onClick={blip}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-cyan/50 hover:text-neon-cyan"
         >
-          {physical ? 'Blip' : 'Rev'}
+          Blip
         </Button>
         <Button
           variant="outline"
           size="sm"
           disabled={!isPlaying || sweepActive}
-          onClick={() => { if (physical) onDriveModeChange?.('free'); onThrottleChange(1); }}
+          onClick={() => { onDriveModeChange?.('free'); onThrottleChange(1); }}
           className="text-xs font-[Rajdhani] border-hud-line hover:border-neon-pink/50 hover:text-neon-pink"
         >
-          {physical ? 'Full throttle' : 'Redline'}
+          Full throttle
         </Button>
       </div>
 
@@ -412,7 +356,7 @@ export function PlaybackController({
         variant="outline"
         size="sm"
         disabled={!isPlaying}
-        onClick={sweepActive ? stopSweep : physical ? startPhysicalSweep : startSweep}
+        onClick={sweepActive ? stopSweep : startDynoPull}
         className={`w-full text-xs font-[Rajdhani] uppercase tracking-wide transition-all duration-200 ${
           sweepActive
             ? 'border-neon-pink text-neon-pink bg-neon-pink/10 box-glow-pink'
@@ -420,7 +364,7 @@ export function PlaybackController({
         }`}
       >
         <TrendingUp className="w-3.5 h-3.5 mr-1.5" />
-        {sweepActive ? 'Stop Sweep' : physical ? 'Dyno Pull (WOT → Redline, Lift)' : 'RPM Sweep (Idle → Redline)'}
+        {sweepActive ? 'Stop Sweep' : 'Dyno Pull (WOT → Redline, Lift)'}
       </Button>
 
       {/* Engine Telemetry */}
@@ -454,7 +398,7 @@ export function PlaybackController({
             </p>
           </div>
         </div>
-        {physical && playbackState.telemetry && (
+        {playbackState.telemetry && (
           <div className="grid grid-cols-3 gap-1.5 pt-1">
             {(() => {
               const t = playbackState.telemetry;

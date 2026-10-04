@@ -1,5 +1,5 @@
-import type { EngineConfiguration, SoundProfile } from "./engineTypes";
-import { isBaselineSoundProfile, isClaritySoundProfile, isCylinderBalanceSoundProfile, normalizeSoundProfile } from "./engineTypes";
+import type { EngineConfiguration, SoundProfile } from "../shared/engineTypes";
+import { isBaselineSoundProfile, isClaritySoundProfile, isCylinderBalanceSoundProfile, normalizeSoundProfile } from "./soundProfiles";
 
 export interface RealtimeAudioMixProfile {
   dryExhaustGain: number;

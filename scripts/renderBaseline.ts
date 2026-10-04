@@ -7,8 +7,8 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
-import { buildEngineSoundAnalysis, generateEnginePcm, resolveSoundTuningWeights } from "../shared/engineSoundModel";
+import { COMBUSTION_PROCESSOR_CODE } from "../legacy/combustionProcessor";
+import { buildEngineSoundAnalysis, generateEnginePcm, resolveSoundTuningWeights } from "../legacy/engineSoundModel";
 import { FACTORY_PRESETS } from "../shared/engineTypes";
 import type { EngineConfiguration } from "../shared/engineTypes";
 

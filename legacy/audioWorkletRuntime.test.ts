@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
+import { COMBUSTION_PROCESSOR_CODE } from "./combustionProcessor";
 import { buildEngineSoundAnalysis, resolveSoundTuningWeights } from "./engineSoundModel";
-import { FACTORY_PRESETS } from "./engineTypes";
-import type { EngineConfiguration } from "./engineTypes";
+import { FACTORY_PRESETS } from "../shared/engineTypes";
+import type { EngineConfiguration } from "../shared/engineTypes";
 
 class FakeAudioWorkletProcessor {
   port = {

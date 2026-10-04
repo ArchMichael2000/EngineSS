@@ -2,7 +2,7 @@
 import { AUDIO_ENGINE_MODEL_VERSION, getAudioEngine, AudioEngine } from '@/lib/audioEngine';
 import type { EngineConfiguration, ListenerPerspective, PlaybackState } from '../../../shared/engineTypes';
 import type { DriveMode, StemGains } from '../../../shared/ess/engine';
-import { DEFAULT_ENGINE_CONFIG, normalizeSoundProfile } from '../../../shared/engineTypes';
+import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from '../../../shared/engineTypes';
 
 export function useAudioEngine() {
   const engineRef = useRef<AudioEngine | null>(null);
@@ -105,17 +105,13 @@ export function useAudioEngine() {
   }, [ensureEngine]);
 
   const updateConfig = useCallback((newConfig: EngineConfiguration) => {
-    const normalizedConfig = { ...newConfig, soundProfile: normalizeSoundProfile(newConfig.soundProfile) };
+    const normalizedConfig = { ...newConfig, soundProfile: CURRENT_SOUND_PROFILE };
     setConfig(normalizedConfig);
     const engine = ensureEngine();
     if (isPlaying) {
       engine.setConfig(normalizedConfig);
     }
   }, [ensureEngine, isPlaying]);
-
-  const triggerBOV = useCallback(() => {
-    ensureEngine().triggerBOV();
-  }, [ensureEngine]);
 
   const setDriveMode = useCallback((mode: DriveMode) => {
     ensureEngine().setDriveMode(mode);
@@ -156,7 +152,6 @@ export function useAudioEngine() {
     setRPM,
     setLoad,
     updateConfig,
-    triggerBOV,
     setDriveMode,
     setPerspective,
     setStemGains,
