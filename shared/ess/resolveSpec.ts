@@ -87,7 +87,20 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     intakeLiftMm: ph.intakeLiftMm ?? inD * (inCount === 1 ? 0.27 : 0.29) * (1 + 0.1 * highRev),
     exhaustLiftMm: ph.exhaustLiftMm ?? exD * (exCount === 1 ? 0.3 : 0.31) * (1 + 0.1 * highRev),
     gamma: ph.camLobeGamma ?? 0.8,
+    intakePhaserDeg: clamp(ph.intakePhaserDeg ?? 0, 0, 80),
+    exhaustPhaserDeg: clamp(ph.exhaustPhaserDeg ?? 0, 0, 80),
+    liftSwitch: null,
   };
+  if (ph.liftSwitchRpm) {
+    // High cam defaults: the classic VTEC/MIVEC step, ≈ +30° duration and +20 % lift.
+    cam.liftSwitch = {
+      switchRpm: ph.liftSwitchRpm,
+      intakeDurationDeg: ph.highCamIntakeDurationDeg ?? cam.intakeDurationDeg + 30,
+      exhaustDurationDeg: ph.highCamExhaustDurationDeg ?? cam.exhaustDurationDeg + 30,
+      intakeLiftMm: ph.highCamIntakeLiftMm ?? cam.intakeLiftMm * 1.2,
+      exhaustLiftMm: ph.highCamExhaustLiftMm ?? cam.exhaustLiftMm * 1.2,
+    };
+  }
 
   // ---- Intake
   const intakeType = adv.intakeType ?? "single-throttle-body";

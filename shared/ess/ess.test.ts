@@ -86,6 +86,22 @@ describe("combustion", () => {
   });
 });
 
+describe("valve timing", () => {
+  it("phasers sit at minimum overlap at idle and advance the intake at low-speed full load", () => {
+    const idle = new EngineSimulator(specOf("bmw-s54"), FS);
+    idle.setControls({ mode: "free", throttle: 0 });
+    idle.prewarm(1.5);
+    expect(idle.telemetry.intakeCamAdvanceDeg).toBeLessThan(1);
+    const wot = dyno("bmw-s54", 2500, 1.5).telemetry;
+    expect(wot.intakeCamAdvanceDeg).toBeGreaterThan(40);
+  });
+
+  it("VTEC engages above its switch speed at full load and stays off at cruise", () => {
+    expect(dyno("honda-k20a", 7000, 1.5).telemetry.highCam).toBe(true);
+    expect(dyno("honda-k20a", 4500, 1.5).telemetry.highCam).toBe(false);
+  });
+});
+
 describe("forced induction", () => {
   it("parallel turbos share the airflow (quad-turbo W16 builds boost)", () => {
     const t = dyno("bugatti-w16", 4000, 3).telemetry;

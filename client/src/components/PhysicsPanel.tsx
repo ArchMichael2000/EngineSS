@@ -65,10 +65,10 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
     </div>
   );
 
-  const toggle = (key: Key, label: string, value: boolean) => (
+  const toggle = (key: Key, label: string, value: boolean, onValue: unknown = true) => (
     <div className="flex items-center justify-between" key={key}>
       <span className="text-[11px] font-[Rajdhani] uppercase text-foreground/75">{label}</span>
-      <Switch checked={value} onCheckedChange={(v) => set(key, v)} />
+      <Switch checked={value} onCheckedChange={(v) => (onValue === true ? set(key, v) : v ? set(key, onValue) : reset(key))} />
     </div>
   );
 
@@ -109,6 +109,16 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {slider('intakeLiftMm', 'Intake lift', spec.cam.intakeLiftMm, 4, 18, 0.1, ' mm', 1)}
       {slider('exhaustLiftMm', 'Exhaust lift', spec.cam.exhaustLiftMm, 4, 18, 0.1, ' mm', 1)}
       {slider('camLobeGamma', 'Lobe shape γ (ramp gentleness)', spec.cam.gamma, 0.5, 3, 0.05, '', 2)}
+      {slider('intakePhaserDeg', 'Intake cam phaser authority', spec.cam.intakePhaserDeg, 0, 70, 1, '°')}
+      {slider('exhaustPhaserDeg', 'Exhaust cam phaser authority', spec.cam.exhaustPhaserDeg, 0, 70, 1, '°')}
+      {toggle('liftSwitchRpm', 'Two-step lift switching (VTEC-style)', spec.cam.liftSwitch !== null, Math.round(spec.calibration.redlineRpm * 0.7 / 50) * 50)}
+      {spec.cam.liftSwitch && (<>
+        {slider('liftSwitchRpm', 'Lift switch speed', spec.cam.liftSwitch.switchRpm, 2500, Math.max(3000, spec.calibration.redlineRpm), 50, ' rpm')}
+        {slider('highCamIntakeDurationDeg', 'High-cam intake duration', spec.cam.liftSwitch.intakeDurationDeg, 180, 320, 1, '°')}
+        {slider('highCamExhaustDurationDeg', 'High-cam exhaust duration', spec.cam.liftSwitch.exhaustDurationDeg, 180, 320, 1, '°')}
+        {slider('highCamIntakeLiftMm', 'High-cam intake lift', spec.cam.liftSwitch.intakeLiftMm, 4, 18, 0.1, ' mm', 1)}
+        {slider('highCamExhaustLiftMm', 'High-cam exhaust lift', spec.cam.liftSwitch.exhaustLiftMm, 4, 18, 0.1, ' mm', 1)}
+      </>)}
 
       {section('Induction')}
       {slider('plenumVolumeL', 'Plenum volume', spec.intake.plenumVolumeL, 0.3, 15, 0.1, ' L', 1)}

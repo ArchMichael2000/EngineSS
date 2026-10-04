@@ -315,6 +315,15 @@ export interface PhysicalOverrides {
   afterfireTendency: number;
   /** Harmonic cam-lobe shape exponent γ (engine-sim convention): higher = gentler low-lift ramps, less overlap area. */
   camLobeGamma: number;
+  /** Cam phaser authority, crank degrees (0 = fixed): intake advance, exhaust retard. */
+  intakePhaserDeg: number;
+  exhaustPhaserDeg: number;
+  /** Two-step lift switching (VTEC-style): engagement speed and the high-cam lobes. */
+  liftSwitchRpm: number;
+  highCamIntakeDurationDeg: number;
+  highCamExhaustDurationDeg: number;
+  highCamIntakeLiftMm: number;
+  highCamExhaustLiftMm: number;
   /** Fuel octane (≈ RON) for the knock model. */
   fuelOctane: number;
   /** Closed-loop knock control on/off. */
@@ -386,6 +395,9 @@ export interface PlaybackState {
     volumetricEfficiency: number;
     knockRetardDeg: number;
     knockEvents: number;
+    intakeCamAdvanceDeg: number;
+    exhaustCamRetardDeg: number;
+    highCam: boolean;
     splDb: number;
   };
 }

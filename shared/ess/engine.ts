@@ -56,6 +56,10 @@ export interface EngineTelemetry {
   volumetricEfficiency: number;
   /** Mean knock-control spark retard across cylinders, degrees. */
   knockRetardDeg: number;
+  /** Cam phaser positions (crank degrees) and lift-switch state. */
+  intakeCamAdvanceDeg: number;
+  exhaustCamRetardDeg: number;
+  highCam: boolean;
   /** Knock onsets since the simulator started. */
   knockEvents: number;
   splDb: number;
@@ -126,6 +130,12 @@ export class EngineSimulator {
   private lastPedal = 0;
   private bypass = 0.3;
   private slowRpm = 0;
+  // Valve timing actuators
+  private intakeCamAdvance = 0;
+  private exhaustCamRetard = 0;
+  private highCamRequest = false;
+  private highCamTimer = 0;
+  private highCam = false;
   private bypassActual = 0.3;
   private fuelCut = false;
   private limiterActive = false;
@@ -152,7 +162,7 @@ export class EngineSimulator {
   private splN = 0;
   readonly telemetry: EngineTelemetry = {
     rpm: 0, mapKpa: 101, boostKpa: 0, torqueNm: 0, powerKw: 0, lambda: 1, egtC: 600, throttlePlate: 0,
-    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, splDb: 0,
+    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, intakeCamAdvanceDeg: 0, exhaustCamRetardDeg: 0, highCam: false, splDb: 0,
   };
 
   constructor(spec: EngineSpec, sampleRate: number, options: SimulatorOptions = {}) {
@@ -406,6 +416,47 @@ export class EngineSimulator {
     return (fmep * vd) / (4 * Math.PI) + accessory;
   }
 
+  /**
+   * Phaser schedule in the shape production calibrations use: minimum overlap with the pedal closed
+   * (idle and coast stability),
+   * high overlap at part load (internal EGR, lower pumping work: intake advanced, exhaust retarded),
+   * and at full load intake advance falling with speed (early IVC traps charge at low speed, late
+   * IVC uses ram tuning at high speed). Hydraulic phasers slew at ~300 crank °/s. Lift switching
+   * engages above its speed under load after an oil-pressure/locking-pin delay (~0.1 s), with
+   * 300 rpm of hysteresis.
+   */
+  private scheduleValveTiming(rpm: number, pedal: number, mapKpa: number, blockSec: number): void {
+    const cam = this.spec.cam;
+    const cal = this.spec.calibration;
+    const load = clamp((mapKpa - 25) / 70, 0, 1.5);
+    // Closed pedal (idle, coast, decel) parks the phasers at minimum overlap.
+    const idle = pedal < 0.03;
+    const rpmN = rpm / cal.redlineRpm;
+    const full = clamp((load - 0.6) / 0.3, 0, 1);
+    const wotIntake = clamp(1 - (rpmN - 0.2) / 0.6, 0.15, 1);
+    const intakeTarget = idle || this.fuelCut ? 0 : cam.intakePhaserDeg * (0.75 * (1 - full) + wotIntake * full);
+    const exhaustTarget = idle || this.fuelCut ? 0 : cam.exhaustPhaserDeg * (0.8 * (1 - full) + 0.4 * full);
+    const slew = 300 * blockSec;
+    this.intakeCamAdvance += clamp(intakeTarget - this.intakeCamAdvance, -slew, slew);
+    this.exhaustCamRetard += clamp(exhaustTarget - this.exhaustCamRetard, -slew, slew);
+    if (cam.liftSwitch) {
+      const want = this.highCamRequest
+        ? rpm > cam.liftSwitch.switchRpm - 300 && load > 0.4
+        : rpm > cam.liftSwitch.switchRpm && load > 0.6 && pedal > 0.5;
+      this.highCamRequest = want;
+      this.highCamTimer = want === this.highCam ? 0 : this.highCamTimer + blockSec;
+      if (this.highCamTimer > 0.1) {
+        this.highCam = want;
+        this.highCamTimer = 0;
+      }
+    }
+    for (const c of this.cylinders) c.setValveTiming(this.intakeCamAdvance, this.exhaustCamRetard, this.highCam, mod720(this.crankDeg - c.fireAngleDeg));
+    const t = this.telemetry;
+    t.intakeCamAdvanceDeg = this.intakeCamAdvance;
+    t.exhaustCamRetardDeg = this.exhaustCamRetard;
+    t.highCam = this.highCam;
+  }
+
   private externalLoadTorque(rpm: number): number {
     const c = this.controls;
     if (c.mode === "dyno") {
@@ -483,6 +534,9 @@ export class EngineSimulator {
       } else if (this.fuelCut && (pedal > 0.03 || rpm < cal.idleRpm + 700 || predicted < cal.idleRpm + 900)) this.fuelCut = false;
       if (this.fuelCut) this.fuelCutAge += blockSec;
     }
+
+    // Valve timing: cam phasers and lift switching.
+    this.scheduleValveTiming(rpm, pedal, this.intake.mapPa / 1000, blockSec);
 
     // Rev limiter.
     const lim = cal.revLimiterRpm;

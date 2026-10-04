@@ -42,6 +42,19 @@ export interface CamSpec {
   exhaustLiftMm: number;
   /** Harmonic lobe shape exponent (engine-sim convention; 0.7 aggressive … 1.0 gentle). */
   gamma: number;
+  /** Cam phaser authority, crank degrees: intake advance and exhaust retard from the base centrelines (0 = fixed cam). */
+  intakePhaserDeg: number;
+  exhaustPhaserDeg: number;
+  /** Two-step lift switching (VTEC, VarioCam Plus, MIVEC): high-cam lobes engaged above `switchRpm` under load. */
+  liftSwitch: LiftSwitchSpec | null;
+}
+
+export interface LiftSwitchSpec {
+  switchRpm: number;
+  intakeDurationDeg: number;
+  exhaustDurationDeg: number;
+  intakeLiftMm: number;
+  exhaustLiftMm: number;
 }
 
 export interface ValveSpec {

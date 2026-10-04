@@ -22,6 +22,8 @@ export class CamLobe {
   /** Lift tabulated every 0.25 crank degree over the open period (no pow() in the audio loop). */
   private readonly table: Float64Array;
   private readonly halfOpenDeg: number;
+  /** Phaser shift of the centreline, crank degrees (negative = earlier). */
+  phaseDeg = 0;
   constructor(readonly centreDeg: number, durationAt050Deg: number, readonly liftM: number, readonly gamma: number) {
     const halfCam = (durationAt050Deg / 4) * DEG;
     const s = Math.pow((2 * THOU_050_M) / Math.max(liftM, THOU_050_M * 2.2), 1 / gamma) - 1;
@@ -38,7 +40,7 @@ export class CamLobe {
   }
   /** Lift (m) at cycle angle α (crank degrees, 0..720). */
   lift(alphaDeg: number): number {
-    let d = alphaDeg - this.centreDeg;
+    let d = alphaDeg - this.centreDeg - this.phaseDeg;
     if (d > 360) d -= 720;
     else if (d < -360) d += 720;
     const ad = d < 0 ? -d : d;
@@ -51,7 +53,7 @@ export class CamLobe {
   /** Opening and closing cycle angles (crank deg) where lift leaves zero. */
   get openCloseDeg(): [number, number] {
     const half = (this.extent / DEG) * 2;
-    return [this.centreDeg - half, this.centreDeg + half];
+    return [this.centreDeg + this.phaseDeg - half, this.centreDeg + this.phaseDeg + half];
   }
 }
 
@@ -109,8 +111,13 @@ export class Cylinder {
   readonly crankRadius: number;
   readonly sweptVolume: number;
   readonly clearanceVolume: number;
-  readonly intakeLobe: CamLobe;
-  readonly exhaustLobe: CamLobe;
+  /** Active lobes (low cam, or the high cam when lift switching is engaged). */
+  intakeLobe: CamLobe;
+  exhaustLobe: CamLobe;
+  private readonly lowIntake: CamLobe;
+  private readonly lowExhaust: CamLobe;
+  private readonly highIntake: CamLobe | null = null;
+  private readonly highExhaust: CamLobe | null = null;
   private readonly lambdaRod: number;
   private readonly woschniBore: number;
   private hWoschni = 0;
@@ -237,8 +244,31 @@ export class Cylinder {
     this.lambdaRod = this.crankRadius / rodM;
     this.woschniBore = 3.26 * Math.pow(boreM, -0.2);
     // Cycle angle 0 = firing TDC, 360 = overlap TDC.
-    this.intakeLobe = new CamLobe(360 + cam.intakeCenterlineDeg, cam.intakeDurationDeg, cam.intakeLiftMm / 1000, cam.gamma);
-    this.exhaustLobe = new CamLobe(360 - cam.exhaustCenterlineDeg, cam.exhaustDurationDeg, cam.exhaustLiftMm / 1000, cam.gamma);
+    this.lowIntake = new CamLobe(360 + cam.intakeCenterlineDeg, cam.intakeDurationDeg, cam.intakeLiftMm / 1000, cam.gamma);
+    this.lowExhaust = new CamLobe(360 - cam.exhaustCenterlineDeg, cam.exhaustDurationDeg, cam.exhaustLiftMm / 1000, cam.gamma);
+    if (cam.liftSwitch) {
+      const h = cam.liftSwitch;
+      this.highIntake = new CamLobe(360 + cam.intakeCenterlineDeg, h.intakeDurationDeg, h.intakeLiftMm / 1000, cam.gamma);
+      this.highExhaust = new CamLobe(360 - cam.exhaustCenterlineDeg, h.exhaustDurationDeg, h.exhaustLiftMm / 1000, cam.gamma);
+    }
+    this.intakeLobe = this.lowIntake;
+    this.exhaustLobe = this.lowExhaust;
+  }
+
+  /**
+   * Valve timing from the ECU: phaser positions (crank degrees; intake advance moves the lobe
+   * earlier, exhaust retard later) and the lift-switch state. A switch takes effect only while
+   * the follower is on the base circle of both lobes, as the locking pins require.
+   */
+  setValveTiming(intakeAdvanceDeg: number, exhaustRetardDeg: number, highCam: boolean, alphaDeg: number): void {
+    for (const lobe of [this.lowIntake, this.highIntake]) if (lobe) lobe.phaseDeg = -intakeAdvanceDeg;
+    for (const lobe of [this.lowExhaust, this.highExhaust]) if (lobe) lobe.phaseDeg = exhaustRetardDeg;
+    const wantHigh = highCam && this.highIntake !== null;
+    const isHigh = this.intakeLobe === this.highIntake;
+    if (wantHigh !== isHigh && this.intakeLobe.lift(alphaDeg) === 0 && this.exhaustLobe.lift(alphaDeg) === 0) {
+      this.intakeLobe = wantHigh ? this.highIntake! : this.lowIntake;
+      this.exhaustLobe = wantHigh ? this.highExhaust! : this.lowExhaust;
+    }
   }
 
   /** Piston displacement from TDC (m) and its derivative wrt crank angle (m/rad) at cycle angle α. */
