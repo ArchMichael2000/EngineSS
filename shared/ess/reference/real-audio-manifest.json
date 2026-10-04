@@ -1,0 +1,184 @@
+{
+ "source": "EngineLab references/real-engine-audio/manifest.json (github.com/zolaski333/EngineLab, MIT); audio CC0-1.0 from freesound.org",
+ "recordings": [
+  {
+   "key": "2JZ",
+   "file": "2jz-supra-dyno.ogg",
+   "url": "https://cdn.freesound.org/previews/496/496171_1784475-hq.ogg",
+   "source_url": "https://freesound.org/people/editboy23/sounds/496171/",
+   "sha256": "0b5f744f399b246385b68f6936005c35f8564c763c8e31609bdb54b063a57372",
+   "license": "CC0-1.0",
+   "creator": "editboy23",
+   "platform": "Toyota Supra",
+   "source_kind": "dyno-recording",
+   "conditions": [
+    "loaded-sweep"
+   ],
+   "reference_engine": "toyota-2jz-gte",
+   "cylinders": 6,
+   "fire_order": null
+  },
+  {
+   "key": "LS3",
+   "file": "ls3-v8.ogg",
+   "url": "https://cdn.freesound.org/previews/651/651534_2396512-hq.ogg",
+   "source_url": "https://freesound.org/people/overmedium/sounds/651534/",
+   "sha256": "fd3619bac22d6fe37ef1925dfe92d2eb878721f65906bd1722a0de219012dc13",
+   "license": "CC0-1.0",
+   "creator": "overmedium",
+   "platform": "unknown V8 vehicle",
+   "source_kind": "field-recording",
+   "conditions": [
+    "idle",
+    "free-rev"
+   ],
+   "reference_engine": "gm-ls3",
+   "cylinders": 8,
+   "fire_order": null
+  },
+  {
+   "key": "Hayabusa",
+   "file": "hayabusa.ogg",
+   "url": "https://cdn.freesound.org/previews/49/49326_21830-hq.ogg",
+   "source_url": "https://freesound.org/people/Heigh-hoo/sounds/49326/",
+   "sha256": "587c32fd4387072ff47e5be5f946abd7b78addaa3e8dedc15cbb1fc3cc8e12a3",
+   "license": "CC0-1.0",
+   "creator": "Heigh-hoo",
+   "platform": "Suzuki GSX1300 Hayabusa",
+   "source_kind": "field-recording",
+   "conditions": [
+    "start",
+    "idle",
+    "pull-away"
+   ],
+   "reference_engine": null,
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "Big Twin",
+   "file": "big-twin-harley.ogg",
+   "url": "https://cdn.freesound.org/previews/81/81068_1067842-hq.ogg",
+   "source_url": "https://freesound.org/people/allencote/sounds/81068/",
+   "sha256": "586e4e2f7b4dff19a90bfa0e969446dbb52e24fffb3a770afbf756f88cf81fea",
+   "license": "CC0-1.0",
+   "creator": "allencote",
+   "platform": "Harley-Davidson motorcycle",
+   "source_kind": "field-recording",
+   "conditions": [
+    "start",
+    "idle",
+    "free-rev"
+   ],
+   "reference_engine": "harley-m8-107",
+   "cylinders": 2,
+   "fire_order": null
+  },
+  {
+   "key": "EJ25",
+   "file": "ej25-wrx.ogg",
+   "url": "https://cdn.freesound.org/previews/273/273334_4168822-hq.ogg",
+   "source_url": "https://freesound.org/people/ulose2piranha/sounds/273334/",
+   "sha256": "ca7397e21735017b96efd74bf6da1096abff8e61645b00cf26b332b5f053d156",
+   "license": "CC0-1.0",
+   "creator": "ulose2piranha",
+   "platform": "2003 Subaru Impreza WRX with 3-inch turbo-back exhaust",
+   "source_kind": "field-recording",
+   "conditions": [
+    "idle",
+    "free-rev"
+   ],
+   "reference_engine": "subaru-ej257",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "K20",
+   "file": "k20-civic-proxy.mp3",
+   "url": "https://cdn.freesound.org/previews/487/487553_9945386-hq.mp3",
+   "source_url": "https://freesound.org/people/thepodcastdoctor/sounds/487553/",
+   "sha256": "2887403c4f76019c2b426e4de199a1580fc51b4b30ffd10170fee79c64104cd1",
+   "license": "CC0-1.0",
+   "creator": "thepodcastdoctor",
+   "platform": "2012 Honda Civic",
+   "source_kind": "field-recording",
+   "conditions": [
+    "start",
+    "idle",
+    "free-rev"
+   ],
+   "reference_engine": "honda-k20a",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "Merlin",
+   "file": "merlin-static.mp3",
+   "url": "https://cdn.freesound.org/previews/276/276597_1149179-hq.mp3",
+   "source_url": "https://freesound.org/people/squashy555/sounds/276597/",
+   "sha256": "866d1c76236f23813018f220edc6e72b5b96b269922a72be0968ed1a6b3ead14",
+   "license": "CC0-1.0",
+   "creator": "squashy555",
+   "platform": "static display without propeller",
+   "source_kind": "static-test-recording",
+   "conditions": [
+    "static-run",
+    "free-rev"
+   ],
+   "reference_engine": "merlin-v12",
+   "cylinders": 12,
+   "fire_order": null
+  },
+  {
+   "key": "Aircooled",
+   "file": "aircooled-porsche-911.mp3",
+   "url": "https://cdn.freesound.org/previews/55/55727_267249-hq.mp3",
+   "source_url": "https://freesound.org/people/mharo/sounds/55727/",
+   "sha256": "2387d2c74a32f3bd9ff773fe33d3dd6a04a05708ab92ad17d85e88917d43b735",
+   "license": "CC0-1.0",
+   "creator": "mharo",
+   "platform": "Porsche 911",
+   "source_kind": "field-recording",
+   "conditions": [
+    "street-pass"
+   ],
+   "reference_engine": null,
+   "cylinders": 6,
+   "fire_order": null
+  },
+  {
+   "key": "CP3",
+   "file": "cp3-mt09-flyby.mp3",
+   "url": "https://cdn.freesound.org/previews/429/429491_1481531-hq.mp3",
+   "source_url": "https://freesound.org/people/richwise/sounds/429491/",
+   "sha256": "f96a60bd6cacbe833d26e71dd2087da7e980a078324875b6fcdbf2b578e2a217",
+   "license": "CC0-1.0",
+   "creator": "richwise",
+   "platform": "Yamaha MT-09 / FZ-09",
+   "source_kind": "field-recording",
+   "conditions": [
+    "loaded-track-flyby"
+   ],
+   "reference_engine": "yamaha-cp3",
+   "cylinders": 3,
+   "fire_order": 1.5
+  },
+  {
+   "key": "Radial",
+   "file": "radial-biplane-archive.mp3",
+   "url": "https://cdn.freesound.org/previews/437/437726_2524442-hq.mp3",
+   "source_url": "https://freesound.org/people/craigsmith/sounds/437726/",
+   "sha256": "a2ed9f4e8c301dcf7b9782921f063985ab7e56b73550106e3e43efbbed3f5782",
+   "license": "CC0-1.0",
+   "creator": "craigsmith",
+   "platform": "vintage radial-engine biplane",
+   "source_kind": "archival-recording",
+   "conditions": [
+    "aircraft-flyby"
+   ],
+   "reference_engine": "pw-r985",
+   "cylinders": 9,
+   "fire_order": 4.5
+  }
+ ]
+}
