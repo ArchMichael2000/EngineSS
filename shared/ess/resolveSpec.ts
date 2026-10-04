@@ -331,7 +331,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       q.redline,
       calibration.idleRpm,
       motorcycleLike || n <= 2,
-      (12e5 * (displacement / 1000) / (4 * Math.PI)) * (forcedInduction.kind === "na" ? 1 : 1 + forcedInduction.targetBoostKpa / 101.3),
+      // Peak torque guess from BMEP: ≈ 12 bar for a four-stroke (one firing per two revolutions);
+      // a two-stroke fires every revolution at ≈ 8 bar.
+      (twoStroke ? (8e5 * (displacement / 1000)) / (2 * Math.PI) : (12e5 * (displacement / 1000)) / (4 * Math.PI)) * (forcedInduction.kind === "na" ? 1 : 1 + forcedInduction.targetBoostKpa / 101.3),
+      calibration.revLimiterRpm,
     ),
     inertiaKgM2: inertia,
     borePitchMm: bore * 1.12 + 9,
@@ -415,6 +418,8 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
     const chargeDensity = ((101.3 + boostKpa) * 1000) / (287 * 320);
     const redlineFlow = (0.95 * chargeDensity * (perTurboDisp / 1000) * redline) / 120;
     const wheel = ph.compressorWheelMm ?? clamp(1000 * Math.sqrt(redlineFlow / (1.18 * 470 * 0.12)) * (size === "small" ? 0.94 : size === "large" ? 1.08 : 1), 32, 140);
+    // Modern turbo-diesels (common rail, marked by pilot injection) use variable-nozzle turbines.
+    const vgt = ph.turboVgt ?? (config.quick.fuel === "diesel" && (ph.pilotInjection ?? true));
     return {
       kind: "turbo",
       count,
@@ -427,10 +432,14 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
       // litre·rpm, evaluated at the boost threshold, which sits ~20 % below the speed where full
       // boost is held (the low-boost equilibrium is stable until exhaust flow can bootstrap the
       // shaft). Small housings hold full boost near 0.28 × redline, large ones near 0.55.
-      turbineAreaMm2: 0.126 * displacement * redline * (size === "small" ? 0.22 : size === "large" ? 0.45 : 0.32),
+      // A VGT's full-open nozzle passes rated flow like a large housing (0.55); closed to 30 % it
+      // behaves like a 0.165 housing, below the smallest fixed one, so boost builds just off idle.
+      turbineAreaMm2: 0.126 * displacement * redline * (vgt ? 0.55 : size === "small" ? 0.22 : size === "large" ? 0.45 : 0.32),
       rotorInertiaKgM2: 2.6e-5 * Math.pow(wheel / 50, 5) * count,
       targetBoostKpa: (fi.maxBoost ?? 15) * 6.895,
-      wastegate: fi.wastegateEnabled ?? true,
+      wastegate: vgt ? false : fi.wastegateEnabled ?? true,
+      vgt,
+      vgtMinArea: 0.3,
       blowOffValve: fi.bovEnabled ?? true,
       chargeVolumeL: 2.5 + displacement * 0.6,
     };

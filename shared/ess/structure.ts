@@ -87,7 +87,8 @@ export class StructuralRadiator {
     /**
      * Drive train that excites the block between impacts. Four-strokes: the timing chain or belt on a
      * 21-tooth crank sprocket plus valvetrain friction. Two-strokes have neither (no camshaft, no
-     * valves): only crank and bearing friction remain, without a tooth-pass tone.
+     * valves): only crank and bearing friction remain, without a tooth-pass tone. Wankels: the
+     * stationary-gear mesh and seal friction.
      */
     private readonly drive: { teeth: number; level: number } = { teeth: 21, level: 1 },
   ) {

@@ -292,7 +292,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-ea288": {
     name: "VW EA288 2.0 TDI (110 kW)",
-    description: "Common-rail inline-4 diesel with pilot injection, VGT-style small turbo",
+    description: "Common-rail inline-4 diesel with pilot injection and a variable-geometry turbo",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [340, 2000], peakPowerKw: [110, 3750] },
     config: {
@@ -345,7 +345,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-alh-tdi": {
     name: "VW 1.9 TDI ALH (66 kW)",
-    description: "Inline-4 diesel with an electronic VE distributor pump (no pilot injection), small turbo: late-1990s New Beetle / Golf IV",
+    description: "Inline-4 diesel with an electronic VE distributor pump (no pilot injection) and a Garrett VNT-15 variable-nozzle turbo: late-1990s New Beetle / Golf IV",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [210, 1900], peakPowerKw: [66, 4000] },
     config: {
@@ -353,7 +353,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       quick: { layout: "inline", cylinderCount: 4, displacement: 1.896, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 4800, fuel: "diesel" },
       advanced: { bore: 79.5, stroke: 95.5, firingOrder: [1, 3, 4, 2] },
       // Pump fuel limit fitted to the published 210 N·m (the ALH is fuel-limited well below its smoke limit).
-      physical: { compressionRatio: 19.5, valvesPerCylinder: 2, pilotInjection: false, idleRpm: 900, dieselFullLoadFuelMg: 34 },
+      physical: { compressionRatio: 19.5, valvesPerCylinder: 2, pilotInjection: false, idleRpm: 900, dieselFullLoadFuelMg: 34, turboVgt: true },
       forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 13 },
     },
   },

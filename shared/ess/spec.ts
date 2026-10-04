@@ -141,6 +141,13 @@ export interface TurboSpec {
   rotorInertiaKgM2: number;
   targetBoostKpa: number;
   wastegate: boolean;
+  /**
+   * Variable-geometry (variable-nozzle) turbine: the boost controller moves the vanes instead of a
+   * wastegate. turbineAreaMm2 is then the full-open area, sized for rated flow, and the closed
+   * vanes leave vgtMinArea of it, which builds boost at low speed.
+   */
+  vgt: boolean;
+  vgtMinArea: number;
   blowOffValve: boolean;
   /** Charge-pipe + intercooler volume, L. */
   chargeVolumeL: number;

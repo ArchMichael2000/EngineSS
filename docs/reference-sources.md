@@ -54,7 +54,7 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Side-branch silencers | Quarter-wave J-pipe L = c/4f; Helmholtz neck 0.6× pipe diameter, L_eff from f = (c/2π)√(S/(V·L_eff)), end correction 1.7r | Classical resonator formulas (Munjal; Kinsler). Tuned with c at about 600 K; the true tuning drifts with gas temperature, as it does on cars. A Helmholtz at 133 Hz cuts the LS3's 2000 rpm firing order by about 7 dB. |
 | Valved exhaust | Bypass parallel to the muffler; flap loss K = 0.3 + 4000·(1 − open)³; opens above its speed, or above 0.6× that speed at > 80 % pedal; 0.25 s actuator | Production valved-exhaust logic. Parallel paths can interfere (Herschel–Quincke), so open is not louder at every speed. |
 | Intake snorkel resonator | OEM paper-filter airboxes default to a Helmholtz tuned to the firing frequency at 2200 rpm, cavity 0.4 L per litre | Cuts the K20A intake firing order by 6.4 dB at 2200 rpm (OEM resonators: 5–15 dB). |
-| Vehicle drivetrain | 6-speed, final drive set for a plausible top speed at redline; torsional spring-damper driveline (≈5 Hz shuffle, ζ 0.3) in series with a stick–slip clutch (capacity 1.8× estimated peak torque); aero C_d·A 0.65 m², rolling 0.012 | LS3 car: 0–100 km/h 4.5 s vs 4.6–4.9 s published for LS3 Camaro/Corvette. |
+| Vehicle drivetrain | 6-speed; top gear puts the lower of redline and rev limiter at the power-limited top speed, (½ρ·C_d·A·v² + m·g·C_rr)·v = 0.9 × estimated peak power (85 % of the BMEP torque guess at 85 % of top speed; 12 bar four-stroke, 8 bar firing every revolution for two-strokes); shifts at 96 % of the same speed. Cars 950 + 150·L kg, C_d·A 0.65, C_rr 0.012; bikes (≤ 2 cylinders or ≥ 10 000 rpm) 110 + 90·L kg + 80 kg rider, C_d·A 0.5. Torsional spring-damper driveline (≈5 Hz shuffle, ζ 0.3) in series with a stick–slip clutch (1.8× / 2.2× peak torque) | 0–100 km/h: LS3 car 4.1 s (published 4.6–4.9), K20A 5.8 (Civic Type R 6.6), S54 4.6 (E46 M3 5.1), RD350LC 5.7 (≈ 5–5.5), Harley M8 3.9 (≈ 4–4.5), Ducati 1299 2.3 (≈ 2.5). Every reference engine completes the run (`scripts/driveSurvey.ts`). |
 | Shift and launch control | Automated clutch: torque-based launch (clutch torque = engine torque + J·12·Δω about a pedal-dependent launch speed); upshift = 40 ms clutch open + ignition cut held until 70 % re-engagement (flat shift) + 60 ms select + 120 ms engage; downshifts blip to rev-match | Sequential/DCT behaviour. Ignition cuts send charge into the exhaust, so flat shifts and launch control produce afterfire. |
 | Start / stop | Starter torque (40 + 32·L) N·m falling to zero at 320 crank rpm; catch above 55 % of idle; start flare +30 % decaying over 1.5 s; starter mesh (132 ring teeth) and commutator whine through the block | Cranking settles at 190–260 rpm; catch at about 0.3 s; idle reached in about 2 s. |
 | Plenum port loss | K 0.08 entering a runner, 0.9 leaving one | Radiused entry vs Borda–Carnot expansion (Idelchik). Brings the LS3 tuning trough to a realistic depth (VE 83 % at 5900 rpm). |
@@ -63,11 +63,12 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Compressor wheel | Redline flow at φ 0.12, 470 m/s tip speed | Puts the WOT operating line right of peak efficiency and short of choke. |
 | Idle feed-forward | Energy balance: friction + accessories + pumping at η 0.27/(1 + overlap/30) | Lands within about 10 % of the converged idle-valve opening on all 29 engines. |
 | Accessory drag | (2.6 + 0.00035·rpm) · L | About 16 N·m on a 6 L V8 at idle, about 3 N·m on a 1 L motorcycle engine. |
-| Structure excitation | Combustion F = A·p; piston slap J = m·√(2Fc/m) with 30 µm clearance; valve seating J = 0.05 kg × 0.25 m/s·(rpm/6000); timing drive 60 N noise + 36 N mesh tone (order 21) × (rpm/1000)^1.5 on four-strokes; two-strokes (no camshaft drive, no valvetrain) keep half the noise and no tooth tone | Physical impulse magnitudes. The order-21 tone on two-strokes was a bug found by the CRM250 recording (§4). Contact durations 100 µs (seat), 0.3 ms (slap), 150 µs (chain). |
+| Structure excitation | Combustion F = A·p; piston slap J = m·√(2Fc/m) with 30 µm clearance; valve seating J = 0.05 kg × 0.25 m/s·(rpm/6000); timing drive 60 N noise + 36 N mesh tone (order 21) × (rpm/1000)^1.5 on four-strokes; two-strokes (no camshaft drive, no valvetrain) keep half the noise and no tooth tone; Wankels 0.6 × with the stationary-gear mesh at ≈ 34 per e-shaft revolution | Physical impulse magnitudes. The order-21 tone on two-strokes was a bug found by the CRM250 recording (§4). Contact durations 100 µs (seat), 0.3 ms (slap), 150 µs (chain). |
 | Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
 | Cabin boom gain | 0.00175 Pa per N·m of 25–180 Hz torque ripple | **Unverified.** No open interior recordings; set so WOT boom sits a few dB above the airborne exhaust. |
 | Afterfire | Continuous afterburning (τ ≈ 3 ms when hot with O₂) while firing; discrete pops need fuel cut, limiter cut or misfires | Matches observed behaviour: crackle on lift-off and the limiter, flame without pops under load. |
-| Surge duct | Greitzer inertance 1.8 m / inducer area (inlet → compressor → charge piping → throttle) | Sets the charge-system Helmholtz frequency near 20–35 Hz. Deep surge without a BOV then runs at 32 Hz on the 2JZ (96 % of Helmholtz). The OSU rig (Dehner & Selamet) measured 63–82 % of Helmholtz, so the simulated cycle sits closer to the mild-surge rate. The previous 0.6 m duct gave 70 Hz with no flow reversal. |
+| Variable-geometry turbine | Full-open nozzle sized like a large housing (0.55 × redline in the area rule), closed vanes 30 % of it; vanes on the wastegate's PI with the same anticipation, opened by shaft overspeed; no wastegate. Default for boosted diesels with pilot injection (common rail), set per engine otherwise | PSA 1.5 BlueHDi torque at 1750 rpm: −27.5 % with a wastegate, −8.5 % with the VGT (`docs/figures/diesel-vgt.png`). |
+| Surge duct | Greitzer inertance 1.8 m / inducer area (inlet → compressor → charge piping → throttle) | Sets the charge-system Helmholtz frequency near 20–35 Hz. Deep surge without a BOV then runs at 32 Hz on the 2JZ (96 % of Helmholtz). The OSU rig (Dehner & Selamet) measured 63–82 % of Helmholtz, so the simulated cycle sits closer to the mild-surge rate. The previous 0.6 m duct gave 70 Hz with no flow reversal. Sensitivity (October 2026): the frequency follows the Helmholtz frequency for any duct inertance (0.6–1.8 m) and ignores the backflow-branch slope (1–25·φ²): the cycle stays the mild type. Lowering the shut-off head ψ₀ from 0.42 to 0.30 / 0.20 gives 90 % / 85 %. Reaching the measured band needs the stage's measured negative-flow characteristic, which is not available. |
 | Blow-off valve | Pneumatic: cracks at 20 kPa across the throttle, fully open at 40 kPa, 12 ms travel; area 0.16·D²·count (≈ 0.45 × wheel diameter) | A fixed 24 mm valve on an 83 mm wheel balanced the wheel's flow at 220 kPa. Sized to the wheel, the compressor stays out of surge and boost halves in 250 ms, then decays with shaft speed. |
 | Wastegate | PI on boost; proportional term on boost predicted 0.15 s ahead from its filtered rise rate | Tip-in overshoot 10.5 % (17 % without anticipation); settled boost within 1.5 % of target. |
 | Diesel governor | All-speed: fuel per stroke = pedal^1.15 × full-load fuel over an idle PI (no derivative: diesel speed ripple turns it bang-bang); droop to zero fuel over the last 180 rpm; full-load fuel tapers 12 % from 0.6 × redline (torque rise); main injection advances 1.5°/1000 rpm to 9° (turbo, pilot) or 12° (NA) BTDC at redline | Fuel per stroke defaults to the smoke limit λ 1.4 (turbo) / 1.5 (NA) at rated boost; mechanical-pump engines take their fuel-plate value from published BMEP. EA288 peak pressure ≈ 190 bar at 2500 rpm full load. |
@@ -180,14 +181,14 @@ Brake output after 2.5–3 s at the stated speed, WOT. Run with `scratchpad`-sty
 | Yamaha RD350LC (two-stroke) | 34.6 kW @ 8500 | 33 | −5.5 % |
 | Mazda 13B (FC S5 NA rotary) | 187 N·m @ 4000 | 181 | −3 % |
 | Mazda 13B (FC S5 NA rotary) | 118 kW @ 7000 | 131 | +11 % |
-| VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 330 | −3 % |
-| VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 110 | 0 % |
+| VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 327 | −4 % (VGT) |
+| VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 119 | +8 % (VGT) |
 | Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 580 | +7 % |
 | Cummins 6BT 5.9 12V | 119 kW @ 2500 | 120 | +1 % |
-| PSA DV5 1.5 BlueHDi | 300 N·m @ 1750 | 218 | −27.5 % (wastegate turbo spools too late; real engine has a VGT) |
-| PSA DV5 1.5 BlueHDi | 96 kW @ 3750 | 94 | −2 % |
-| VW 1.9 TDI ALH | 210 N·m @ 1900 | 207 | −1 % (fuel limit fitted: 34 mg) |
-| VW 1.9 TDI ALH | 66 kW @ 4000 | 67 | +1 % |
+| PSA DV5 1.5 BlueHDi | 300 N·m @ 1750 | 274 | −8.5 % (VGT; −27.5 % with the former wastegate turbo) |
+| PSA DV5 1.5 BlueHDi | 96 kW @ 3750 | 101 | +5 % |
+| VW 1.9 TDI ALH | 210 N·m @ 1900 | 207 | −1 % (fuel limit fitted: 34 mg; VNT-15 VGT) |
+| VW 1.9 TDI ALH | 66 kW @ 4000 | 72 | +9 % |
 | Mercedes OM601 2.0 | 123 N·m @ 2800 | 131 | +7 % |
 | Mercedes OM601 2.0 | 53 kW @ 4600 | 50 | −6 % |
 | Honda CRM250 (two-stroke) | 36 N·m @ 7000 | 25 | −30 % |
@@ -201,6 +202,8 @@ pilot injection lowers 1–4 kHz structure-borne combustion noise by about 5 dB.
 diesel is still about 10 dB above a gasoline engine of the same size at idle.
 
 The five engines added in October 2026 (`scripts/dynoCheck.ts`) are not pinned by the tests yet: the PSA's low-end torque and the CRM250 are open model gaps (VGT, two-stroke power valve and high specific output, 118 hp/L against the RD350LC's 100).
+
+**S54 at 7900 rpm (October 2026).** The code at handoff gives 174 kW (−31 %), not the 222 kW tabled above. The cause is the measurement: the soft limiter starts cutting at 7970 rpm, the dyno absorber's speed swings to 8044 rpm under the cuts, and the cut cycles show in the sampled IMEP. With the limiter moved to 8500 rpm the speed holds within ±25 rpm and the S54 makes 215 kW (−15 %). The deficit pattern holds across the three engines: F136 −12.5 % at 9000 rpm, S54 −15 % at 7900, K20A −8.6 % at 8000, against −2 % for the F140 at 8250 and −6 % for the LS3 at 5900. It appears only above about 21 m/s mean piston speed. Volumetric efficiency there is 87–93 %. The speed-squared terms are the candidates: the Chen–Flynn Q·Sp² friction (0.9 bar at 24 m/s) and the accessory drag, whose rpm-linear torque takes 14.5 kW on the S54 at 7900 rpm and may double-count the oil and water pumps already in a motoring-calibrated friction figure. Neither has been changed without friction data to fit.
 
 The pattern: high-revving NA engines read 10–13 % low at peak power. Their real heads and intakes (ITBs, tuned airboxes, large valves) breathe better at high speed than the family defaults used for the unpublished parts. Boosted engines read 5–14 % high at peak power. Boost there is an estimate, and production engines also cap torque through the ECU, which v16 does not model.
 
@@ -307,6 +310,8 @@ Blair-style defaults (exhaust port at 87° ATDC on the RD350LC) first gave 16 kW
 3. **Pipe timing.** Blair's L_t = c·θ/(12N) returns a wave launched at port opening right at port closing. In the model the blowdown peaks ≈ 25° after opening, so the plug arrived after the port closed and the diffuser's suction landed at closing. Sizing from the actual wave timing, L_t = c·(θ − 40°)/(12N), put the plug before closing: the RD350LC went from 26 to 33 kW at 8500 rpm, and delivery ratio stays ≈ 0.95 through the top end.
 4. **Mechanical friction.** With no valvetrain and rolling-element bearings, two-stroke friction is set to 0.65 × the four-stroke correlation.
 
+**Torque curve (October 2026).** The RD350LC's full-load torque stays within 5 % of its peak from 4000 to 8500 rpm (`scripts/torqueCurve.ts`): delivery ratio ≈ 0.95 and trapping efficiency ≈ 0.55 at every speed. A piped engine's plugging pulse should lift trapping near the tuned speed only, giving the narrow power band; here it adds little trapping anywhere, and the pipe's benefit over a plain exhaust is the same at 4000 rpm as at 8000. Extra wave damping in the pipe (0–2 Np/m) changes nothing, so later reflections are not the cause. An exhaust power valve (YPVS, Honda RC) is not added yet: it would raise low-speed torque that is already too high. Fixing the trapping response comes first.
+
 Result at 8000 rpm: the pipe adds more than 20 % over a plain exhaust (pinned by a test). Trapping efficiency 0.55 at delivery ratio 0.95. Idle runs on the residual-heavy, misfiring "four-stroking" regime the model produces on its own (residual ≈ 0.5 at idle). Idle air is metered by the slide's idle stop, with no four-stroke decel schedule or dashpot. 24 random two-strokes (singles to fours, reed and piston-port) all pass the fuzz checks.
 
 ### Rotary
@@ -316,6 +321,10 @@ The 13B fires every 180° of e-shaft (six chambers, two firings per revolution).
 * manifold pressure at idle rises from about 30 to 98 kPa;
 * residual gas at idle reaches 75 %, the rough "brap" idle;
 * torque falls at 4000 rpm (138 against 181 N·m) and rises at the top end.
+
+**+11 % at 7000 rpm (October 2026).** The cause is not the auxiliary ports: closed auxiliary ports would make a model without them weaker at the top, not stronger. Volumetric efficiency rises with speed, 79 % at 4000 rpm to 88 % at 7000, so torque stays flat (181 → 179 N·m) where the real engine falls 13 % (186 → 161). The stock exhaust with its catalyst takes off only 2 kW. Intake tuning is the remaining suspect.
+
+**Mechanical noise.** Wankels no longer get the four-stroke timing-chain tone (order 21). Their structure is excited by the stationary-gear mesh: the rotor's internal gear rolls on the stationary gear, whose contact point circles it once per e-shaft revolution, so the tone sits at its tooth count, ≈ 34 per revolution on a 13B (tooth count estimated). Rendered on the 13B's structure stem at 3000 rpm it stands at order 33.98, 25 dB above the surrounding structure noise. Apex-seal crossings at port edges already excite the structure through the port-closing impulses.
 
 24 random rotaries (1–4 rotors, NA, turbo and supercharged, peripheral and side ports) pass the fuzz checks.
 

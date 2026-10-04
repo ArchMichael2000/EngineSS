@@ -242,7 +242,10 @@ export class EngineSimulator {
     this.fi = createForcedInduction(spec, sampleRate, this.rng, this.exhaust, this.intake);
     this.drivetrain = new Drivetrain(spec.vehicle, spec.calibration.idleRpm, spec.calibration.redlineRpm);
     // Two-strokes have no timing drive or valvetrain: no tooth-pass tone, about half the friction excitation.
-    const drive = spec.cycle === "two-stroke" ? { teeth: 0, level: 0.5 } : { teeth: 21, level: 1 };
+    // Wankels have neither either; their gear noise is the rotor's internal gear rolling on the
+    // stationary gear, whose contact point circles the stationary gear once per e-shaft revolution:
+    // a mesh tone at its tooth count (≈ 34 on a 13B; estimated) per revolution.
+    const drive = spec.cycle === "two-stroke" ? { teeth: 0, level: 0.5 } : spec.cycle === "rotary" ? { teeth: 34, level: 0.6 } : { teeth: 21, level: 1 };
     this.structure = new StructuralRadiator(sampleRate, this.displacementL, spec.cylinders, this.cylinders[0].area, this.rng, this.schedule.cylinders.map((c) => c.positionM), drive);
     this.valveJets = this.cylinders.map(() => new BandNoise(this.rng, sampleRate, 0.5));
     this.allDucts = [...this.exhaust.ducts(), ...this.intake.ducts(), ...(this.fi?.ducts() ?? [])];

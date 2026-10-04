@@ -202,21 +202,46 @@ export class Drivetrain {
   }
 }
 
-/** Plausible vehicle for an engine: mass, gearing and drag scale with displacement and layout. */
-export function defaultVehicle(displacementL: number, redlineRpm: number, idleRpm: number, motorcycle: boolean, peakTorqueGuessNm: number): VehicleSpec {
+/**
+ * Top speed where the estimated wheel power meets aerodynamic drag and rolling resistance:
+ * P = (½ρ·CdA·v² + m·g·Crr)·v, solved by bisection.
+ */
+function powerLimitedTopSpeed(wheelPowerW: number, massKg: number, cdA: number, crr: number): number {
+  let lo = 5;
+  let hi = 150;
+  for (let i = 0; i < 50; i++) {
+    const v = 0.5 * (lo + hi);
+    if ((0.5 * 1.2 * cdA * v * v + massKg * 9.81 * crr) * v > wheelPowerW) hi = v;
+    else lo = v;
+  }
+  return lo;
+}
+
+/**
+ * Plausible vehicle for an engine. Mass scales with displacement; top gear is set so the engine's
+ * usable top speed (redline or limiter, whichever is lower) lands at the power-limited top speed, as
+ * production gearing roughly does, so small engines get short gearing and big ones tall.
+ */
+export function defaultVehicle(displacementL: number, redlineRpm: number, idleRpm: number, motorcycle: boolean, peakTorqueGuessNm: number, limiterRpm = redlineRpm): VehicleSpec {
+  const topRpm = Math.min(redlineRpm, limiterRpm);
+  // Peak power ≈ 85 % of peak torque at 85 % of the top speed.
+  const peakPowerW = 0.85 * peakTorqueGuessNm * ((0.85 * topRpm * 2 * Math.PI) / 60);
   if (motorcycle) {
     const ratios = [2.6, 1.95, 1.6, 1.38, 1.24, 1.13];
     const r = 0.31;
-    const vTop = clamp(55 + 35 * displacementL, 50, 90);
-    const finalDrive = ((redlineRpm * 2 * Math.PI) / 60) * r / (vTop * ratios[ratios.length - 1]);
-    return { massKg: 220 + 60 * displacementL + 80, tireRadiusM: r, gearRatios: ratios, finalDrive, efficiency: 0.9, cdA: 0.5, rollingResistance: 0.015, clutchCapacityNm: peakTorqueGuessNm * 2.2, shiftRpm: redlineRpm * 0.96, launchRpm: Math.round(redlineRpm * 0.55) };
+    // Bike (wet) ≈ 110 + 90·L kg, plus an 80 kg rider.
+    const massKg = 110 + 90 * displacementL + 80;
+    const vTop = clamp(powerLimitedTopSpeed(0.9 * peakPowerW, massKg, 0.5, 0.015), 25, 90);
+    const finalDrive = ((topRpm * 2 * Math.PI) / 60) * r / (vTop * ratios[ratios.length - 1]);
+    return { massKg, tireRadiusM: r, gearRatios: ratios, finalDrive, efficiency: 0.9, cdA: 0.5, rollingResistance: 0.015, clutchCapacityNm: peakTorqueGuessNm * 2.2, shiftRpm: topRpm * 0.96, launchRpm: Math.round(topRpm * 0.55) };
   }
   const ratios = [3.6, 2.19, 1.54, 1.21, 1.0, 0.84];
   const r = 0.33;
-  const vTop = clamp(55 + 13 * displacementL, 50, 105);
-  const finalDrive = clamp(((redlineRpm * 2 * Math.PI) / 60) * r / (vTop * ratios[ratios.length - 1]), 2.4, 5.5);
+  const massKg = clamp(950 + 150 * displacementL, 800, 2300);
+  const vTop = clamp(powerLimitedTopSpeed(0.9 * peakPowerW, massKg, 0.65, 0.012), 35, 105);
+  const finalDrive = clamp(((topRpm * 2 * Math.PI) / 60) * r / (vTop * ratios[ratios.length - 1]), 2.4, 5.5);
   return {
-    massKg: clamp(950 + 150 * displacementL, 800, 2300),
+    massKg,
     tireRadiusM: r,
     gearRatios: ratios,
     finalDrive,
@@ -224,7 +249,7 @@ export function defaultVehicle(displacementL: number, redlineRpm: number, idleRp
     cdA: 0.65,
     rollingResistance: 0.012,
     clutchCapacityNm: peakTorqueGuessNm * 1.8,
-    shiftRpm: redlineRpm * 0.96,
-    launchRpm: Math.round(clamp(redlineRpm * 0.55, idleRpm + 1500, 6500)),
+    shiftRpm: topRpm * 0.96,
+    launchRpm: Math.round(clamp(topRpm * 0.55, idleRpm + 1500, 6500)),
   };
 }

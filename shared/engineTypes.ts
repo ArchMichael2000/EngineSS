@@ -260,6 +260,8 @@ export interface PhysicalOverrides {
   exhaustValveOpenRpm: number;
   exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
   turboCount: number;
+  /** Variable-geometry turbine (default: boosted common-rail diesels). */
+  turboVgt: boolean;
   compressorWheelMm: number;
   superchargerDisplacementL: number;
   superchargerDriveRatio: number;

@@ -206,6 +206,31 @@ describe("vehicle and start/stop", () => {
     expect(sim.telemetry.gear).toBeGreaterThanOrEqual(2);
   }, 60_000);
 
+  // Every family drives: a diesel whose neutral limiter sits below its redline (it used to bounce on
+  // the limiter in first gear), a two-stroke motorcycle and a rotary car.
+  for (const [key, maxSeconds] of [["psa-dv5-bluehdi", 12], ["honda-crm250", 13], ["mazda-13b-fc", 10]] as const) {
+    it(`${key} drives away and shifts up to 100 km/h without stalling or riding the limiter`, () => {
+      const spec = specOf(key);
+      const sim = new EngineSimulator(spec, FS);
+      sim.setControls({ mode: "vehicle", throttle: 0, autoShift: true });
+      sim.prewarm(1.5);
+      sim.setControls({ throttle: 1 });
+      let t = 0;
+      let limiter = 0;
+      let minRpm = Infinity;
+      while (sim.telemetry.speedKmh < 100 && t < maxSeconds) {
+        sim.prewarm(0.1);
+        t += 0.1;
+        if (sim.telemetry.limiter) limiter++;
+        minRpm = Math.min(minRpm, sim.rpm);
+      }
+      expect(sim.telemetry.speedKmh).toBeGreaterThanOrEqual(100);
+      expect(sim.telemetry.gear).toBeGreaterThanOrEqual(2);
+      expect(limiter / (t / 0.1)).toBeLessThan(0.1);
+      expect(minRpm).toBeGreaterThan(spec.calibration.idleRpm * 0.4);
+    }, 120_000);
+  }
+
   it("a stopped engine cranks, catches and returns to idle", () => {
     const spec = specOf("honda-k20a");
     const sim = new EngineSimulator(spec, FS);
