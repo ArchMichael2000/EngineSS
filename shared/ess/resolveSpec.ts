@@ -117,6 +117,9 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     snorkelDiameterMm: clamp(58 + 19 * Math.sqrt(displacement), 50, 140),
     filter: ph.airFilter ?? (intakeType === "velocity-stacks" ? "none" : intakeType === "itbs" ? "sock" : intakeType === "carb" ? "cone" : "oem-paper"),
     idleBypassAreaMm2: 22 * displacement + 25,
+    // OEM airboxes carry a snorkel resonator against low-speed intake boom (firing frequency ≈ 2200 rpm).
+    resonatorHz: ph.intakeResonatorHz ?? ((ph.airFilter ?? "oem-paper") === "oem-paper" && intakeType === "single-throttle-body" ? (n / 2) * (2200 / 60) : 0),
+    resonatorVolumeL: ph.intakeResonatorVolumeL ?? clamp(0.4 * displacement, 0.4, 3),
   } as EngineSpec["intake"];
 
   // ---- Exhaust
@@ -150,6 +153,9 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     tailpipeLengthMm: clamp(totalLen - fixed, 150, 2500),
     tailpipeDiameterMm: ph.tailpipeDiameterMm ?? pipeD * (character === "stock" ? 0.95 : 1.05),
     outletSpacingM: ph.outletSpacingM ?? (motorcycleLike ? 0.25 : 0.95),
+    quarterWaveTubesHz: ph.droneTubeHz ? [ph.droneTubeHz] : [],
+    helmholtz: ph.helmholtzHz ? [{ tuneHz: ph.helmholtzHz, volumeL: ph.helmholtzVolumeL ?? 2 }] : [],
+    valve: ph.exhaustValveMode && ph.exhaustValveMode !== "none" ? { openRpm: ph.exhaustValveOpenRpm ?? Math.round(q.redline * 0.45), mode: ph.exhaustValveMode } : null,
   };
 
   // ---- Forced induction

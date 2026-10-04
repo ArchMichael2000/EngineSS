@@ -124,6 +124,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {slider('plenumVolumeL', 'Plenum volume', spec.intake.plenumVolumeL, 0.3, 15, 0.1, ' L', 1)}
       {slider('throttleDiameterMm', 'Throttle bore', spec.intake.throttleDiameterMm, 25, 130, 1, ' mm')}
       {slider('runnerDiameterMm', 'Runner diameter', spec.intake.runnerDiameterMm, 20, 80, 0.5, ' mm', 1)}
+      {slider('intakeResonatorHz', 'Snorkel resonator tuned to (0 = none)', spec.intake.resonatorHz, 0, 400, 1, ' Hz')}
       {select('airFilter', 'Air filter', spec.intake.filter, [['oem-paper', 'OEM panel in airbox'], ['cone', 'Open cone'], ['sock', 'Sock / mesh'], ['none', 'None']])}
 
       {section('Exhaust')}
@@ -135,7 +136,12 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {select('crossover', 'Crossover', spec.exhaust.crossover, [['none', 'None'], ['x-pipe', 'X-pipe'], ['h-pipe', 'H-pipe']])}
       {toggle('catalyst', 'Catalytic converter', spec.exhaust.catalyst)}
       {toggle('resonator', 'Resonator', spec.exhaust.resonator)}
-      {select('muffler', 'Muffler', muffler.type, [['turbo', 'OEM multi-chamber'], ['chambered', 'Chambered'], ['straight-through', 'Straight-through (packed)'], ['none', 'None']])}
+      {select('muffler', 'Muffler', muffler.type, [['turbo', 'OEM multi-chamber'], ['chambered', 'Chambered'], ['straight-through', 'Straight-through (packed)'], ['glasspack', 'Glasspack'], ['none', 'None']])}
+      {slider('droneTubeHz', 'J-pipe drone tube tuned to', spec.exhaust.quarterWaveTubesHz[0] ?? 0, 0, 400, 1, ' Hz')}
+      {slider('helmholtzHz', 'Helmholtz resonator tuned to', spec.exhaust.helmholtz[0]?.tuneHz ?? 0, 0, 400, 1, ' Hz')}
+      {spec.exhaust.helmholtz.length > 0 && slider('helmholtzVolumeL', 'Helmholtz cavity volume', spec.exhaust.helmholtz[0].volumeL, 0.3, 8, 0.1, ' L', 1)}
+      {select('exhaustValveMode', 'Valved exhaust (muffler bypass)', spec.exhaust.valve?.mode ?? 'none', [['none', 'No valve'], ['auto', 'Auto (opens with rpm/load)'], ['open', 'Always open'], ['closed', 'Always closed']])}
+      {spec.exhaust.valve && slider('exhaustValveOpenRpm', 'Valve opening speed', spec.exhaust.valve.openRpm, 1000, spec.calibration.redlineRpm, 50, ' rpm')}
       {slider('mufflerPacking', 'Packing density', muffler.packing, 0, 1, 0.05, '', 2)}
       {slider('tailpipeDiameterMm', 'Tailpipe diameter', spec.exhaust.tailpipeDiameterMm, 35, 130, 0.5, ' mm', 1)}
 

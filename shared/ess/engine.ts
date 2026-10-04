@@ -32,6 +32,8 @@ export interface EngineControls {
   /** Dyno speed set-point, rpm. */
   targetRpm: number;
   mode: DriveMode;
+  /** Live override of a valved exhaust (sport button); defaults to the build's mode. */
+  exhaustValve?: "auto" | "open" | "closed";
 }
 
 export interface EngineTelemetry {
@@ -56,6 +58,8 @@ export interface EngineTelemetry {
   volumetricEfficiency: number;
   /** Mean knock-control spark retard across cylinders, degrees. */
   knockRetardDeg: number;
+  /** Exhaust bypass flap position 0 (closed) … 1 (open); 0 when the build has no valve. */
+  exhaustValve: number;
   /** Cam phaser positions (crank degrees) and lift-switch state. */
   intakeCamAdvanceDeg: number;
   exhaustCamRetardDeg: number;
@@ -136,6 +140,7 @@ export class EngineSimulator {
   private highCamRequest = false;
   private highCamTimer = 0;
   private highCam = false;
+  private exhaustValvePos = 0;
   private bypassActual = 0.3;
   private fuelCut = false;
   private limiterActive = false;
@@ -162,7 +167,7 @@ export class EngineSimulator {
   private splN = 0;
   readonly telemetry: EngineTelemetry = {
     rpm: 0, mapKpa: 101, boostKpa: 0, torqueNm: 0, powerKw: 0, lambda: 1, egtC: 600, throttlePlate: 0,
-    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, intakeCamAdvanceDeg: 0, exhaustCamRetardDeg: 0, highCam: false, splDb: 0,
+    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, intakeCamAdvanceDeg: 0, exhaustCamRetardDeg: 0, highCam: false, exhaustValve: 0, splDb: 0,
   };
 
   constructor(spec: EngineSpec, sampleRate: number, options: SimulatorOptions = {}) {
@@ -541,6 +546,17 @@ export class EngineSimulator {
         this.fuelCutAge = 0;
       } else if (this.fuelCut && (pedal > 0.03 || rpm < cal.idleRpm + 700 || predicted < cal.idleRpm + 900)) this.fuelCut = false;
       if (this.fuelCut) this.fuelCutAge += blockSec;
+    }
+
+    // Valved exhaust: opens above its speed, or early under heavy pedal (as sports calibrations do);
+    // the flap actuator moves in ~0.25 s.
+    const valve = this.spec.exhaust.valve;
+    if (valve) {
+      const mode = this.controls.exhaustValve ?? valve.mode;
+      const target = mode === "open" ? 1 : mode === "closed" ? 0 : rpm > valve.openRpm || (pedal > 0.8 && rpm > 0.6 * valve.openRpm) ? 1 : 0;
+      this.exhaustValvePos += clamp(target - this.exhaustValvePos, -blockSec / 0.25, blockSec / 0.25);
+      this.exhaust.setValve(this.exhaustValvePos);
+      this.telemetry.exhaustValve = this.exhaustValvePos;
     }
 
     // Valve timing: cam phasers and lift switching.

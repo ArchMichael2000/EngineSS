@@ -80,11 +80,14 @@ export interface IntakeSpec {
   filter: EssAirFilter;
   /** Idle-air bypass area at full authority, mm². */
   idleBypassAreaMm2: number;
+  /** Helmholtz resonator on the snorkel (OEM intake boom control): tuned Hz (0 = none) and cavity volume L. */
+  resonatorHz: number;
+  resonatorVolumeL: number;
 }
 
 export type CollectorStrategy = "bank" | "firing-alternate" | "pairs-then-bank" | "all" | "none";
 export type CrossoverType = "none" | "x-pipe" | "h-pipe";
-export type MufflerType = "chambered" | "turbo" | "straight-through" | "none";
+export type MufflerType = "chambered" | "turbo" | "straight-through" | "glasspack" | "none";
 export type ExhaustRoutingType = "single" | "dual" | "open-headers";
 
 export interface MufflerSpec {
@@ -114,6 +117,12 @@ export interface ExhaustSpec {
   tailpipeDiameterMm: number;
   /** Lateral spacing between outlets, m (dual routing). */
   outletSpacingM: number;
+  /** Closed-end quarter-wave side branches ("J-pipe" drone killers) ahead of the muffler, tuned frequency Hz. */
+  quarterWaveTubesHz: number[];
+  /** Helmholtz resonators ahead of the muffler: tuned frequency Hz and cavity volume L. */
+  helmholtz: Array<{ tuneHz: number; volumeL: number }>;
+  /** Valved exhaust: a bypass parallel to the muffler that opens above `openRpm` (auto) or on command. */
+  valve: { openRpm: number; mode: "auto" | "open" | "closed" } | null;
 }
 
 export type TurboSizeClass = "small" | "balanced" | "large";

@@ -63,6 +63,8 @@ export class ExhaustNetwork {
   readonly primaries: Duct[];
   readonly primaryPorts: Port[];
   readonly outlets: ExhaustOutlet[] = [];
+  /** Bypass flap joints of a valved exhaust. */
+  private readonly valveJoints: ResistiveJoint[] = [];
   readonly turbines: TurbineStage[] = [];
   /** Collector junction per group (afterfire injection points). */
   readonly collectors: Junction[] = [];
@@ -229,8 +231,32 @@ export class ExhaustNetwork {
       }
       port = this.extend(port, { lengthM: 0.6, diameterM: pipeD, name: `pipe-b${k}` }, d + 0.3, k);
       d += 0.6;
+      // Side-branch silencers ahead of the muffler, tuned with c at tail-section gas temperature.
+      const cTail = Math.sqrt(1.34 * R_AIR * 600);
+      for (const hz of ex.quarterWaveTubesHz) {
+        const side = this.addDuct({ lengthM: clamp(cTail / (4 * hz), 0.08, 3), diameterM: pipeD, name: `j-pipe${k}` }, d, k);
+        port = this.branch(port, side, pipeD, d, k);
+        d += 0.15;
+      }
+      for (const h of ex.helmholtz) {
+        port = this.helmholtz(port, h.tuneHz, h.volumeL, pipeD, cTail, d, k);
+        d += 0.15;
+      }
       if (ex.muffler.type !== "none") {
-        port = this.element(port, "muffler", pipeD, d, k);
+        if (ex.valve) {
+          // Valved exhaust: a bypass in parallel with the muffler, its flap a variable loss.
+          const split = this.addDuct({ lengthM: 0.08, diameterM: pipeD, name: `valve-split${k}` }, d, k);
+          const bypassIn = this.addDuct({ lengthM: ex.muffler.bodyLengthMm / 2000, diameterM: pipeD * 0.9, name: `bypass-a${k}` }, d, k);
+          this.addJunction([port, { duct: split, end: "a" }, { duct: bypassIn, end: "a" }]);
+          const mufOut = this.element({ duct: split, end: "b" }, "muffler", pipeD, d, k);
+          const bypassOut = this.resistive({ duct: bypassIn, end: "b" }, { lengthM: ex.muffler.bodyLengthMm / 2000, diameterM: pipeD * 0.9, name: `bypass-b${k}` }, 4000, d, k);
+          this.valveJoints.push(this.joints[this.joints.length - 1]);
+          const merged = this.addDuct({ lengthM: 0.08, diameterM: pipeD, name: `valve-merge${k}` }, d + ex.muffler.bodyLengthMm / 1000, k);
+          this.addJunction([mufOut, bypassOut, { duct: merged, end: "a" }]);
+          port = { duct: merged, end: "b" };
+        } else {
+          port = this.element(port, "muffler", pipeD, d, k);
+        }
         d += ex.muffler.bodyLengthMm / 1000;
       }
       const tail = this.extend(port, { lengthM: Math.max(0.1, ex.tailpipeLengthMm / 1000), diameterM: ex.tailpipeDiameterMm / 1000, name: `tail${k}` }, d + 0.2, k);
@@ -259,6 +285,37 @@ export class ExhaustNetwork {
       j.solve(inj, dt);
     });
     return j;
+  }
+
+  /** Tee: continue the line with a new duct and attach `side` (its far end closed) at the junction. */
+  private branch(from: Port, side: Duct, pipeD: number, distanceM: number, group: number): Port {
+    const next = this.addDuct({ lengthM: 0.15, diameterM: pipeD, name: `after-${side.name}` }, distanceM, group);
+    this.addJunction([from, { duct: next, end: "a" }, { duct: side, end: "a" }]);
+    return { duct: next, end: "b" };
+  }
+
+  /**
+   * Helmholtz resonator on a tee: neck (diameter 0.6 × pipe) into a cavity of `volumeL`, the neck
+   * length chosen for f = (c/2π)·√(S/(V·L_eff)) with end corrections 1.7·r. Light neck absorption
+   * stands in for the perforate/fibre damping that sets its bandwidth.
+   */
+  private helmholtz(from: Port, tuneHz: number, volumeL: number, pipeD: number, c: number, distanceM: number, group: number): Port {
+    const r = 0.3 * pipeD;
+    const S = Math.PI * r * r;
+    const V = Math.max(0.1, volumeL) / 1000;
+    const effective = (S * c * c) / (Math.pow(2 * Math.PI * tuneHz, 2) * V);
+    const neck = this.addDuct({ lengthM: clamp(effective - 1.7 * r, 0.01, 1.5), diameterM: 2 * r, absorption: 6, name: `helmholtz-neck${group}` }, distanceM, group);
+    const port = this.branch(from, neck, pipeD, distanceM, group);
+    this.addJunction([{ duct: neck, end: "b" }], V);
+    return port;
+  }
+
+  /** Exhaust valve flap position 0 (closed) … 1 (open), applied at block rate. */
+  setValve(open: number): void {
+    const o = clamp(open, 0, 1);
+    // Butterfly loss: K ≈ 0.3 wide open, rising steeply as it closes (≈ 4000 shut, a leak-tight seal is not modelled).
+    const k = 0.3 + 4000 * Math.pow(1 - o, 3);
+    for (const j of this.valveJoints) j.lossCoefficient = k;
   }
 
   /** Append a duct after `from`, joined by an area-change junction. */
@@ -299,6 +356,9 @@ export class ExhaustNetwork {
     const bodyL = m.bodyLengthMm / 1000;
     const packing = clamp(m.packing, 0, 1);
     switch (m.type) {
+      case "glasspack":
+        // Short perforated core in fibreglass: little low-frequency loss, strong high-frequency absorption.
+        return this.resistive(from, { lengthM: bodyL * 0.7, diameterM: pipeD, absorption: 10 + 45 * packing, name: `glasspack${group}` }, 0.25, distance, group);
       case "straight-through":
         return this.resistive(from, { lengthM: bodyL, diameterM: pipeD, absorption: 6 + 34 * packing, name: `muffler${group}` }, 0.35, distance, group);
       case "chambered": {

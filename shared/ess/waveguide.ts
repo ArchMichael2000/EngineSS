@@ -165,7 +165,12 @@ export class Duct {
     // ν from Sutherland-like scaling of air viscosity with temperature.
     const nu = 1.5e-5 * Math.pow(temperatureK / 293, 1.7) * (P_AMBIENT / meanPressurePa);
     const lined = this.absorption * 0.1151; // dB → Np
-    const alphaAt = (f: number) => (Math.sqrt(Math.PI * f * nu) / (this.radius * c)) * 1.45 + lined * Math.pow(f / 1000, 0.7);
+    // Turbulent wall friction under mean flow damps waves independently of frequency:
+    // α = f_D·M/(2D) (quasi-steady friction linearised about the mean velocity; f_D ≈ 0.025
+    // including bends and joints). Mean velocity from the slow parts of the two travelling waves.
+    const mach = this.initialised && this.rho > 0 && this.c > 0 ? Math.min(0.6, Math.abs(this.dcB - this.dcA) / (this.rho * this.c * this.c)) : 0;
+    const flowLoss = (0.025 * mach) / (4 * this.radius);
+    const alphaAt = (f: number) => (Math.sqrt(Math.PI * f * nu) / (this.radius * c)) * 1.45 + lined * Math.pow(f / 1000, 0.7) + flowLoss;
     // Fit a one-pole low-pass + gain to the transit loss at 250 Hz and 4 kHz.
     const lossLo = Math.exp(-alphaAt(250) * this.lengthM);
     const lossHi = Math.exp(-alphaAt(4000) * this.lengthM);

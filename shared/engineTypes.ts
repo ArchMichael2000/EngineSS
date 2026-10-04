@@ -268,7 +268,7 @@ export interface AdvancedConfig {
 export type PhysicalCrankType = 'even-fire' | 'cross-plane' | 'flat-plane' | 'common-pin' | 'single-pin' | 'custom';
 export type CollectorType = 'bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
 export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
-export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'none';
+export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'glasspack' | 'none';
 export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
 export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe';
 
@@ -330,6 +330,17 @@ export interface PhysicalOverrides {
   knockControl: boolean;
   /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */
   buildTolerance: number;
+  /** Intake snorkel Helmholtz resonator tuned frequency (Hz, 0 = none) and cavity volume (L). */
+  intakeResonatorHz: number;
+  intakeResonatorVolumeL: number;
+  /** Quarter-wave "J-pipe" drone tube tuned to this frequency, Hz (0 = none). */
+  droneTubeHz: number;
+  /** Helmholtz resonator tuned frequency (Hz) and cavity volume (L). */
+  helmholtzHz: number;
+  helmholtzVolumeL: number;
+  /** Valved exhaust: bypass opening speed (auto mode) and mode. */
+  exhaustValveOpenRpm: number;
+  exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
   turboCount: number;
   compressorWheelMm: number;
   superchargerDisplacementL: number;
@@ -400,6 +411,7 @@ export interface PlaybackState {
     intakeCamAdvanceDeg: number;
     exhaustCamRetardDeg: number;
     highCam: boolean;
+    exhaustValve: number;
     splDb: number;
   };
 }

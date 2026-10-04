@@ -10,7 +10,7 @@
  * plus throttle-plate turbulence at part throttle.
  */
 import type { EngineSpec } from "./spec";
-import { BandNoise, P_AMBIENT, R_AIR, RHO_AIR, Rng, T_AMBIENT, clamp, orificeMassFlow } from "./gas";
+import { BandNoise, C_AIR, P_AMBIENT, R_AIR, RHO_AIR, Rng, T_AMBIENT, clamp, orificeMassFlow } from "./gas";
 import { Duct, Junction, RadiationLoad, ReservoirOrifice, ResistiveJoint, arriving, send } from "./waveguide";
 import type { Port } from "./waveguide";
 
@@ -29,6 +29,11 @@ export class IntakeSystem {
   private readonly filterDuct?: Duct;
   private readonly filterJoint?: ResistiveJoint;
   private readonly mouth?: RadiationLoad;
+  // Snorkel resonator: tee between the mouth-side snorkel and the inner snorkel, neck and cavity.
+  private readonly snorkelInner?: Duct;
+  private readonly resonatorNeck?: Duct;
+  private readonly resonatorTee?: Junction;
+  private readonly resonatorCavity?: Junction;
   private readonly stacks: ReservoirOrifice[] = [];
   private readonly throttleNoise: BandNoise;
   private readonly throttleDiameter: number;
@@ -83,7 +88,22 @@ export class IntakeSystem {
       this.filterDuct = new Duct(sampleRate, { lengthM: 0.06, diameterM: Math.max(0.06, it.snorkelDiameterMm / 1000 * 1.6), temperatureK: T_AMBIENT, gamma: 1.4, absorption: filterAbsorption, name: "filter" });
       this.snorkel = new Duct(sampleRate, { lengthM: Math.max(0.03, it.snorkelLengthMm / 1000), diameterM: it.snorkelDiameterMm / 1000, temperatureK: T_AMBIENT, gamma: 1.4, absorption: 2, name: "snorkel" });
       // Loss coefficients referred to snorkel velocity: OEM panel element + box ≈ 1.2, cone ≈ 0.5, sock ≈ 0.4.
-      this.filterJoint = new ResistiveJoint(this.snorkel, this.filterDuct, it.filter === "none" ? 0.05 : it.filter === "oem-paper" ? 1.2 : it.filter === "cone" ? 0.5 : 0.4);
+      let filterUpstream = this.snorkel;
+      if (it.resonatorHz > 0) {
+        // Helmholtz resonator teed into the snorkel: neck 0.5 × snorkel diameter, length for
+        // f = (c/2π)·√(S/(V·L_eff)) with end corrections 1.7·r.
+        const sd = it.snorkelDiameterMm / 1000;
+        this.snorkelInner = new Duct(sampleRate, { lengthM: 0.12, diameterM: sd, temperatureK: T_AMBIENT, gamma: 1.4, absorption: 2, name: "snorkel-inner" });
+        const r = 0.25 * sd;
+        const S = Math.PI * r * r;
+        const V = it.resonatorVolumeL / 1000;
+        const effective = (S * C_AIR * C_AIR) / (Math.pow(2 * Math.PI * it.resonatorHz, 2) * V);
+        this.resonatorNeck = new Duct(sampleRate, { lengthM: clamp(effective - 1.7 * r, 0.01, 0.6), diameterM: 2 * r, temperatureK: T_AMBIENT, gamma: 1.4, absorption: 4, name: "resonator-neck" });
+        this.resonatorTee = new Junction([{ duct: this.snorkel, end: "b" }, { duct: this.snorkelInner, end: "a" }, { duct: this.resonatorNeck, end: "a" }], 0, P_AMBIENT, 1.4);
+        this.resonatorCavity = new Junction([{ duct: this.resonatorNeck, end: "b" }], V, P_AMBIENT, 1.4);
+        filterUpstream = this.snorkelInner;
+      }
+      this.filterJoint = new ResistiveJoint(filterUpstream, this.filterDuct, it.filter === "none" ? 0.05 : it.filter === "oem-paper" ? 1.2 : it.filter === "cone" ? 0.5 : 0.4);
       const airboxPorts: Port[] = [{ duct: this.filterDuct, end: "b" }];
       this.airbox = new Junction(airboxPorts, Math.max(0.4, it.airboxVolumeL) / 1000, P_AMBIENT, 1.4);
       this.mouth = new RadiationLoad(sampleRate, it.snorkelDiameterMm / 2000, 346);
@@ -170,6 +190,10 @@ export class IntakeSystem {
     }
 
     if (this.snorkel && this.filterJoint && this.mouth) {
+      if (this.resonatorTee && this.resonatorCavity) {
+        this.resonatorTee.solve(0, dt);
+        this.resonatorCavity.solve(0, dt);
+      }
       this.filterJoint.solve();
       const reflected = this.mouth.process(this.snorkel.arrivingA, this.snorkel.Z);
       send({ duct: this.snorkel, end: "a" }, reflected);
@@ -189,6 +213,8 @@ export class IntakeSystem {
     const list = [...this.runners];
     if (this.filterDuct) list.push(this.filterDuct);
     if (this.snorkel) list.push(this.snorkel);
+    if (this.snorkelInner) list.push(this.snorkelInner);
+    if (this.resonatorNeck) list.push(this.resonatorNeck);
     return list;
   }
 
