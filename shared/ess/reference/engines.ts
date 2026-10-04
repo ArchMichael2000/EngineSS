@@ -290,4 +290,31 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "na" },
     },
   },
+  "vw-ea288": {
+    name: "VW EA288 2.0 TDI (110 kW)",
+    description: "Common-rail inline-4 diesel with pilot injection, VGT-style small turbo",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    published: { peakTorqueNm: [340, 2000], peakPowerKw: [110, 3750] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 4, displacement: 1.968, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 4800, fuel: "diesel" },
+      advanced: { bore: 81, stroke: 95.5, firingOrder: [1, 3, 4, 2] },
+      physical: { compressionRatio: 16.2, pilotInjection: true },
+      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 17 },
+    },
+  },
+  "cummins-6bt": {
+    name: "Cummins 6BT 5.9 12-valve (1994)",
+    description: "Inline-6 diesel, mechanical P7100 injection pump (no pilot): the classic diesel clatter",
+    provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
+    published: { peakTorqueNm: [542, 1600], peakPowerKw: [119, 2500] },
+    config: {
+      ...v16,
+      quick: { layout: "inline", cylinderCount: 6, displacement: 5.88, crankshaft: "even-fire", aspiration: "turbo", exhaustCharacter: "stock", idleCharacter: "smooth", redline: 2700, fuel: "diesel" },
+      advanced: { bore: 102, stroke: 120, firingOrder: [1, 5, 3, 6, 2, 4], revLimiterRpm: 2800 },
+      // Fuel plate from the published BMEP (11.6 bar at η_b ≈ 0.40): ≈ 66 mg per stroke.
+      physical: { compressionRatio: 17.5, valvesPerCylinder: 2, pilotInjection: false, injectionAdvanceDeg: 13, idleRpm: 750, dieselFullLoadFuelMg: 66 },
+      forcedInduction: { type: "turbo", turboSize: "small", maxBoost: 17 },
+    },
+  },
 };

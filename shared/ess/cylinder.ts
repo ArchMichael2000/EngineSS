@@ -91,6 +91,8 @@ export interface CylinderParams {
   fuelLhv: number;
   stoichAfr: number;
   wallTempK: number;
+  /** Direct-injection compression ignition (no fuel in the intake, no spark). */
+  diesel: { cetane: number; pilot: boolean } | null;
 }
 
 export interface CombustionCommand {
@@ -104,6 +106,12 @@ export interface CombustionCommand {
   fuelOctane: number;
   /** Per-cylinder closed-loop knock control (retard on knock, slow recovery). */
   knockControl: boolean;
+  /** Diesel: start of main injection, degrees BTDC. */
+  injectionAdvanceDeg: number;
+  /** Diesel: fuel to inject this cycle, kg (capped by the smoke limit). */
+  fuelMassKg: number;
+  /** Diesel: smoke-limited minimum lambda. */
+  smokeLambda: number;
 }
 
 export class Cylinder {
@@ -174,6 +182,12 @@ export class Cylinder {
   private prevAlpha = 0;
   private wiebeA = 5;
   private wiebeM = 2;
+  // Diesel double-Wiebe: premixed share β with its own (short) duration, then mixing-controlled burn.
+  private premixedFraction = 0;
+  private premixedDurationDeg = 8;
+  /** Ignition delay of the last injection, crank degrees. */
+  lastIgnitionDelayDeg = 0;
+  private ringPending = 0;
 
   // Knock: Livengood–Wu integral of the end gas, compressed isentropically from the spark state.
   /** Spark retard this cylinder's knock controller currently applies, degrees. */
@@ -342,19 +356,28 @@ export class Cylinder {
     this.energy -= this.pressure * dV;
     this.volume = newVolume;
 
-    // ---- Spark event (crossing of the spark angle, handling the 720° wrap)
-    this.effectiveAdvance = combustion.sparkAdvanceDeg - (combustion.knockControl ? this.knockRetard : 0);
-    const sparkAngle = 720 - this.effectiveAdvance;
-    if (crossed(prev, alphaDeg, sparkAngle)) this.ignite(combustion, omega, dilutionCovGain);
+    // ---- Spark event (crossing of the spark angle, handling the 720° wrap), or diesel injection
+    if (this.params.diesel) {
+      if (crossed(prev, alphaDeg, 720 - combustion.injectionAdvanceDeg)) this.inject(combustion, omega);
+    } else {
+      this.effectiveAdvance = combustion.sparkAdvanceDeg - (combustion.knockControl ? this.knockRetard : 0);
+      const sparkAngle = 720 - this.effectiveAdvance;
+      if (crossed(prev, alphaDeg, sparkAngle)) this.ignite(combustion, omega, dilutionCovGain);
+    }
 
     // ---- Combustion heat release (Wiebe)
     this.heatReleaseRate = 0;
     if (this.burning) {
       let theta = alphaDeg - this.burnStartDeg;
       if (theta < -360) theta += 720;
+      else if (theta > 360) theta -= 720;
       const exhaustOpening = this.exhaustLobe.lift(alphaDeg) > 0.0003;
       if (theta > 0 && !exhaustOpening) {
-        const x = 1 - Math.exp(-this.wiebeA * Math.pow(Math.min(1.5, theta / this.burnDurationDeg), this.wiebeM + 1));
+        if (this.ringPending > 0) this.startRinging(this.ringPending, dt);
+        const x = this.params.diesel
+          ? this.premixedFraction * (1 - Math.exp(-6.9 * Math.pow(Math.min(2, theta / this.premixedDurationDeg), 3))) +
+            (1 - this.premixedFraction) * (1 - Math.exp(-6.9 * Math.pow(Math.min(2, theta / this.burnDurationDeg), 1.5)))
+          : 1 - Math.exp(-this.wiebeA * Math.pow(Math.min(1.5, theta / this.burnDurationDeg), this.wiebeM + 1));
         const dx = Math.max(0, x - this.burnFraction);
         this.burnFraction = x;
         const dQ = dx * this.burnQ;
@@ -486,6 +509,76 @@ export class Cylinder {
     this.sparkTemperature = this.temperature;
     this.knockIntegral = 0;
     this.knockPending = true;
+  }
+
+  /**
+   * Diesel injection: fuel enters at start of injection, autoignites after the Hardenberg–Hase
+   * delay (SAE 790493), τ[°CA] = (0.36 + 0.22·Sp)·exp(Ea·(1/(R̃T) − 1/17190) + (21.2/(p − 12.4))^0.63),
+   * Ea = 618 840/(CN + 25) J/mol, p in bar. Fuel prepared during the delay burns as a premixed
+   * spike, share β = 1 − 0.926·φ^0.37/τ[ms]^0.26 (Watson, SAE 800029); the rest burns at the
+   * mixing-controlled rate. The premixed spike's pressure-rise rate is the diesel clatter, and it
+   * rings the chamber like knock does. A pilot injection lands the main spray in a burning pilot:
+   * short delay, small premixed share — the soft sound of common-rail diesels.
+   */
+  private inject(cmd: CombustionCommand, omega: number): void {
+    this.sparked = true;
+    const d = this.params.diesel!;
+    this.lastResidualFraction = this.massBurned / Math.max(1e-12, this.mass);
+    const airLimit = this.massAir / (this.params.stoichAfr * Math.max(1, cmd.smokeLambda));
+    const fuel = cmd.fuelEnabled ? Math.min(cmd.fuelMassKg * this.fuelScale, airLimit) : 0;
+    if (fuel <= 1e-9) {
+      this.misfired = true;
+      this.burning = false;
+      return;
+    }
+    this.massFuel += fuel;
+    this.mass += fuel;
+    // Spray evaporation and heating takes ≈ 0.35 MJ/kg from the charge.
+    this.energy += fuel * CV_GAS * 330 - fuel * 0.35e6;
+    this.updateState();
+    const rpm = (omega * 60) / (2 * Math.PI);
+    const sp = (2 * this.params.strokeM * rpm) / 60;
+    const pBar = Math.max(13, this.pressure / 1e5);
+    const ea = 618_840 / (d.cetane + 25);
+    let delayDeg = (0.36 + 0.22 * sp) * Math.exp(ea * (1 / (8.3143 * this.temperature) - 1 / 17_190) + Math.pow(21.2 / (pBar - 12.4), 0.63));
+    delayDeg *= Math.exp(0.05 * this.rng.gaussian());
+    if (d.pilot) delayDeg = Math.max(1.5, delayDeg * 0.3);
+    if (delayDeg > 60) {
+      // Too cold to light (cranking a cold engine): the fuel goes out unburned.
+      this.misfired = true;
+      this.burning = false;
+      return;
+    }
+    this.lastIgnitionDelayDeg = delayDeg;
+    const delayMs = (delayDeg / Math.max(1, rpm * 6)) * 1000;
+    const phi = clamp((fuel * this.params.stoichAfr) / Math.max(1e-12, this.massAir), 0.05, 1);
+    let beta = clamp(1 - (0.926 * Math.pow(phi, 0.37)) / Math.pow(Math.max(0.05, delayMs), 0.26), 0.02, 0.95);
+    if (d.pilot) beta *= 0.5;
+    this.premixedFraction = beta;
+    // Premixed burn ≈ 0.7 ms; diffusion burn lengthens with fuel quantity (injection duration).
+    this.premixedDurationDeg = clamp(0.0042 * rpm, 4, 18);
+    this.burnDurationDeg = clamp((25 + 50 * phi) * (0.8 + 0.2 * (rpm / 2000)) * this.burnScale, 25, 110);
+    this.lastBurnDuration = this.burnDurationDeg;
+    this.burnEfficiency = 0.98;
+    this.burnQ = Math.min(this.massFuel, this.massAir / this.params.stoichAfr) * this.params.fuelLhv * this.burnEfficiency;
+    this.burnStartDeg = mod720(720 - cmd.injectionAdvanceDeg + delayDeg);
+    this.burnFraction = 0;
+    this.burning = true;
+    this.knockPending = false;
+    // Chamber ringing excited by the premixed spike: a share of its constant-volume pressure rise,
+    // larger the faster it burns.
+    const dpPremixed = ((GAMMA_GAS - 1) * beta * this.burnQ) / Math.max(1e-7, this.clearanceVolume);
+    this.ringPending = 0.06 * dpPremixed * clamp(10 / this.premixedDurationDeg, 0.5, 2);
+  }
+
+  private startRinging(amplitude: number, dt: number): void {
+    this.ringPending = 0;
+    const c = Math.sqrt(1.3 * R_AIR * Math.max(600, this.temperature));
+    const f = Math.min((1.84 * c) / (Math.PI * this.params.boreM), 20000);
+    this.knockOmega = 2 * Math.PI * f;
+    this.knockPhase = 0;
+    this.knockAmp = Math.max(this.knockAmp, amplitude);
+    this.knockDecay = Math.exp((-dt * Math.PI * f) / 15);
   }
 
   /**
@@ -657,7 +750,7 @@ export class Cylinder {
         this.takenFromPlenum += fromPlenum;
         const fresh = gain - fromResidual - fromPlenum;
         this.massBurned += fromResidual + fromPlenum;
-        const fuelFraction = combustion && combustion.fuelEnabled ? 1 / (1 + combustion.lambda * this.params.stoichAfr / this.fuelScale) : 0;
+        const fuelFraction = combustion && combustion.fuelEnabled && !this.params.diesel ? 1 / (1 + combustion.lambda * this.params.stoichAfr / this.fuelScale) : 0;
         this.massFuel += fresh * fuelFraction;
         this.massAir += fresh * (1 - fuelFraction);
       }
@@ -718,6 +811,11 @@ export function wiebeDuration(boreM: number, rpm: number, chargeDensity: number,
 /** Spark advance placing 50 % burn at ~9° ATDC (MBT) for a Wiebe(a=5, m=2) burn. */
 export function mbtAdvance(durationDeg: number): number {
   return 0.517 * durationDeg - 9;
+}
+
+function mod720(x: number): number {
+  const r = x % 720;
+  return r < 0 ? r + 720 : r;
 }
 
 function crossed(prev: number, cur: number, target: number): boolean {

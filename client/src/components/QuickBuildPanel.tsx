@@ -2,7 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
-import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, SoundProfile } from '../../../shared/engineTypes';
+import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, SoundProfile, EngineCycleType, FuelType } from '../../../shared/engineTypes';
 import { SOUND_PROFILE_HISTORY, normalizeSoundProfile } from '../../../shared/engineTypes';
 
 interface QuickBuildPanelProps {
@@ -15,6 +15,7 @@ const TOOLTIPS = {
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
   crankshaft: 'Cross-plane creates the classic V8 burble with uneven exhaust pulses. Flat-plane produces an even, high-pitched scream. Odd-fire creates an asymmetric, distinctive rhythm.',
+  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection).',
   aspiration: 'Naturally aspirated engines breathe freely. Turbochargers add spool whine and blow-off sounds. Superchargers add a constant mechanical whine proportional to RPM.',
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
@@ -170,6 +171,38 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <SelectItem value="flat-plane">Flat-Plane</SelectItem>
             <SelectItem value="even-fire">Even-Fire</SelectItem>
             <SelectItem value="odd-fire">Odd-Fire</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Engine type (cycle + combustion) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Engine Type</label>
+          <InfoTooltip text={TOOLTIPS.engineType} />
+        </div>
+        <Select
+          value={`${config.quick.cycle ?? 'four-stroke'}:${config.quick.fuel ?? 'gasoline'}`}
+          onValueChange={(v) => {
+            const [cycle, fuel] = v.split(':');
+            onChange({
+              ...config,
+              quick: {
+                ...config.quick,
+                cycle: cycle as EngineCycleType,
+                fuel: fuel as FuelType,
+                // Diesels are governed far lower than spark engines.
+                ...(fuel === 'diesel' && config.quick.redline > 5200 && { redline: 4800 }),
+              },
+            });
+          }}
+        >
+          <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-dark-elevated border-hud-line">
+            <SelectItem value="four-stroke:gasoline">Four-Stroke Gasoline</SelectItem>
+            <SelectItem value="four-stroke:diesel">Four-Stroke Diesel</SelectItem>
           </SelectContent>
         </Select>
       </div>

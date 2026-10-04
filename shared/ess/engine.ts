@@ -168,7 +168,12 @@ export class EngineSimulator {
   private fuelCut = false;
   private limiterActive = false;
   private softCutFraction = 0;
-  private readonly command: CombustionCommand = { sparkAdvanceDeg: 0, lambda: 1, fuelEnabled: true, sparkEnabled: true, fuelOctane: 95, knockControl: true };
+  private readonly command: CombustionCommand = { sparkAdvanceDeg: 0, lambda: 1, fuelEnabled: true, sparkEnabled: true, fuelOctane: 95, knockControl: true, injectionAdvanceDeg: 8, fuelMassKg: 0, smokeLambda: 1.2 };
+  // Diesel governor state: fuel per cylinder per cycle (kg), its idle feed-forward and integrator.
+  private dieselFuel = 0;
+  private dieselIdleFF = 0;
+  private dieselIdleIntegral = 0;
+  private injectionAdvance = 8;
   private sparkAdvance = 15;
   private lambdaTarget = 1;
   private readonly sparkCuts: Uint8Array;
@@ -213,6 +218,7 @@ export class EngineSimulator {
       fuelLhv: spec.fuelLhvMjKg * 1e6,
       stoichAfr: spec.fuelStoichAfr,
       wallTempK: 440,
+      diesel: spec.diesel ? { cetane: spec.diesel.cetane, pilot: spec.diesel.pilotInjection } : null,
     };
     this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
@@ -495,10 +501,18 @@ export class EngineSimulator {
     c.sparkEnabled = sparkEnabled;
     c.fuelOctane = cal.fuelOctane;
     c.knockControl = cal.knockControl;
+    if (this.spec.diesel) {
+      // Compression ignition: the only lever is fuel; overspeed cuts injection.
+      c.fuelEnabled = c.fuelEnabled && !overspeed;
+      c.fuelMassKg = this.dieselFuel;
+      c.injectionAdvanceDeg = this.injectionAdvance;
+      c.smokeLambda = this.spec.diesel.smokeLambda;
+    }
     return c;
   }
 
   private throttlePlate(): number {
+    if (this.spec.diesel) return 1; // unthrottled: load is set by fuel quantity
     // Vehicle mode: the shift controller may blip the throttle to rev-match a downshift.
     const pedal = this.controls.mode === "vehicle" && this.drivetrain.blipThrottle !== null ? Math.max(this.controls.throttle, this.drivetrain.blipThrottle) : this.controls.throttle;
     // Drive-by-wire progression: small pedal → finer plate control at the bottom.
@@ -715,6 +729,7 @@ export class EngineSimulator {
     if (this.cranking) advance = 5; // cranking spark: fixed near TDC
     this.sparkAdvance = clamp(advance, -5, 48);
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
+    if (this.spec.diesel) this.dieselGovernor(rpm, pedal, idleErr, rpmRate, blockSec);
 
     // Housekeeping at block rate.
     this.intake.updateBlock();
@@ -769,6 +784,44 @@ export class EngineSimulator {
       this.splAcc = 0;
       this.splN = 0;
     }
+  }
+
+  /**
+   * All-speed diesel governor (block rate): fuel per cylinder per cycle from the pedal, an idle PI
+   * on speed underneath it, and a droop to zero fuel across the last 180 rpm before the limiter
+   * (diesels govern rather than cut). Start of injection advances with speed.
+   */
+  private dieselGovernor(rpm: number, pedal: number, idleErr: number, rpmRate: number, blockSec: number): void {
+    const d = this.spec.diesel!;
+    const cal = this.spec.calibration;
+    // Torque-rise characteristic: full-load fuel per stroke tapers 12 % from 60 % of redline to
+    // redline (pump torque plate / common-rail full-load map, turbine and EGT protection).
+    const full = d.fullLoadFuelMg * 1e-6 * (1 - 0.12 * clamp((rpm - 0.6 * cal.redlineRpm) / (0.4 * cal.redlineRpm), 0, 1));
+    if (this.dieselIdleFF === 0) {
+      // Idle feed-forward from the energy balance: friction and accessories at ≈ 35 % indicated efficiency.
+      const idleOmega = (cal.idleRpm / 60) * TWO_PI;
+      const cyclesPerSec = (cal.idleRpm / 120) * this.cylinders.length;
+      this.dieselIdleFF = (this.frictionTorque(cal.idleRpm) * idleOmega) / (0.35 * this.spec.fuelLhvMjKg * 1e6 * cyclesPerSec);
+      this.dieselIdleIntegral = this.dieselIdleFF;
+    }
+    const ff = this.dieselIdleFF;
+    const nearIdle = rpm < cal.idleRpm * 1.5 && this.running && !this.cranking;
+    // PI only: the per-firing speed ripple of a diesel is large, and a derivative term turns it into
+    // bang-bang fuelling.
+    void rpmRate;
+    if (nearIdle && this.controls.mode !== "dyno") this.dieselIdleIntegral = clamp(this.dieselIdleIntegral + idleErr * ff * 4 * blockSec, ff * 0.3, ff * 3);
+    const idleFuel = clamp(this.dieselIdleIntegral + idleErr * ff * 4, 0, full);
+    let fuel = Math.max(Math.pow(pedal, 1.15) * full, idleFuel);
+    fuel *= clamp((cal.revLimiterRpm + 30 - rpm) / 180, 0, 1);
+    if (this.cranking) fuel = 0.5 * full;
+    this.dieselFuel = fuel;
+    // Start of injection: retarded at idle (noise, NOx), advancing ≈ 1.5°/1000 rpm toward rated.
+    const base = d.injectionAdvanceDeg;
+    this.injectionAdvance = this.cranking ? 2 : clamp(base - 1.5 * ((cal.redlineRpm - rpm) / 1000), 1, base + 4);
+    let trapped = 0;
+    for (const c of this.cylinders) trapped += c.lastTrappedAir;
+    trapped /= this.cylinders.length;
+    this.lambdaTarget = fuel > 1e-9 ? Math.max(d.smokeLambda, trapped / (fuel * this.spec.fuelStoichAfr)) : 9.99;
   }
 
   private afterfire(dt: number): void {

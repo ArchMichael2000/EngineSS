@@ -10,7 +10,12 @@ import { EngineSimulator } from "./engine";
 import { resolveEngineSpec } from "./resolveSpec";
 import type { EngineConfiguration } from "../engineTypes";
 
-export function randomConfig(seed: number): EngineConfiguration {
+export interface FuzzOptions {
+  /** Allow the diesel variant draw (default true). */
+  diesel?: boolean;
+}
+
+export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfiguration {
   let s = seed * 2654435761 >>> 0;
   const rnd = () => {
     s ^= s << 13; s >>>= 0;
@@ -68,6 +73,15 @@ export function randomConfig(seed: number): EngineConfiguration {
   if (rnd() < 0.3) ph.fuelOctane = 85 + rnd() * 25;
   if (rnd() < 0.15) ph.knockControl = false;
   if (rnd() < 0.2) ph.camLobeGamma = 0.6 + rnd() * 2;
+  // Diesel variants (drawn last so earlier seeds keep their configurations): compression ignition
+  // needs CR ≥ 14 and diesels rarely exceed ≈ 5200 rpm.
+  if (layout !== "radial" && rnd() < 0.2 && opts.diesel !== false) {
+    config.quick.fuel = "diesel";
+    config.quick.redline = Math.round(Math.min(5200, Math.max(2500, redline * 0.55)) / 100) * 100;
+    if (ph.compressionRatio !== undefined) ph.compressionRatio = 14 + rnd() * 8;
+    ph.pilotInjection = rnd() < 0.5;
+    if (rnd() < 0.3) ph.cetaneNumber = 40 + rnd() * 15;
+  }
   config.physical = ph as EngineConfiguration["physical"];
   return config;
 }
@@ -82,11 +96,11 @@ export interface FuzzResult {
   summary: string;
 }
 
-export function runConfig(seed: number, fs = 48000): FuzzResult {
+export function runConfig(seed: number, fs = 48000, opts: FuzzOptions = {}): FuzzResult {
   const problems: string[] = [];
-  const config = randomConfig(seed);
+  const config = randomConfig(seed, opts);
   const q = config.quick;
-  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type} redline ${q.redline}`;
+  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""} redline ${q.redline}`;
   let idleRpm = 0;
   let wotRpm = 0;
   let cpu = 0;

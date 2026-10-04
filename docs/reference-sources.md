@@ -29,6 +29,9 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Compressor | Non-dimensional ψ(φ) speed line with a rising backflow branch; duct inertance (Greitzer B-model) | Greitzer, *J. Eng. Power* 98 (1976); Moore & Greitzer (1986) | `forcedInduction.ts` |
 | Turbine | Nozzle from the manifold volume, implicit, wastegate in parallel | Watson & Janota, *Turbocharging the IC Engine* (1982) | `exhaust.ts` `solveTurbine` |
 | Positive-displacement blowers | Roots / twin-screw displacement with leakage, pocket discharge pulsation | Eaton TVS literature; Hagerty TVS teardown | `forcedInduction.ts` |
+| Diesel ignition delay | Hardenberg–Hase `τ[°CA] = (0.36 + 0.22·Sp)·exp(Ea(1/R̃T − 1/17190) + (21.2/(p − 12.4))^0.63)`, `Ea = 618840/(CN + 25)` | Hardenberg & Hase, SAE 790493 | `cylinder.ts` `inject` |
+| Diesel heat release | Double Wiebe: premixed share `β = 1 − 0.926·φ^0.37/τ_ms^0.26` (≈ 0.7 ms spike), mixing-controlled remainder (25–110°) | Watson, Pilley & Marzouk, SAE 800029; Miyamoto et al., SAE 850107 | `cylinder.ts` |
+| Diesel combustion noise | Premixed spike rings the chamber's first circumferential mode, at 6 % of its constant-volume pressure rise (×2 when it burns in < 5°); pilot injection shortens the main delay to 30 % and halves β | Russell & Haworth, SAE 850973 (combustion noise and pressure-rise rate) | `cylinder.ts` `startRinging` |
 | Radiation to listener | Monopole `p = ρQ̇/(4πr)`, ground reflection, shielding filters | Kinsler et al., *Fundamentals of Acoustics* | `observer.ts` |
 
 ### Calibrated constants and their basis
@@ -61,6 +64,7 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Surge duct | Greitzer inertance 1.8 m / inducer area (inlet → compressor → charge piping → throttle) | Sets the charge-system Helmholtz frequency near 20–35 Hz. Deep surge without a BOV then runs at 32 Hz on the 2JZ (96 % of Helmholtz). The OSU rig (Dehner & Selamet) measured 63–82 % of Helmholtz, so the simulated cycle sits closer to the mild-surge rate. The previous 0.6 m duct gave 70 Hz with no flow reversal. |
 | Blow-off valve | Pneumatic: cracks at 20 kPa across the throttle, fully open at 40 kPa, 12 ms travel; area 0.16·D²·count (≈ 0.45 × wheel diameter) | A fixed 24 mm valve on an 83 mm wheel balanced the wheel's flow at 220 kPa. Sized to the wheel, the compressor stays out of surge and boost halves in 250 ms, then decays with shaft speed. |
 | Wastegate | PI on boost; proportional term on boost predicted 0.15 s ahead from its filtered rise rate | Tip-in overshoot 10.5 % (17 % without anticipation); settled boost within 1.5 % of target. |
+| Diesel governor | All-speed: fuel per stroke = pedal^1.15 × full-load fuel over an idle PI (no derivative: diesel speed ripple turns it bang-bang); droop to zero fuel over the last 180 rpm; full-load fuel tapers 12 % from 0.6 × redline (torque rise); main injection advances 1.5°/1000 rpm to 9° (turbo, pilot) or 12° (NA) BTDC at redline | Fuel per stroke defaults to the smoke limit λ 1.4 (turbo) / 1.5 (NA) at rated boost; mechanical-pump engines take their fuel-plate value from published BMEP. EA288 peak pressure ≈ 190 bar at 2500 rpm full load. |
 | Rev limiter | Soft: a random share of cylinders loses spark *and* fuel, ramping from 0 at limiter − 30 rpm to all cylinders at limiter + 130 rpm, with 12° retard on the rest; every strategy has an overspeed ignition cut on instantaneous speed at limiter + 150 rpm | A fuel-only soft cut acts one cycle late. A 10 L turbo inline-8 with a light flywheel overran its 5300 rpm limiter to 6041 rpm with it. Spark cut acts on the charge already inducted. |
 | Internal rate tiers | 1, 5/6, 2/3 of the device rate; cost estimate 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers (× real time at 48 kHz on the reference machine, ±25 %) times a measured machine factor, kept under 60 % of the audio thread; 2 s above 90 % steps down one tier | Physics is rate-independent: W16 brake torque at 32 kHz is within 0.15 % of 48 kHz. Kaiser-windowed sinc upsampler (32 taps, β 8): flat to 0.75 of the reduced Nyquist, images ≤ −60 dB. |
 
@@ -145,6 +149,15 @@ Brake output after 2.5–3 s at the stated speed, WOT. Run with `scratchpad`-sty
 | Bugatti W16 | 736 kW @ 6000 | 842 | +14 % |
 | SRT Hellcat | 881 N·m @ 4000 | 963 | +9 % |
 | SRT Hellcat | 527 kW @ 6000 | 578 | +10 % |
+| VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 330 | −3 % |
+| VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 110 | 0 % |
+| Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 580 | +7 % |
+| Cummins 6BT 5.9 12V | 119 kW @ 2500 | 120 | +1 % |
+
+EA288 full-load brake efficiency at 2000 rpm is 0.42 (published TDI peak ≈ 0.42, BSFC ≈ 200 g/kWh).
+At idle its ignition delay is 4.1° without pilot (premixed share 0.60) and 1.5° with it (0.24), and
+pilot injection lowers 1–4 kHz structure-borne combustion noise by about 5 dB. With pilot the
+diesel is still about 10 dB above a gasoline engine of the same size at idle.
 
 The pattern: high-revving NA engines read 10–13 % low at peak power. Their real heads and intakes (ITBs, tuned airboxes, large valves) breathe better at high speed than the family defaults used for the unpublished parts. Boosted engines read 5–14 % high at peak power. Boost there is an estimate, and production engines also cap torque through the ECU, which v16 does not model.
 

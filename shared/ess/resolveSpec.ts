@@ -6,7 +6,7 @@
  */
 import { defaultVehicle } from "./vehicle";
 import type { EngineConfiguration } from "../engineTypes";
-import type { CamSpec, CollectorStrategy, CrossoverType, EngineSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
+import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
 import { clamp } from "./gas";
 import { bankLayout } from "./geometry";
 
@@ -43,9 +43,11 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const perCyl = displacement / n;
   const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6;
   const aircraftLike = layout === "radial" || (q.redline <= 3200 && perCyl > 1.5);
+  const diesel = q.fuel === "diesel";
 
   // ---- Bore / stroke
-  const defaultRatio = layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
+  // Diesels are undersquare (stroke ≈ 1.1–1.2 × bore) for combustion-chamber shape and torque.
+  const defaultRatio = diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
   let bore: number;
   let stroke: number;
   if (adv.bore && adv.stroke) {
@@ -78,8 +80,9 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const exCount = valvesPerCyl >= 4 ? 2 : 1;
   const inD = ph.intakeValveDiameterMm ?? (inCount === 1 ? 0.52 * bore : inCount === 2 ? 0.39 * bore : 0.31 * bore);
   const exD = ph.exhaustValveDiameterMm ?? (exCount === 1 ? 0.41 * bore : 0.33 * bore);
-  const camPreset = CAMS[q.idleCharacter];
-  const highRev = clamp((q.redline - 6500) / 3000, 0, 1);
+  // Diesel cams: short, low-overlap timing (piston-to-valve clearance at CR 16–20 allows little overlap).
+  const camPreset = diesel ? { intake: 198, exhaust: 204, icl: 112, ecl: 114 } : CAMS[q.idleCharacter];
+  const highRev = diesel ? 0 : clamp((q.redline - 6500) / 3000, 0, 1);
   const cam: CamSpec = {
     intakeDurationDeg: ph.intakeDurationDeg ?? camPreset.intake + highRev * 18,
     exhaustDurationDeg: ph.exhaustDurationDeg ?? camPreset.exhaust + highRev * 18,
@@ -164,7 +167,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
 
   // ---- Calibration
   const boosted = forcedInduction.kind !== "na";
-  const idleRpm = ph.idleRpm ?? IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0);
+  const idleRpm = ph.idleRpm ?? (diesel ? 760 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
   const limiterRpm = adv.revLimiterRpm ?? q.redline;
   const afterfireByCharacter = { stock: 0.04, sport: 0.22, race: 0.5, "straight-pipe": 0.75 } as const;
   const calibration: EngineSpec["calibration"] = {
@@ -173,24 +176,38 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     revLimiterRpm: limiterRpm,
     revLimiter: adv.revLimiterType ?? "soft",
     fuelOctane: ph.fuelOctane ?? 95,
-    knockControl: ph.knockControl ?? true,
+    knockControl: diesel ? false : ph.knockControl ?? true,
     buildTolerance: clamp(ph.buildTolerance ?? 0.5, 0, 1),
-    lambdaWot: boosted ? 0.8 : 0.87,
+    lambdaWot: diesel ? (boosted ? 1.4 : 1.5) : boosted ? 0.8 : 0.87,
     lambdaPart: 1,
     overrunFuelCut: true,
-    afterfireTendency: ph.afterfireTendency ?? afterfireByCharacter[character],
+    // Diesels have no spark to light fuel in the exhaust.
+    afterfireTendency: diesel ? 0 : ph.afterfireTendency ?? afterfireByCharacter[character],
   };
+  const smokeLambda = calibration.lambdaWot;
+  const ratedAirKg = (((101.3 + (forcedInduction.kind !== "na" ? forcedInduction.targetBoostKpa : 0)) * 1000) / (287.05 * 320)) * (perCyl / 1000) * 0.9;
+  const dieselSpec: DieselSpec | null = diesel
+    ? {
+        injectionAdvanceDeg: ph.injectionAdvanceDeg ?? (boosted ? 9 : 12),
+        pilotInjection: ph.pilotInjection ?? boosted,
+        cetane: ph.cetaneNumber ?? 51,
+        smokeLambda,
+        fullLoadFuelMg: ph.dieselFullLoadFuelMg ?? (ratedAirKg / (14.5 * smokeLambda)) * 1e6,
+      }
+    : null;
 
-  const inertia = ph.inertiaKgM2 ?? (motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : 0.06 + 0.022 * displacement);
+  const inertia = ph.inertiaKgM2 ?? (motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
 
   return {
-    name: `${n}-cyl ${layout} ${displacement.toFixed(1)} L`,
+    name: `${n}-cyl ${layout} ${displacement.toFixed(1)} L${diesel ? " diesel" : ""}`,
+    combustion: diesel ? "diesel" : "spark",
+    diesel: dieselSpec,
     layout,
     cylinders: n,
     boreMm: bore,
     strokeMm: stroke,
     rodLengthMm: rod,
-    compressionRatio: ph.compressionRatio ?? (boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
+    compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
     crank: {
@@ -214,8 +231,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     ),
     inertiaKgM2: inertia,
     borePitchMm: bore * 1.12 + 9,
-    fuelLhvMjKg: 43,
-    fuelStoichAfr: 14.7,
+    fuelLhvMjKg: diesel ? 42.8 : 43,
+    fuelStoichAfr: diesel ? 14.5 : 14.7,
     seed: config.seed ?? 42,
   };
 }

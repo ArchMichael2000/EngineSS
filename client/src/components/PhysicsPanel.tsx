@@ -96,7 +96,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
         ['even-fire', 'Even-fire (split pins)'], ['cross-plane', 'Cross-plane'], ['flat-plane', 'Flat-plane'],
         ['common-pin', 'Common-pin (bank angle sets intervals)'], ['single-pin', 'Single-pin (radial / master rod)'],
       ])}
-      {slider('compressionRatio', 'Compression ratio', spec.compressionRatio, 6, 16, 0.1, ':1', 1)}
+      {slider('compressionRatio', 'Compression ratio', spec.compressionRatio, 6, spec.diesel ? 24 : 16, 0.1, ':1', 1)}
       {slider('rodLengthMm', 'Rod length', spec.rodLengthMm, spec.strokeMm * 1.3, spec.strokeMm * 2.4, 1, ' mm')}
       {slider('inertiaKgM2', 'Rotating inertia', spec.inertiaKgM2, 0.01, 1.5, 0.005, ' kg·m²', 3)}
 
@@ -148,9 +148,16 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {section('Calibration')}
       {slider('idleRpm', 'Idle speed', spec.calibration.idleRpm, 400, 1600, 10, ' rpm')}
       {slider('afterfireTendency', 'Afterfire tendency', spec.calibration.afterfireTendency, 0, 1, 0.01, '', 2)}
-      {slider('fuelOctane', 'Fuel octane (RON)', spec.calibration.fuelOctane, 80, 115, 1)}
+      {!spec.diesel && slider('fuelOctane', 'Fuel octane (RON)', spec.calibration.fuelOctane, 80, 115, 1)}
       {slider('buildTolerance', 'Build tolerance (cyl-to-cyl spread)', spec.calibration.buildTolerance, 0, 1, 0.05, '', 2)}
-      {toggle('knockControl', 'Knock control (off = audible knock)', spec.calibration.knockControl)}
+      {!spec.diesel && toggle('knockControl', 'Knock control (off = audible knock)', spec.calibration.knockControl)}
+      {spec.diesel && (<>
+        {section('Diesel injection')}
+        {toggle('pilotInjection', 'Pilot injection (common rail: softer clatter)', spec.diesel.pilotInjection)}
+        {slider('injectionAdvanceDeg', 'Main injection at rated speed', spec.diesel.injectionAdvanceDeg, 0, 25, 0.5, '° BTDC', 1)}
+        {slider('cetaneNumber', 'Fuel cetane number', spec.diesel.cetane, 35, 65, 1)}
+        {slider('dieselFullLoadFuelMg', 'Full-load fuel per stroke', spec.diesel.fullLoadFuelMg, 5, 300, 1, ' mg')}
+      </>)}
 
       {fi.kind === 'turbo' && (<>
         {section('Turbocharger')}

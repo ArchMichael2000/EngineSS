@@ -59,6 +59,10 @@ describe("reference engines against published figures", () => {
     ["gm-ls3", "torque"],
     ["porsche-9a1", "power"],
     ["ferrari-f140", "power"],
+    ["vw-ea288", "torque"],
+    ["vw-ea288", "power"],
+    ["cummins-6bt", "torque"],
+    ["cummins-6bt", "power"],
   ];
   for (const [key, kind] of points) {
     it(`${key} peak ${kind}`, () => {
@@ -89,6 +93,44 @@ describe("combustion", () => {
     const sim = dyno("gm-ls3", 1500, 1.5, (c) => ({ ...c, physical: { ...c.physical, fuelOctane: 85, knockControl: false } }));
     expect(sim.telemetry.knockEvents).toBeGreaterThan(5);
   });
+});
+
+describe("diesel combustion", () => {
+  function idleStructure(pilot: boolean) {
+    const sim = new EngineSimulator(specOf("vw-ea288", (c) => ({ ...c, physical: { ...c.physical, pilotInjection: pilot } })), FS);
+    sim.setControls({ mode: "free", throttle: 0 });
+    sim.prewarm(2);
+    Object.assign(sim.stems, { exhaust: 0, exhaustJet: 0, valveJet: 0, intake: 0, structure: 1, accessory: 0 });
+    const n = FS;
+    const l = new Float32Array(n);
+    sim.process(l, new Float32Array(n), n);
+    // 1–4 kHz band energy (combustion noise region).
+    let a = 0;
+    let b = 0;
+    let e = 0;
+    const ka = 1 - Math.exp((-2 * Math.PI * 4000) / FS);
+    const kb = 1 - Math.exp((-2 * Math.PI * 1000) / FS);
+    for (const v of l) {
+      a += (v - a) * ka;
+      b += (v - b) * kb;
+      e += (a - b) * (a - b);
+    }
+    const cyl = (sim as unknown as { cylinders: Array<{ lastIgnitionDelayDeg: number }> }).cylinders[0];
+    return { db: 10 * Math.log10(e / n), delay: cyl.lastIgnitionDelayDeg, rpm: sim.rpm };
+  }
+
+  it("idles on its governor, with Hardenberg–Hase ignition delay and pilot injection softening the clatter", () => {
+    const plain = idleStructure(false);
+    const pilot = idleStructure(true);
+    expect(plain.rpm).toBeGreaterThan(650);
+    expect(plain.rpm).toBeLessThan(900);
+    // Idle ignition delay of a DI diesel ≈ 0.5–1.5 ms ≈ 2–8 °CA at 760 rpm.
+    expect(plain.delay).toBeGreaterThan(2);
+    expect(plain.delay).toBeLessThan(8);
+    expect(pilot.delay).toBeLessThan(plain.delay);
+    // Pilot injection lowers combustion noise by ≈ 3–10 dB.
+    expect(plain.db - pilot.db).toBeGreaterThan(3);
+  }, 60_000);
 });
 
 describe("valve timing", () => {
@@ -197,11 +239,12 @@ describe("numerical health", () => {
 });
 
 describe("random configurations", () => {
-  // A few seeds from the robustness sweep (scripts/fuzzConfigs.ts runs the full set), including
-  // seed 34, a 10 L turbo inline-8 that once overran its soft limiter.
-  for (const seed of [3, 17, 34]) {
-    it(`seed ${seed} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed);
+  // A few seeds from the robustness sweep (scripts/fuzzConfigs.ts runs the full set): seed 34 as the
+  // 10 L turbo inline-8 that once overran its soft limiter (its gasoline draw), seed 29 a diesel.
+  const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
+  for (const [seed, diesel] of cases) {
+    it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
+      const r = runConfig(seed, FS, { diesel });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }

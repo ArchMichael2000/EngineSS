@@ -226,7 +226,14 @@ export interface QuickBuildConfig {
   exhaustCharacter: ExhaustCharacter;
   idleCharacter: IdleCharacter;
   redline: number; // RPM
+  /** Fuel / combustion system (default gasoline spark ignition). */
+  fuel?: FuelType;
+  /** Working cycle (default four-stroke). Rotary: cylinderCount = rotors, displacement = rotors × chamber. */
+  cycle?: EngineCycleType;
 }
+
+export type FuelType = 'gasoline' | 'diesel';
+export type EngineCycleType = 'four-stroke' | 'two-stroke' | 'rotary';
 
 /**
  * Forced induction configuration.
@@ -328,6 +335,14 @@ export interface PhysicalOverrides {
   fuelOctane: number;
   /** Closed-loop knock control on/off. */
   knockControl: boolean;
+  /** Diesel: start of main injection at rated speed, degrees BTDC. */
+  injectionAdvanceDeg: number;
+  /** Diesel: common-rail pilot injection (shortens the main ignition delay, softens clatter). */
+  pilotInjection: boolean;
+  /** Diesel fuel cetane number (EN 590 ≥ 51, US #2 ≈ 40–45). */
+  cetaneNumber: number;
+  /** Diesel full-load fuel per cylinder per cycle, mg (pump fuel-plate / calibration limit; default: smoke limit at rated boost). */
+  dieselFullLoadFuelMg: number;
   /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */
   buildTolerance: number;
   /** Intake snorkel Helmholtz resonator tuned frequency (Hz, 0 = none) and cavity volume (L). */

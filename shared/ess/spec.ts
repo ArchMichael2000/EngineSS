@@ -192,8 +192,26 @@ export interface CalibrationSpec {
   afterfireTendency: number;
 }
 
+export type CombustionKind = "spark" | "diesel";
+
+/** Direct-injection compression ignition. */
+export interface DieselSpec {
+  /** Start of main injection at rated speed, degrees BTDC (advances ≈ 1.5°/1000 rpm from idle). */
+  injectionAdvanceDeg: number;
+  /** Common-rail pilot injection: the main injection lands in a burning pilot (short ignition delay). */
+  pilotInjection: boolean;
+  cetane: number;
+  /** Smoke-limited full-load lambda (fuel is capped to trapped air / (AFR · this)). */
+  smokeLambda: number;
+  /** Full-load fuel per cylinder per cycle, mg (rated). */
+  fullLoadFuelMg: number;
+}
+
 export interface EngineSpec {
   name: string;
+  /** Spark ignition or compression ignition (diesel). */
+  combustion: CombustionKind;
+  diesel: DieselSpec | null;
   layout: EssLayout;
   cylinders: number;
   boreMm: number;
