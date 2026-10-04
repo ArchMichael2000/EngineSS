@@ -283,10 +283,11 @@ export class ExhaustNetwork {
   private element(from: Port, kind: "catalyst" | "resonator" | "muffler", pipeD: number, distance: number, group: number): Port {
     const ex = this.spec.exhaust;
     if (kind === "catalyst") {
-      // Monolith in an expanded shell: area change, entry/exit losses, and the laminar resistance of
-      // ~400 cpsi channels (d_h ≈ 1.1 mm, 75 % open, 0.15 m brick), which damps standing waves
-      // between manifold and converter; visco-thermal absorption in the channels adds broadband loss.
-      const shell = this.resistive(from, { lengthM: 0.3, diameterM: pipeD * 1.85, absorption: 25, name: `cat${group}` }, 1.4, distance, group, { lengthM: 0.15, hydraulicDiameterM: 1.1e-3, openArea: 0.75 });
+      // Monolith in a shell entered through conical diffusers (less reactive than a sudden
+      // expansion: effective diameter ratio ≈ 1.5), entry/exit losses, and the laminar resistance of
+      // ~400 cpsi channels (d_h ≈ 1.1 mm, 75 % open, 0.15 m brick). That lumped resistance carries
+      // the channels' viscous loss (≈ 4 dB at 400 Hz); the shell keeps only light mat absorption.
+      const shell = this.resistive(from, { lengthM: 0.3, diameterM: pipeD * 1.5, absorption: 6, name: `cat${group}` }, 1.4, distance, group, { lengthM: 0.15, hydraulicDiameterM: 1.1e-3, openArea: 0.75 });
       return this.extend(shell, { lengthM: 0.15, diameterM: pipeD, name: `cat-out${group}` }, distance + 0.38, group);
     }
     if (kind === "resonator") {

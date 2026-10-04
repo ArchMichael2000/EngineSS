@@ -40,6 +40,7 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Chen–Flynn `C, A, B, Q` | 0.7, 0.005, 0.03, 0.0016 bar; Stribeck 0.3·e^(−Sp/4) | Warm motoring FMEP of about 1.05 bar at idle, 1.2 bar at 2000 rpm and 2.1 bar at 17 m/s. Checked against LS3 and F140 brake output (§4). |
 | Knock delay scale | 3 × Douaud–Eyzat | Premium fuel (ON 95) at CR 10.5–11 is knock-limited only at low-speed WOT, matching production calibrations. LS3: 7.6° retard at 1500 rpm, under 1° at 4600 rpm. |
 | Knock controller | +2.5 + 10·I on knock; +6·(I − 0.85) near the borderline; −0.3°/cycle recovery | Typical production strategy: fast retard, slow recovery. |
+| Catalyst | Laminar monolith resistance 32μL/(d_h²·OFA): 400 cpsi, d_h 1.1 mm, OFA 0.75, 0.15 m brick; conical-diffuser shell at 1.5× pipe diameter | Gives 3–10 dB insertion loss on the LS3 (published converter TL is about 5–10 dB; Selamet et al.). |
 | Plenum port loss | K 0.08 entering a runner, 0.9 leaving one | Radiused entry vs Borda–Carnot expansion (Idelchik). Brings the LS3 tuning trough to a realistic depth (VE 83 % at 5900 rpm). |
 | Turbine area | 0.126 mm² per litre·rpm at threshold speed (small 0.22, balanced 0.32, large 0.45 × redline) | Energy balance with η_t 0.68, T3 ≈ 1100 K, PR_t ≈ 0.75·PR_c. |
 | Compressor map | φ peak 0.04, design 0.09, choke 0.165; ψmax 0.56 | Exducer-based flow coefficient of modern ported-shroud stages. |
