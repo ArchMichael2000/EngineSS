@@ -418,6 +418,7 @@ export function PlaybackController({
                 ['IMEP', `${t.imepBar.toFixed(1)} bar`],
                 ['P peak', `${Math.round(t.peakPressureBar)} bar @ ${Math.round(t.peakPressureAngle)}°`],
                 ['Vol. eff.', `${Math.round(t.volumetricEfficiency * 100)} %`],
+                ['Knock retard', `${t.knockRetardDeg.toFixed(1)}° · ${t.knockEvents} events`],
                 ['SPL @ mic', `${t.splDb.toFixed(0)} dB`],
                 ['State', t.limiter ? 'LIMITER' : t.fuelCut ? 'FUEL CUT' : t.afterfire ? `${t.afterfire} pops` : 'firing'],
               ];

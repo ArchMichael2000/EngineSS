@@ -158,9 +158,11 @@ export class ExhaustNetwork {
         const stage: TurbineStage = {
           manifold,
           downpipe,
-          turbineArea: (turbo.turbineAreaMm2 * 1e-6) / turbines * Math.max(1, turbo.count) / Math.max(1, turbines),
+          // turbineAreaMm2 is the engine total; each stage carries its share of the turbos.
+          turbineArea: (turbo.turbineAreaMm2 * 1e-6) / turbines,
           wastegate: 0,
-          wastegateArea: (turbo.turbineAreaMm2 * 1e-6) * 0.6,
+          // Wastegate ports pass most of the flow at high speed: ~1.3 × the nozzle area.
+          wastegateArea: (1.3 * turbo.turbineAreaMm2 * 1e-6) / turbines,
           massFlow: 0,
           wastegateMassFlow: 0,
           inletPa: P_AMBIENT,

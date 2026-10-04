@@ -313,6 +313,12 @@ export interface PhysicalOverrides {
   idleRpm: number;
   inertiaKgM2: number;
   afterfireTendency: number;
+  /** Harmonic cam-lobe shape exponent γ (engine-sim convention): higher = gentler low-lift ramps, less overlap area. */
+  camLobeGamma: number;
+  /** Fuel octane (≈ RON) for the knock model. */
+  fuelOctane: number;
+  /** Closed-loop knock control on/off. */
+  knockControl: boolean;
   turboCount: number;
   compressorWheelMm: number;
   superchargerDisplacementL: number;
@@ -378,6 +384,8 @@ export interface PlaybackState {
     peakPressureBar: number;
     peakPressureAngle: number;
     volumetricEfficiency: number;
+    knockRetardDeg: number;
+    knockEvents: number;
     splDb: number;
   };
 }

@@ -86,7 +86,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     exhaustCenterlineDeg: ph.exhaustCenterlineDeg ?? camPreset.ecl,
     intakeLiftMm: ph.intakeLiftMm ?? inD * (inCount === 1 ? 0.27 : 0.29) * (1 + 0.1 * highRev),
     exhaustLiftMm: ph.exhaustLiftMm ?? exD * (exCount === 1 ? 0.3 : 0.31) * (1 + 0.1 * highRev),
-    gamma: 0.8,
+    gamma: ph.camLobeGamma ?? 0.8,
   };
 
   // ---- Intake
@@ -152,9 +152,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     redlineRpm: q.redline,
     revLimiterRpm: limiterRpm,
     revLimiter: adv.revLimiterType ?? "soft",
-    sparkAdvanceDeg: boosted
-      ? [[0, 8], [1000, 12], [2500, 18], [4000, 22], [6000, 25], [9000, 27]]
-      : [[0, 8], [1000, 14], [2500, 24], [4000, 29], [6000, 32], [9000, 33], [13000, 34]],
+    fuelOctane: ph.fuelOctane ?? 95,
+    knockControl: ph.knockControl ?? true,
     lambdaWot: boosted ? 0.8 : 0.87,
     lambdaPart: 1,
     overrunFuelCut: true,
@@ -259,11 +258,14 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
   const kind = fi.type ?? config.quick.aspiration;
   if (kind === "turbo") {
     const size = fi.turboSize === "small" || fi.turboSize === "large" ? fi.turboSize : "balanced";
-    const sizeScale = size === "small" ? 0.82 : size === "large" ? 1.22 : 1;
     const count = ph.turboCount ?? 1;
     const perTurboDisp = displacement / count;
-    // Exducer sized so design flow (φ = ṁ/(ρUD²) ≈ 0.085 at ~480 m/s) covers the engine's boosted airflow.
-    const wheel = ph.compressorWheelMm ?? clamp(62 * Math.sqrt(perTurboDisp / 2) * sizeScale, 36, 130);
+    // Exducer sized so the boosted airflow at redline lands at φ = ṁ/(ρUD²) ≈ 0.12 (right of peak
+    // efficiency, short of choke) at 470 m/s tip speed; small/large housings shift it ∓.
+    const boostKpa = (fi.maxBoost ?? 15) * 6.895;
+    const chargeDensity = ((101.3 + boostKpa) * 1000) / (287 * 320);
+    const redlineFlow = (0.95 * chargeDensity * (perTurboDisp / 1000) * redline) / 120;
+    const wheel = ph.compressorWheelMm ?? clamp(1000 * Math.sqrt(redlineFlow / (1.18 * 470 * 0.12)) * (size === "small" ? 0.94 : size === "large" ? 1.08 : 1), 32, 140);
     return {
       kind: "turbo",
       count,
@@ -271,7 +273,10 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
       compressorWheelDiameterMm: wheel,
       compressorBlades: 6,
       turbineBlades: 11,
-      turbineAreaMm2: 1100 * Math.pow(displacement / 2, 0.85) * sizeScale * sizeScale,
+      // Total turbine nozzle area sized so the exhaust energy at the full-boost speed drives the
+      // compressor: an energy balance (η_t 0.68, T3 ≈ 1100 K, PR_t ≈ 0.75·PR_c) gives ≈ 0.126 mm² per
+      // litre·rpm. Small housings reach full boost near 0.28 × redline, large ones near 0.52.
+      turbineAreaMm2: 0.126 * displacement * redline * (size === "small" ? 0.28 : size === "large" ? 0.52 : 0.38),
       rotorInertiaKgM2: 2.6e-5 * Math.pow(wheel / 50, 5) * count,
       targetBoostKpa: (fi.maxBoost ?? 15) * 6.895,
       wastegate: fi.wastegateEnabled ?? true,

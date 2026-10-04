@@ -286,10 +286,28 @@ export class Junction {
   /** Speed of sound of the node gas for the compliance (defaults to the first port's duct). */
   nodeSoundSpeed = 0;
   private readonly outgoing: Float64Array;
+  /** Mass flow node → duct at each port on the last solve (kg/s). */
+  private readonly portFlow: Float64Array;
+  private readonly portY: Float64Array;
+  private lossIntoDuct = 0;
+  private lossOutOfDuct = 0;
 
   constructor(ports: Port[], public volumeM3 = 0, public meanPressurePa = P_AMBIENT, public gamma = 1.4) {
     this.ports = ports;
     this.outgoing = new Float64Array(ports.length);
+    this.portFlow = new Float64Array(ports.length);
+    this.portY = new Float64Array(ports.length);
+  }
+
+  /**
+   * Port pressure-loss coefficients (Δp = K·ρu²/2). `intoDuct` applies to flow leaving the node
+   * into a duct (bellmouth / contraction entry, ~0.05–0.5); `outOfDuct` to flow leaving a duct
+   * into the node volume, where a sudden expansion dumps the jet's dynamic head (Borda–Carnot,
+   * K → 1). This is the dominant damping of ram and reversion pulses at a plenum or collector.
+   */
+  setPortLoss(intoDuct: number, outOfDuct: number): void {
+    this.lossIntoDuct = intoDuct;
+    this.lossOutOfDuct = outOfDuct;
   }
 
   /**
@@ -298,12 +316,21 @@ export class Junction {
    * @param conductance dmExt/dp (kg/(s·Pa), ≤ 0 for a feed that weakens as node pressure rises)
    */
   solve(mExt: number, dt: number, conductance = 0): void {
+    const lossy = this.lossIntoDuct > 0 || this.lossOutOfDuct > 0;
     let sumY = 0;
     let sumYP = 0;
     for (let k = 0; k < this.ports.length; k++) {
       const port = this.ports[k];
       const d = port.duct;
-      const Y = d.area / d.c;
+      let Y = d.area / d.c;
+      if (lossy) {
+        // Linearised quadratic loss on last sample's flow: R = K|ṁ|/(2ρA²), Y' = Y/(1 + Y·R).
+        const m = this.portFlow[k];
+        const K = m >= 0 ? this.lossIntoDuct : this.lossOutOfDuct;
+        const R = d.rho > 0 ? (K * Math.abs(m)) / (2 * d.rho * d.area * d.area) : 0;
+        Y = Y / (1 + Y * R);
+      }
+      this.portY[k] = Y;
       sumY += Y;
       sumYP += Y * arriving(port);
     }
@@ -321,9 +348,13 @@ export class Junction {
     for (let k = 0; k < this.ports.length; k++) {
       const port = this.ports[k];
       const pin = arriving(port);
-      this.outgoing[k] = p - pin;
-      send(port, p - pin);
-      out += (port.duct.area / port.duct.c) * (p - 2 * pin);
+      const m = this.portY[k] * (p - 2 * pin);
+      // Duct-end pressure sits below the node by the loss drop: p_end = p − R·ṁ = 2·pin + ṁ·c/A.
+      const pEnd = lossy ? 2 * pin + (m * port.duct.c) / port.duct.area : p;
+      this.portFlow[k] = m;
+      this.outgoing[k] = pEnd - pin;
+      send(port, pEnd - pin);
+      out += m;
     }
     this.netOutflow = out;
   }

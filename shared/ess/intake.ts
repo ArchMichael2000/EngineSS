@@ -70,6 +70,8 @@ export class IntakeSystem {
 
     if (this.hasPlenum) {
       this.plenum = new Junction(this.runners.map((duct) => ({ duct, end: "a" as const })), Math.max(0.2, it.plenumVolumeL) / 1000, P_AMBIENT, 1.4);
+      // Radiused runner entries (K ≈ 0.08); reversion jets into the plenum lose their head (K ≈ 0.9).
+      this.plenum.setPortLoss(0.08, 0.9);
     } else {
       this.stacks = this.runners.map((duct) => new ReservoirOrifice({ duct, end: "a" }, sampleRate));
     }
@@ -96,11 +98,14 @@ export class IntakeSystem {
 
   /** Geometric throttle plate open area for pedal 0..1 (butterfly: A = A0·(1 − cos φ / cos φ0)). */
   throttleArea(throttle: number, bypass: number): number {
+    return this.plateArea(throttle, this.throttleDiameter) + this.bypassMax * clamp(bypass, 0, 1) + 2e-6;
+  }
+
+  private plateArea(throttle: number, diameter: number): number {
     const phi0 = (6 * Math.PI) / 180;
     const phi = phi0 + (Math.PI / 2 - phi0) * clamp(throttle, 0, 1);
-    const a0 = (Math.PI / 4) * this.throttleDiameter * this.throttleDiameter;
-    const plate = a0 * (1 - Math.cos(phi) / Math.cos(phi0));
-    return Math.max(0, plate) + this.bypassMax * clamp(bypass, 0, 1) + 2e-6;
+    const a0 = (Math.PI / 4) * diameter * diameter;
+    return Math.max(0, a0 * (1 - Math.cos(phi) / Math.cos(phi0)));
   }
 
   /**
@@ -137,8 +142,12 @@ export class IntakeSystem {
         this.airbox.solve(-(this.boosted ? this.compressorDraw : mdot), dt, 0);
       }
     } else {
-      // ITBs / velocity stacks: each runner mouth is its own throttle and radiator.
-      const perRunner = cdA / Math.max(1, this.runners.length) * (this.runners.length > 1 ? this.runners.length / 1.6 : 1);
+      // ITBs / velocity stacks: each runner mouth is its own throttle (plate ≈ runner bore) and
+      // radiator; the idle-air bypass and plate leakage are shared across the stacks.
+      const n = Math.max(1, this.runners.length);
+      // ITB bores run ~10 % over the runner; wide open the stack is a bellmouth (Cd ≈ 0.95).
+      const itbArea = this.plateArea(throttle, 2.2 * this.runners[0].radius) + (this.bypassMax * clamp(bypass, 0, 1) + 2e-6) / n;
+      const perRunner = (0.7 + 0.25 * clamp(throttle, 0, 1)) * itbArea;
       const reservoir = this.boosted ? this.upstreamPa : this.airbox ? P_AMBIENT + this.airbox.pressure : P_AMBIENT;
       let acc = 0;
       let total = 0;

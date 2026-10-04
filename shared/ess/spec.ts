@@ -151,8 +151,10 @@ export interface CalibrationSpec {
   redlineRpm: number;
   revLimiterRpm: number;
   revLimiter: RevLimiterKind;
-  /** Spark advance at WOT, degrees BTDC, as rpm breakpoints. */
-  sparkAdvanceDeg: Array<[rpm: number, advance: number]>;
+  /** Fuel octane number (≈ RON) for the end-gas autoignition model. 91–98 pump, ~105 E85, 110+ race. */
+  fuelOctane: number;
+  /** Closed-loop knock control. Off = spark stays at MBT and the engine knocks audibly where the fuel can't take it. */
+  knockControl: boolean;
   /** Lambda at WOT (rich) and part load. */
   lambdaWot: number;
   lambdaPart: number;

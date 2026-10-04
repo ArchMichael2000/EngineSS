@@ -67,9 +67,11 @@ class Compressor {
   private readonly inertance: number;
   private readonly psiMax = 0.56;
   private readonly psiShutoff = 0.42;
-  private readonly phiPeak = 0.045;
-  private readonly phiChoke = 0.14;
-  private readonly phiDesign = 0.085;
+  // Exducer-based flow coefficient of modern automotive stages: surge-side peak ≈ 0.05,
+  // peak efficiency ≈ 0.09, choke ≈ 0.165.
+  private readonly phiPeak = 0.05;
+  private readonly phiChoke = 0.165;
+  private readonly phiDesign = 0.09;
 
   constructor(wheelDiameterM: number) {
     this.diameter = wheelDiameterM;
@@ -103,7 +105,8 @@ class Compressor {
     this.massFlow = clamp(this.massFlow, -0.8, 3);
     this.pressureRatio = Math.max(0.5, p2 / p1);
     const phi = this.phi(this.massFlow, tipSpeed, rho1);
-    this.efficiency = clamp(0.76 - 30 * Math.pow(phi - this.phiDesign, 2) - (phi < this.phiPeak ? 0.15 : 0), 0.3, 0.77);
+    // Efficiency island: ~0.78 at design, ~0.68 along the surge line, falling into choke.
+    this.efficiency = clamp(0.78 - 25 * Math.pow(phi - this.phiDesign, 2) - 0.08 * clamp((this.phiPeak - phi) / this.phiPeak, 0, 1), 0.3, 0.78);
     const work = CP_AIR * t1 * (Math.pow(Math.max(1, this.pressureRatio), (GAMMA_AIR - 1) / GAMMA_AIR) - 1);
     // Windage/disk friction keeps the wheel loaded even at zero flow (∝ ρU³D²).
     const windage = 0.004 * rho1 * Math.pow(Math.max(0, tipSpeed), 3) * this.diameter * this.diameter;
@@ -198,9 +201,11 @@ class Turbocharger implements ForcedInductionModel {
     const t1 = T_AMBIENT;
     const tip = this.omega * this.compressor.tipRadius;
     this.compressor.step(dt, tip, p1, t1, this.charge.pressure);
-    const J = this.t.rotorInertiaKgM2;
+    // `count` identical turbos in parallel: one modelled rotor, flows and powers scaled by count.
+    const n = Math.max(1, this.t.count);
+    const J = this.t.rotorInertiaKgM2 / n;
     const bearing = 2.5e-7 * this.omega * this.omega;
-    const torque = (turbinePower - this.compressor.power - bearing) / Math.max(200, this.omega);
+    const torque = (turbinePower / n - this.compressor.power - bearing) / Math.max(200, this.omega);
     this.omega = clamp(this.omega + (torque / J) * dt, 500, this.maxOmega * 1.05);
 
     // BOV: diaphragm referenced to manifold vacuum.
@@ -210,10 +215,10 @@ class Turbocharger implements ForcedInductionModel {
     this.bovFlow = this.t.blowOffValve ? orificeMassFlow(this.bovOpen * 4.5e-4, this.charge.pressure, this.charge.temperature, P_AMBIENT, T_AMBIENT) : 0;
 
     const throttleFlow = this.intake.throttleMassFlow;
-    this.charge.step(dt, this.compressor.massFlow, this.compressor.outletTemperature(t1), throttleFlow + this.bovFlow, 0.72);
+    this.charge.step(dt, n * this.compressor.massFlow, this.compressor.outletTemperature(t1), throttleFlow + this.bovFlow, 0.72);
     this.intake.upstreamPa = this.charge.pressure;
     this.intake.upstreamK = this.charge.temperature;
-    this.intake.compressorDraw = this.compressor.massFlow;
+    this.intake.compressorDraw = n * this.compressor.massFlow;
 
     // ---- Acoustics
     const shaftHz = this.omega / (2 * Math.PI);
@@ -245,7 +250,8 @@ class Turbocharger implements ForcedInductionModel {
     const qComp = this.compressor.massFlow / RHO_AIR;
     const surgeQdot = (qComp - this.prevCompressorQ) * this.fs;
     this.prevCompressorQ = qComp;
-    this.sourceVolumeAccelerations[0] = (tone + shaftTone + tipBand + whoosh) * 2 * Math.PI * Math.max(400, bpf * 0.5) * 0.02 + surgeQdot * 0.6;
+    // Parallel turbos are incoherent sources (slightly different shaft speeds): power adds, √n in amplitude.
+    this.sourceVolumeAccelerations[0] = ((tone + shaftTone + tipBand + whoosh) * 2 * Math.PI * Math.max(400, bpf * 0.5) * 0.02 + surgeQdot * 0.6) * Math.sqrt(n);
 
     // BOV vent jet.
     const qBov = this.bovFlow / RHO_AIR;

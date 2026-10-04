@@ -108,6 +108,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {slider('exhaustCenterlineDeg', 'Exhaust centreline', spec.cam.exhaustCenterlineDeg, 90, 130, 0.5, '° BTDC', 1)}
       {slider('intakeLiftMm', 'Intake lift', spec.cam.intakeLiftMm, 4, 18, 0.1, ' mm', 1)}
       {slider('exhaustLiftMm', 'Exhaust lift', spec.cam.exhaustLiftMm, 4, 18, 0.1, ' mm', 1)}
+      {slider('camLobeGamma', 'Lobe shape γ (ramp gentleness)', spec.cam.gamma, 0.5, 3, 0.05, '', 2)}
 
       {section('Induction')}
       {slider('plenumVolumeL', 'Plenum volume', spec.intake.plenumVolumeL, 0.3, 15, 0.1, ' L', 1)}
@@ -131,6 +132,8 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
       {section('Calibration')}
       {slider('idleRpm', 'Idle speed', spec.calibration.idleRpm, 400, 1600, 10, ' rpm')}
       {slider('afterfireTendency', 'Afterfire tendency', spec.calibration.afterfireTendency, 0, 1, 0.01, '', 2)}
+      {slider('fuelOctane', 'Fuel octane (RON)', spec.calibration.fuelOctane, 80, 115, 1)}
+      {toggle('knockControl', 'Knock control (off = audible knock)', spec.calibration.knockControl)}
 
       {fi.kind === 'turbo' && (<>
         {section('Turbocharger')}

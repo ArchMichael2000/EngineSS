@@ -54,6 +54,10 @@ export interface EngineTelemetry {
   /** Measured brake torque (dyno absorber in dyno mode), N·m. */
   brakeTorqueNm: number;
   volumetricEfficiency: number;
+  /** Mean knock-control spark retard across cylinders, degrees. */
+  knockRetardDeg: number;
+  /** Knock onsets since the simulator started. */
+  knockEvents: number;
   splDb: number;
 }
 
@@ -121,6 +125,8 @@ export class EngineSimulator {
   private ecuRpm = 800;
   private lastPedal = 0;
   private bypass = 0.3;
+  private slowRpm = 0;
+  private bypassActual = 0.3;
   private fuelCut = false;
   private limiterActive = false;
   private softCutFraction = 0;
@@ -146,7 +152,7 @@ export class EngineSimulator {
   private splN = 0;
   readonly telemetry: EngineTelemetry = {
     rpm: 0, mapKpa: 101, boostKpa: 0, torqueNm: 0, powerKw: 0, lambda: 1, egtC: 600, throttlePlate: 0,
-    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, splDb: 0,
+    fuelCut: false, limiter: false, afterfire: 0, turboRpm: 0, imepBar: 0, peakPressureBar: 0, peakPressureAngle: 0, brakeTorqueNm: 0, volumetricEfficiency: 0, knockRetardDeg: 0, knockEvents: 0, splDb: 0,
   };
 
   constructor(spec: EngineSpec, sampleRate: number, options: SimulatorOptions = {}) {
@@ -193,13 +199,26 @@ export class EngineSimulator {
     this.observer = new Observer(sampleRate, options.perspective ?? "exterior-rear", this.sourceDefs);
     this.setMonitorGain(options.monitorGainDb ?? 0);
 
-    // Idle-air feed-forward: valve area that passes the idle airflow (swept volume × idle speed at
-    // ~32 kPa MAP, VE ≈ 0.85) through a choked orifice (ṁ ≈ 0.78·A·p0/√(RT)·0.685).
-    // Valve overlap at 0.050" lift: big-overlap cams idle on far more air (reversion dilutes the
-    // charge), so their idle MAP target rises ~0.6 kPa per degree of overlap.
+    // Idle-air feed-forward from the energy balance at idle: gross indicated work must cover
+    // mechanical friction, accessories and pumping (≈ exhaust back-pressure − MAP), at the gross
+    // efficiency of retarded idle spark (~0.27), lowered by valve-overlap dilution. MAP follows
+    // from the airflow (VE ≈ 0.85), so a few fixed-point passes settle pumping and airflow together.
+    // The valve area then passes that air through a choked orifice (ṁ ≈ 0.78·A·p0/√(RT)·0.685).
     const overlap = Math.max(0, spec.cam.intakeDurationDeg / 2 - spec.cam.intakeCenterlineDeg) + Math.max(0, spec.cam.exhaustDurationDeg / 2 - spec.cam.exhaustCenterlineDeg);
-    this.idleMapTarget = 32_000 + 600 * overlap;
-    const idleAir = 0.85 * (this.idleMapTarget / (287.05 * 310)) * (this.displacementL / 1000) * (spec.calibration.idleRpm / 120);
+    const idleOmega = (spec.calibration.idleRpm / 60) * TWO_PI;
+    const vd = this.displacementL / 1000;
+    const cyclesPerSec = spec.calibration.idleRpm / 120;
+    const etaIdle = 0.27 / (1 + overlap / 30);
+    const friction = this.frictionTorque(spec.calibration.idleRpm);
+    let idleMap = 32_000;
+    let idleAir = 0;
+    for (let k = 0; k < 6; k++) {
+      const pumpingWork = Math.max(0, 104_000 - idleMap) * vd;
+      const grossPower = friction * idleOmega + pumpingWork * cyclesPerSec;
+      idleAir = (grossPower / (etaIdle * spec.fuelLhvMjKg * 1e6)) * spec.fuelStoichAfr;
+      idleMap = clamp((idleAir / (0.85 * vd * cyclesPerSec)) * 287.05 * 310, 18_000, 70_000);
+    }
+    this.idleMapTarget = idleMap;
     const idleArea = idleAir / (0.78 * (P_AMBIENT / Math.sqrt(287.05 * 298)) * 0.685);
     this.bypassAuthority = 1 + overlap / 25;
     this.intake.setBypassScale(this.bypassAuthority);
@@ -210,10 +229,12 @@ export class EngineSimulator {
     this.plenumGasMass = (Math.max(0.3, spec.intake.plenumVolumeL) / 1000) * 1.0;
     this.idleIntegral = this.idleFeedForward;
     this.bypass = this.idleFeedForward;
+    this.bypassActual = this.idleFeedForward;
 
     // Initial state: idle-like manifold pressure, warm cylinders.
     this.omega = (spec.calibration.idleRpm / 60) * TWO_PI;
     this.lastBlockRpm = spec.calibration.idleRpm;
+    this.slowRpm = spec.calibration.idleRpm;
     this.ecuRpm = spec.calibration.idleRpm;
     this.controls.targetRpm = spec.calibration.idleRpm;
     this.intake.initialise(34_000);
@@ -311,6 +332,7 @@ export class EngineSimulator {
       this.plenumBurned = Math.max(0, this.plenumBurned + cyl.spilledToPlenum - cyl.takenFromPlenum);
       torque += cyl.torque;
       this.pressureRates[i] = cyl.pressureRate;
+      if (cyl.knocked) this.telemetry.knockEvents++;
       if (cyl.exhaustMassFlow > 0) {
         this.exhaust.noteCylinderFlow(i, cyl.exhaustMassFlow, cyl.exhaustGasTemp);
         this.blockExhaustFlow += cyl.exhaustMassFlow;
@@ -332,7 +354,7 @@ export class EngineSimulator {
 
     // ---- Forced induction, intake, exhaust networks
     if (this.fi) this.fi.step(dt, rpm, this.omega, this.controls.throttle);
-    this.intake.step(this.throttlePlate(), this.bypass, dt);
+    this.intake.step(this.throttlePlate(), this.bypassActual, dt);
     this.exhaust.step(dt);
     for (let i = 0; i < ducts.length; i++) ducts[i].commit();
 
@@ -360,7 +382,8 @@ export class EngineSimulator {
     const lim = this.spec.calibration.revLimiter;
     const fuelEnabled = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && !(cut && lim === "soft");
     const sparkEnabled = !(this.limiterActive && lim === "hard-ignition-cut");
-    return { sparkAdvanceDeg: this.sparkAdvance, lambda: this.lambdaTarget, fuelEnabled, sparkEnabled };
+    const cal = this.spec.calibration;
+    return { sparkAdvanceDeg: this.sparkAdvance, lambda: this.lambdaTarget, fuelEnabled, sparkEnabled, fuelOctane: cal.fuelOctane, knockControl: cal.knockControl };
   }
 
   private throttlePlate(): number {
@@ -370,11 +393,16 @@ export class EngineSimulator {
   }
 
   private frictionTorque(rpm: number): number {
-    // Mechanical FMEP (bar) ~ 0.55 + 0.11·(N/1000) + 0.04·(N/1000)²  (Heywood §13.5 / Chen–Flynn form).
-    const k = rpm / 1000;
-    const fmep = (0.9 + 0.12 * k + 0.045 * k * k) * 1e5;
+    // Chen–Flynn mechanical FMEP: C + A·Pmax + B·Sp + Q·Sp² (bar, Sp mean piston speed in m/s).
+    // plus a Stribeck boundary-lubrication term that lifts valvetrain/ring friction at low piston
+    // speed. Calibrated to warm SI motoring data: ~1.05 bar at idle, ~1.2 bar at 2000 rpm, ~2.1 bar at 17 m/s.
+    const sp = (2 * this.spec.strokeMm * 1e-3 * rpm) / 60;
+    const pmax = Math.max(this.telemetry.peakPressureBar, 20);
+    const fmep = (0.7 + 0.005 * pmax + 0.03 * sp + 0.0016 * sp * sp + 0.3 * Math.exp(-sp / 4)) * 1e5;
     const vd = this.displacementL / 1000;
-    const accessory = 6 + 1.6 * this.displacementL + 0.0012 * rpm;
+    // Driven accessories (alternator, water/oil/fuel pumps, steering, A/C idle load) scale with the
+    // engine they serve: ~16 N·m on a 6 L V8 at idle, ~3 N·m on a 1 L motorcycle engine.
+    const accessory = (2.6 + 0.00035 * rpm) * this.displacementL;
     return (fmep * vd) / (4 * Math.PI) + accessory;
   }
 
@@ -395,10 +423,10 @@ export class EngineSimulator {
   private blockUpdate(): void {
     const cal = this.spec.calibration;
     const instantaneous = this.rpm;
-    // ECU speed: averaged over ~2 crank revolutions (event-based tooth timing), not the
-    // instantaneous speed that ripples with every firing pulse.
+    // ECU speed: segment timing over one firing interval (event-based tooth timing), which strips
+    // the firing ripple without the lag of a multi-revolution average.
     const blockSecs = BLOCK / this.sampleRate;
-    const tau = clamp(120 / Math.max(300, instantaneous), 0.01, 0.2);
+    const tau = clamp((120 / Math.max(150, instantaneous)) / this.cylinders.length, 0.004, 0.12);
     this.ecuRpm += (instantaneous - this.ecuRpm) * (1 - Math.exp(-blockSecs / tau));
     const rpm = this.ecuRpm;
     const pedal = this.controls.throttle;
@@ -409,9 +437,14 @@ export class EngineSimulator {
     const idleErr = (cal.idleRpm - rpm) / cal.idleRpm;
     const rpmRate = (rpm - this.lastBlockRpm) / blockSec;
     this.lastBlockRpm = rpm;
+    // Slow speed estimate (~0.3 s) for the adaptation gate: a loping cam's cycle-to-cycle swings
+    // must not freeze the integrator, only a genuine fall from speed should.
+    const prevSlow = this.slowRpm;
+    this.slowRpm += (rpm - this.slowRpm) * (1 - Math.exp(-blockSec / 0.3));
+    const slowRate = (this.slowRpm - prevSlow) / blockSec;
     if (pedal < 0.03) {
       // Integrate only near idle (anti-windup during the fall from high speed).
-      const quasiSteady = Math.abs(rpmRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut;
+      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut;
       if (this.controls.mode === "free" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + idleErr * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
       const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd;
       this.bypass = clamp(this.idleIntegral + idleErr * this.idleGains.kp + damping, this.idleFeedForward * 0.12, 1);
@@ -425,6 +458,8 @@ export class EngineSimulator {
     this.sinceLift = pedal < 0.03 ? this.sinceLift + blockSec : 0;
     this.lastPedal = pedal;
     if (pedal < 0.03) this.bypass = Math.max(this.bypass, this.dashpot);
+    // Idle valve / electronic throttle actuator: ~60 ms first-order response to the command.
+    this.bypassActual += (this.bypass - this.bypassActual) * (1 - Math.exp(-blockSec / 0.06));
 
 
     // Decel fuel cut-off: armed only well above idle, resumes before idle (no hunting).
@@ -443,7 +478,7 @@ export class EngineSimulator {
     // Rev limiter.
     const lim = cal.revLimiterRpm;
     if (cal.revLimiter === "soft") {
-      this.softCutFraction = clamp((rpm - (lim - 120)) / 160, 0, 0.85);
+      this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 0.85);
       this.limiterActive = this.softCutFraction > 0;
       for (let i = 0; i < this.sparkCuts.length; i++) this.sparkCuts[i] = this.rng.next() < this.softCutFraction ? 1 : 0;
     } else {
@@ -451,8 +486,9 @@ export class EngineSimulator {
       else if (this.limiterActive && rpm < lim - 180) this.limiterActive = false;
     }
 
-    // Spark: MBT for the predicted burn, capped by the calibration's knock-limited WOT curve
-    // (the cap only binds at high load; part load runs at MBT, as production calibrations do).
+    // Spark: MBT for the measured burn. Knock limits are found per cylinder by the end-gas
+    // autoignition model and its knock controller (see Cylinder.integrateKnock), so compression,
+    // boost, charge temperature, bore and fuel set the knock-limited advance physically.
     const map = this.intake.mapPa / 1000;
     // Closed-loop phasing: MBT from the burn duration each cylinder actually had last cycle.
     const c0 = this.cylinders[0];
@@ -460,11 +496,12 @@ export class EngineSimulator {
     for (const c of this.cylinders) duration += c.lastBurnDuration;
     duration /= this.cylinders.length;
     const mbt = mbtAdvance(duration);
-    const knockLimit = lerpTable(cal.sparkAdvanceDeg, rpm) + clamp((95 - map) / 60, 0, 1) * 25 - Math.max(0, map - 105) * 0.07;
-    let advance = Math.min(mbt, knockLimit);
+    let advance = Math.min(mbt, 45);
     if (cal.revLimiter === "soft" && this.limiterActive) advance -= 12 * this.softCutFraction;
     // Idle: retarded base spark holds a torque reserve; spark moves fast to regulate speed.
-    if (pedal < 0.03 && rpm < cal.idleRpm + 500) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, Math.min(advance, 28));
+    // Applies at every speed with the pedal closed, so coasting down onto idle is continuous
+    // (no jump from retarded idle spark to MBT at some speed threshold).
+    if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, Math.min(advance, 28));
     this.sparkAdvance = clamp(advance, -5, 48);
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
 
@@ -497,7 +534,9 @@ export class EngineSimulator {
     let ppk = 0;
     let lpp = 0;
     let trapped = 0;
+    let retard = 0;
     for (const c of this.cylinders) {
+      retard += c.knockRetard;
       imep += c.lastImep;
       ppk += c.lastPeakPressure;
       lpp += c.lastPeakAngle;
@@ -508,6 +547,7 @@ export class EngineSimulator {
     t.imepBar += (imep / nc / 1e5 - t.imepBar) * s;
     t.peakPressureBar += (ppk / nc / 1e5 - t.peakPressureBar) * s;
     t.peakPressureAngle += (lpp / nc - t.peakPressureAngle) * s;
+    t.knockRetardDeg = retard / nc;
     const idealAir = (P_AMBIENT / (287.05 * 298.15)) * c0.sweptVolume;
     t.volumetricEfficiency += (trapped / nc / idealAir - t.volumetricEfficiency) * s;
     const load = this.blockLoad / BLOCK;

@@ -55,6 +55,17 @@ export class CamLobe {
   }
 }
 
+/**
+ * Douaud–Eyzat delays with an isentropic end-gas temperature predict onset early for modern
+ * fast-burn chambers (charge motion, wall heat loss from the end gas); the delay is scaled so
+ * premium fuel (ON 95) at CR ≈ 10.5–11 is knock-limited only at low-speed WOT, as production
+ * calibrations are.
+ */
+export let KNOCK_TAU_SCALE = 3;
+export function setKnockTauScale(v: number): void {
+  KNOCK_TAU_SCALE = v;
+}
+
 /** Discharge coefficient vs L/D, from EngineLab parts/camshafts.yaml flow-bench style curves. */
 const CD_TABLE: ReadonlyArray<readonly [number, number]> = [
   [0, 0],
@@ -87,6 +98,10 @@ export interface CombustionCommand {
   lambda: number;
   fuelEnabled: boolean;
   sparkEnabled: boolean;
+  /** Fuel octane number for the end-gas autoignition delay (Douaud–Eyzat). */
+  fuelOctane: number;
+  /** Per-cylinder closed-loop knock control (retard on knock, slow recovery). */
+  knockControl: boolean;
 }
 
 export class Cylinder {
@@ -143,6 +158,25 @@ export class Cylinder {
   private wiebeA = 5;
   private wiebeM = 2;
 
+  // Knock: Livengood–Wu integral of the end gas, compressed isentropically from the spark state.
+  /** Spark retard this cylinder's knock controller currently applies, degrees. */
+  knockRetard = 0;
+  /** Autoignition integral reached by 90 % burn (≥ 1 → knock) on the last cycle. */
+  lastKnockIntegral = 0;
+  /** Unburned fraction at knock onset on the last cycle (0 = no knock). */
+  lastKnockIntensity = 0;
+  /** Set true the sample knock onset occurs; consumed by the engine. */
+  knocked = false;
+  private knockIntegral = 0;
+  private knockPending = false;
+  private sparkPressure = P_AMBIENT;
+  private sparkTemperature = 600;
+  private knockAmp = 0;
+  private knockPhase = 0;
+  private knockOmega = 0;
+  private knockDecay = 0;
+  private effectiveAdvance = 0;
+
   // Outputs per sample
   /** Waves leaving the valve ends into the exhaust primary (end a) and intake runner (end b). */
   exhaustSend = 0;
@@ -166,6 +200,8 @@ export class Cylinder {
   lastImep = 0;
   /** Crank angle of peak pressure, degrees after firing TDC (MBT ≈ 14–18°). */
   lastPeakAngle = 0;
+  /** Burned-gas (residual + EGR) mass fraction of the charge at the last spark. */
+  lastResidualFraction = 0;
   /** Burn duration (Wiebe Δθ) the last combustion event used, before cycle-to-cycle scatter. */
   lastBurnDuration = 70;
   private cyclePeakAngle = 0;
@@ -245,6 +281,7 @@ export class Cylinder {
     this.takenFromPlenum = 0;
     this.intakeClosed = false;
     this.exhaustClosed = false;
+    this.knocked = false;
     const prevPressure = this.pressure;
     const prev = this.prevAlpha;
     this.prevAlpha = alphaDeg;
@@ -257,7 +294,8 @@ export class Cylinder {
     this.volume = newVolume;
 
     // ---- Spark event (crossing of the spark angle, handling the 720° wrap)
-    const sparkAngle = 720 - combustion.sparkAdvanceDeg;
+    this.effectiveAdvance = combustion.sparkAdvanceDeg - (combustion.knockControl ? this.knockRetard : 0);
+    const sparkAngle = 720 - this.effectiveAdvance;
     if (crossed(prev, alphaDeg, sparkAngle)) this.ignite(combustion, omega, dilutionCovGain);
 
     // ---- Combustion heat release (Wiebe)
@@ -279,10 +317,12 @@ export class Cylinder {
         this.massFuel -= fuelBurn;
         this.massAir -= airBurn;
         this.massBurned += fuelBurn + airBurn;
+        if (this.knockPending) this.integrateKnock(x, dt, combustion);
         if (x > 0.999) this.burning = false;
       } else if (exhaustOpening && theta > 0) {
         // Exhaust valve opened before the burn completed: remaining fuel leaves unburned (late/partial burn).
         this.burning = false;
+        if (this.knockPending) this.finishKnockCycle(0, combustion);
       }
     }
 
@@ -333,6 +373,12 @@ export class Cylinder {
 
     this.updateState();
     this.pressureRate = (this.pressure - prevPressure) / dt;
+    if (this.knockAmp > 1) {
+      // Knock ringing: first circumferential chamber mode, d/dt of Δp·e^(−t/τ)·sin(ωt).
+      this.knockPhase += this.knockOmega * dt;
+      this.pressureRate += this.knockAmp * this.knockOmega * Math.cos(this.knockPhase);
+      this.knockAmp *= this.knockDecay;
+    }
     this.torque = (this.pressure - P_AMBIENT) * this.area * dsdth;
     // Cycle bookkeeping (IMEP over the 720° cycle, peak pressure)
     if (this.pressure > this.cyclePeak) {
@@ -352,6 +398,7 @@ export class Cylinder {
   private ignite(cmd: CombustionCommand, omega: number, dilutionCovGain: number): void {
     this.sparked = true;
     const residualFraction = this.massBurned / Math.max(1e-12, this.mass);
+    this.lastResidualFraction = residualFraction;
     if (!cmd.sparkEnabled || this.massFuel <= 1e-9) {
       this.misfired = true;
       this.burning = false;
@@ -379,9 +426,52 @@ export class Cylinder {
     }
     const burnableFuel = Math.min(this.massFuel, this.massAir / this.params.stoichAfr);
     this.burnQ = burnableFuel * this.params.fuelLhv * this.burnEfficiency;
-    this.burnStartDeg = 720 - cmd.sparkAdvanceDeg;
+    this.burnStartDeg = 720 - this.effectiveAdvance;
     this.burnFraction = 0;
     this.burning = true;
+    this.sparkPressure = this.pressure;
+    this.sparkTemperature = this.temperature;
+    this.knockIntegral = 0;
+    this.knockPending = true;
+  }
+
+  /**
+   * Livengood–Wu: ∫dt/τ over the end gas until 90 % burn, τ from Douaud–Eyzat,
+   * τ[ms] = 17.68·(ON/100)^3.402·p[atm]^−1.7·exp(3800/Tu), with the unburned temperature from
+   * isentropic compression of the spark-time charge (γu ≈ 1.32). Onset (integral ≥ 1) rings the
+   * chamber with an amplitude set by the end-gas fraction still unburned.
+   */
+  private integrateKnock(x: number, dt: number, cmd: CombustionCommand): void {
+    const p = Math.max(this.pressure, 1e4);
+    const tu = this.sparkTemperature * Math.pow(p / Math.max(1e4, this.sparkPressure), 0.2424);
+    const tauS = KNOCK_TAU_SCALE * 17.68e-3 * Math.pow(cmd.fuelOctane / 100, 3.402) * Math.pow(p / P_AMBIENT, -1.7) * Math.exp(3800 / tu);
+    this.knockIntegral += dt / tauS;
+    if (this.knockIntegral >= 1) {
+      this.finishKnockCycle(1 - x, cmd);
+      // Draper's first circumferential mode f = 1.84·c/(πB) in the burned gas.
+      const c = Math.sqrt(1.3 * R_AIR * this.temperature);
+      const f = Math.min((1.84 * c) / (Math.PI * this.params.boreM), 20000);
+      this.knockOmega = 2 * Math.PI * f;
+      this.knockPhase = 0;
+      this.knockAmp = 0.5 * (1 - x) * p;
+      // Q ≈ 18: τ = Q/(πf).
+      this.knockDecay = Math.exp((-dt * Math.PI * f) / 18);
+      this.knocked = true;
+    } else if (x >= 0.9) {
+      this.finishKnockCycle(0, cmd);
+    }
+  }
+
+  private finishKnockCycle(intensity: number, cmd: CombustionCommand): void {
+    this.knockPending = false;
+    this.lastKnockIntegral = intensity > 0 ? Math.max(1, this.knockIntegral) : this.knockIntegral;
+    this.lastKnockIntensity = intensity;
+    if (!cmd.knockControl) return;
+    // Production-style controller: fast retard on knock, a little on near-borderline cycles, slow recovery.
+    if (intensity > 0) this.knockRetard += 2.5 + 10 * intensity;
+    else if (this.knockIntegral > 0.85) this.knockRetard += 6 * (this.knockIntegral - 0.85);
+    else this.knockRetard -= 0.3;
+    this.knockRetard = clamp(this.knockRetard, 0, 30);
   }
 
   /**

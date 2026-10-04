@@ -3,7 +3,9 @@
  * Generates WAV audio buffers from engine configurations and uploads to storage.
  */
 import type { EngineConfiguration } from "../shared/engineTypes";
+import { isPhysicalSoundProfile } from "../shared/engineTypes";
 import { generateEnginePcm } from "../shared/engineSoundModel";
+import { renderEssPcm } from "../shared/ess/render";
 import { updateExportJob } from "./db";
 import { storagePut } from "./storage";
 
@@ -16,13 +18,10 @@ export async function renderAndUpload(
   try {
     await updateExportJob(jobId, { status: "processing" });
 
-    const sampleRate = 44100;
-    const { left, right } = generateEnginePcm(config, {
-      durationSec,
-      sampleRate,
-      normalize: true,
-      profile: "sweep",
-    });
+    const sampleRate = 48000;
+    const { left, right } = isPhysicalSoundProfile(config.soundProfile)
+      ? renderEssPcm(config, { durationSec, sampleRate, normalize: true, program: "sweep" })
+      : generateEnginePcm(config, { durationSec, sampleRate, normalize: true, profile: "sweep" });
 
     const wavBuffer = encodeWav(left, right, sampleRate, 2);
     const filename = `exports/engine-${config.quick.layout}-${config.quick.cylinderCount}cyl-${jobId}.wav`;
