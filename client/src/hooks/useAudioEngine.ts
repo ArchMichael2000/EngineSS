@@ -1,7 +1,8 @@
 ﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import { AUDIO_ENGINE_MODEL_VERSION, getAudioEngine, AudioEngine } from '@/lib/audioEngine';
-import type { EngineConfiguration, PlaybackState } from '../../../shared/engineTypes';
-import { DEFAULT_ENGINE_CONFIG, normalizeSoundProfile } from '../../../shared/engineTypes';
+import type { EngineConfiguration, ListenerPerspective, PlaybackState } from '../../../shared/engineTypes';
+import type { DriveMode, StemGains } from '../../../shared/ess/engine';
+import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from '../../../shared/engineTypes';
 
 export function useAudioEngine() {
   const engineRef = useRef<AudioEngine | null>(null);
@@ -39,12 +40,18 @@ export function useAudioEngine() {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+    // Telemetry arrives about 23 times a second; re-render only when the engine state actually changed.
+    let last = '';
     const poll = () => {
       const engine = ensureEngine();
       if (engine) {
         const state = engine.getState();
-        setPlaybackState(state);
-        setIsPlaying(state.isPlaying);
+        const key = `${state.isPlaying}|${state.throttle}|${state.load}|${state.targetRpm}|${state.driveMode}|${state.rpm}|${state.boost}`;
+        if (key !== last) {
+          last = key;
+          setPlaybackState(state);
+          setIsPlaying(state.isPlaying);
+        }
       }
       animFrameRef.current = requestAnimationFrame(poll);
     };
@@ -91,8 +98,10 @@ export function useAudioEngine() {
     setPlaybackState(prev => ({ ...prev, isPlaying: false, rpm: 0 }));
   }, [ensureEngine, stopStatePolling]);
 
+  // Throttle and load update the UI immediately; the poll would otherwise lag a frame behind the input.
   const setThrottle = useCallback((value: number) => {
     ensureEngine().setThrottle(value);
+    setPlaybackState((prev) => ({ ...prev, throttle: Math.max(0, Math.min(1, value)) }));
   }, [ensureEngine]);
 
   const setRPM = useCallback((value: number) => {
@@ -101,10 +110,11 @@ export function useAudioEngine() {
 
   const setLoad = useCallback((value: number) => {
     ensureEngine().setLoad(value);
+    setPlaybackState((prev) => ({ ...prev, load: Math.max(0, Math.min(1, value)) }));
   }, [ensureEngine]);
 
   const updateConfig = useCallback((newConfig: EngineConfiguration) => {
-    const normalizedConfig = { ...newConfig, soundProfile: normalizeSoundProfile(newConfig.soundProfile) };
+    const normalizedConfig = { ...newConfig, soundProfile: CURRENT_SOUND_PROFILE };
     setConfig(normalizedConfig);
     const engine = ensureEngine();
     if (isPlaying) {
@@ -112,8 +122,31 @@ export function useAudioEngine() {
     }
   }, [ensureEngine, isPlaying]);
 
-  const triggerBOV = useCallback(() => {
-    ensureEngine().triggerBOV();
+  const setDriveMode = useCallback((mode: DriveMode) => {
+    ensureEngine().setDriveMode(mode);
+  }, [ensureEngine]);
+
+  const setPerspective = useCallback((perspective: ListenerPerspective) => {
+    ensureEngine().setPerspective(perspective);
+    setConfig((prev) => ({ ...prev, listener: { ...prev.listener, perspective } }));
+  }, [ensureEngine]);
+
+  const setIgnition = useCallback((on: boolean) => {
+    ensureEngine().setIgnition(on);
+  }, [ensureEngine]);
+
+  const shift = useCallback((dir: 1 | -1) => {
+    ensureEngine().shift(dir);
+  }, [ensureEngine]);
+
+  const [vehicleOptions, setVehicleOptionsState] = useState({ autoShift: true, launchControl: false, brake: 0 });
+  const setVehicleOptions = useCallback((options: Partial<{ autoShift: boolean; launchControl: boolean; brake: number }>) => {
+    ensureEngine().setVehicleOptions(options);
+    setVehicleOptionsState((prev) => ({ ...prev, ...options }));
+  }, [ensureEngine]);
+
+  const setStemGains = useCallback((stems: Partial<StemGains>) => {
+    ensureEngine().setStemGains(stems);
   }, [ensureEngine]);
 
   return {
@@ -128,7 +161,13 @@ export function useAudioEngine() {
     setRPM,
     setLoad,
     updateConfig,
-    triggerBOV,
+    setDriveMode,
+    setPerspective,
+    setStemGains,
+    shift,
+    setIgnition,
+    vehicleOptions,
+    setVehicleOptions,
     engine: engineRef.current,
   };
 }

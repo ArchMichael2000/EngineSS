@@ -36,6 +36,13 @@ jobs:
         env:
           GITHUB_PAGES: "true"
 
+      - name: Check the legacy engine is not shipped
+        run: |
+          if grep -rl "combustion-processor" dist; then
+            echo "The legacy (v15) worklet reached the build; see legacy/README.md" >&2
+            exit 1
+          fi
+
       - name: Add SPA fallback
         run: cp dist/index.html dist/404.html
 

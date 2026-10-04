@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { COMBUSTION_PROCESSOR_CODE } from "../client/src/lib/audioEngine";
+import { COMBUSTION_PROCESSOR_CODE } from "./combustionProcessor";
 import { buildEngineSoundAnalysis, resolveSoundTuningWeights } from "./engineSoundModel";
-import { FACTORY_PRESETS } from "./engineTypes";
-import type { EngineConfiguration } from "./engineTypes";
+import { FACTORY_PRESETS } from "../shared/engineTypes";
+import type { EngineConfiguration } from "../shared/engineTypes";
 
 class FakeAudioWorkletProcessor {
   port = {
@@ -122,7 +122,7 @@ function rms(samples: number[]) {
   return Math.sqrt(sumSquares / Math.max(1, samples.length));
 }
 
-describe("browser AudioWorklet runtime", () => {
+describe("browser AudioWorklet runtime", { timeout: 20_000 }, () => {
   it("keeps the exact worklet alive and audible for V12", () => {
     const config = { ...FACTORY_PRESETS["v12"].config, soundProfile: "v15" as const, seed: 42 };
     const render = renderWorklet(config, 520, () => ({

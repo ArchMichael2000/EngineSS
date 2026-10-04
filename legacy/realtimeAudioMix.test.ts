@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FACTORY_PRESETS } from "./engineTypes";
+import { FACTORY_PRESETS } from "../shared/engineTypes";
 import { resolveLiveOutputGain, resolveRealtimeAudioMixProfile } from "./realtimeAudioMix";
 
 describe("realtime audio mix profile", () => {

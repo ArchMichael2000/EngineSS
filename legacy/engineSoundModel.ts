@@ -1,7 +1,6 @@
-﻿import type { EngineConfiguration, EngineLayout, CrankshaftType } from "./engineTypes";
+﻿import type { EngineConfiguration, EngineLayout, CrankshaftType } from "../shared/engineTypes";
+import { DEFAULT_SOUND_TUNING_WEIGHTS, getDefaultFiringOrder } from "../shared/engineTypes";
 import {
-  DEFAULT_SOUND_TUNING_WEIGHTS,
-  getDefaultFiringOrder,
   isAirwashControlSoundProfile,
   isBaselineSoundProfile,
   isClaritySoundProfile,
@@ -11,9 +10,9 @@ import {
   isStaticCleanSoundProfile,
   isStereoStabilitySoundProfile,
   normalizeSoundProfile,
-} from "./engineTypes";
-import type { SoundProfile } from "./engineTypes";
-import type { SoundTuningWeights } from "./engineTypes";
+} from "./soundProfiles";
+import type { SoundProfile } from "../shared/engineTypes";
+import type { SoundTuningWeights } from "../shared/engineTypes";
 
 export interface FiringEventProfile {
   cylinder: number;

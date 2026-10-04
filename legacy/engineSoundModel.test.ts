@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "vitest";
-import { DEFAULT_ENGINE_CONFIG, FACTORY_PRESETS } from "./engineTypes";
+import { DEFAULT_ENGINE_CONFIG, FACTORY_PRESETS } from "../shared/engineTypes";
 import {
   buildEngineSoundAnalysis,
   buildEngineAcousticProfile,

@@ -33,6 +33,7 @@ export type IdleCharacter = 'smooth' | 'lumpy' | 'aggressive' | 'lopey';
 
 /** Sound model selection for A/B testing and regression control. */
 export type SoundProfile =
+  | 'v16'
   | 'v15'
   | 'v14'
   | 'v13'
@@ -46,110 +47,9 @@ export type SoundProfile =
   | 'clean'
   | 'baseline';
 
-export type CanonicalSoundProfile = 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
+export type CanonicalSoundProfile = 'v16' | 'v15' | 'v14' | 'v13' | 'v12' | 'v11' | 'v10' | 'v9' | 'v8' | 'v0';
 
-export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v15';
-
-export const SOUND_PROFILE_HISTORY: Array<{
-  value: CanonicalSoundProfile;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'v15',
-    label: 'v15 - Clean Handoff',
-    description: 'Current ESS model with stricter air-noise removal and stable live preset switching.',
-  },
-  {
-    value: 'v14',
-    label: 'v14 - Static Clean',
-    description: 'Saved static-clean model with randomized hiss removed from the main engine path.',
-  },
-  {
-    value: 'v13',
-    label: 'v13 - Airwash Control',
-    description: 'Saved airwash-control model with pressure-gated clarity layers.',
-  },
-  {
-    value: 'v12',
-    label: 'v12 - Induction Quality',
-    description: 'Saved induction-quality model with reduced airflow wash and more natural turbo/supercharger accessory layers.',
-  },
-  {
-    value: 'v11',
-    label: 'v11 - Stereo Stability',
-    description: 'Headphone-safe dense-bank stereo and smoother high-RPM output.',
-  },
-  {
-    value: 'v10',
-    label: 'v10 - Cylinder Balance',
-    description: 'Current ESS model with cylinder loudness compensation and broader control response.',
-  },
-  {
-    value: 'v9',
-    label: 'v9 - Saved Best',
-    description: 'Saved clarity-output-v9-realtime model before the cylinder balance pass.',
-  },
-  {
-    value: 'v8',
-    label: 'v8 - Depth Reference',
-    description: 'Filtered depth model kept for comparison.',
-  },
-  {
-    value: 'v0',
-    label: 'v0 - Baseline',
-    description: 'Original baseline comparison model.',
-  },
-];
-
-export function normalizeSoundProfile(soundProfile: SoundProfile | undefined): CanonicalSoundProfile {
-  if (soundProfile === 'baseline') return 'v0';
-  if (soundProfile === 'clean') return 'v8';
-  if (soundProfile === 'clarity') return 'v9';
-  return soundProfile ?? CURRENT_SOUND_PROFILE;
-}
-
-export function isBaselineSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  return normalizeSoundProfile(soundProfile) === 'v0';
-}
-
-export function isClaritySoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v9' || normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
-}
-
-export function isCurrentSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  return normalizeSoundProfile(soundProfile) === CURRENT_SOUND_PROFILE;
-}
-
-export function isCylinderBalanceSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v10' || normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
-}
-
-export function isStereoStabilitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v11' || normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
-}
-
-export function isAccessoryQualitySoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v12' || normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
-}
-
-export function isAirwashControlSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v13' || normalized === 'v14' || normalized === 'v15';
-}
-
-export function isStaticCleanSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  const normalized = normalizeSoundProfile(soundProfile);
-  return normalized === 'v14' || normalized === 'v15';
-}
-
-export function isCleanHandoffSoundProfile(soundProfile: SoundProfile | undefined): boolean {
-  return normalizeSoundProfile(soundProfile) === 'v15';
-}
+export const CURRENT_SOUND_PROFILE: CanonicalSoundProfile = 'v16';
 
 /** Derived sound-shaping weights learned from reference captures. */
 export interface SoundTuningWeights {
@@ -210,7 +110,14 @@ export interface QuickBuildConfig {
   exhaustCharacter: ExhaustCharacter;
   idleCharacter: IdleCharacter;
   redline: number; // RPM
+  /** Fuel / combustion system (default gasoline spark ignition). */
+  fuel?: FuelType;
+  /** Working cycle (default four-stroke). Rotary: cylinderCount = rotors, displacement = rotors × chamber. */
+  cycle?: EngineCycleType;
 }
+
+export type FuelType = 'gasoline' | 'diesel';
+export type EngineCycleType = 'four-stroke' | 'two-stroke' | 'rotary';
 
 /**
  * Forced induction configuration.
@@ -248,6 +155,120 @@ export interface AdvancedConfig {
   intakeRunnerLengthCm: number;
 }
 
+/** Crank strategies understood by the physical core (superset of the Quick Build choices). */
+export type PhysicalCrankType = 'even-fire' | 'cross-plane' | 'flat-plane' | 'common-pin' | 'single-pin' | 'custom';
+export type CollectorType = 'bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
+export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
+export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'glasspack' | 'none';
+export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
+export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe';
+
+/**
+ * Detailed physical overrides for the v16 core. Every field is optional; anything
+ * omitted is filled with family-typical values by resolveEngineSpec().
+ */
+export interface PhysicalOverrides {
+  crankType: PhysicalCrankType;
+  /** Throw angle per cylinder, degrees (crankType 'custom'). */
+  crankPinAnglesDeg: number[];
+  /** Firing TDC per cylinder in the 720° cycle (overrides crank geometry). */
+  fireAnglesDeg: number[];
+  vrAngleDeg: number;
+  rodLengthMm: number;
+  compressionRatio: number;
+  valvesPerCylinder: 2 | 3 | 4 | 5;
+  intakeValveDiameterMm: number;
+  exhaustValveDiameterMm: number;
+  intakeDurationDeg: number;
+  exhaustDurationDeg: number;
+  intakeCenterlineDeg: number;
+  exhaustCenterlineDeg: number;
+  intakeLiftMm: number;
+  exhaustLiftMm: number;
+  plenumVolumeL: number;
+  throttleDiameterMm: number;
+  runnerDiameterMm: number;
+  airFilter: AirFilterKind;
+  primaryDiameterMm: number;
+  primaryLengthsMm: number[];
+  collector: CollectorType;
+  collectorDiameterMm: number;
+  pipeDiameterMm: number;
+  crossover: CrossoverPipe;
+  catalyst: boolean;
+  resonator: boolean;
+  muffler: MufflerKind;
+  mufflerPacking: number;
+  tailpipeDiameterMm: number;
+  outletSpacingM: number;
+  idleRpm: number;
+  inertiaKgM2: number;
+  afterfireTendency: number;
+  /** Harmonic cam-lobe shape exponent γ (engine-sim convention): higher = gentler low-lift ramps, less overlap area. */
+  camLobeGamma: number;
+  /** Cam phaser authority, crank degrees (0 = fixed): intake advance, exhaust retard. */
+  intakePhaserDeg: number;
+  exhaustPhaserDeg: number;
+  /** Two-step lift switching (VTEC-style): engagement speed and the high-cam lobes. */
+  liftSwitchRpm: number;
+  highCamIntakeDurationDeg: number;
+  highCamExhaustDurationDeg: number;
+  highCamIntakeLiftMm: number;
+  highCamExhaustLiftMm: number;
+  /** Fuel octane (≈ RON) for the knock model. */
+  fuelOctane: number;
+  /** Closed-loop knock control on/off. */
+  knockControl: boolean;
+  /** Diesel: start of main injection at rated speed, degrees BTDC. */
+  injectionAdvanceDeg: number;
+  /** Diesel: common-rail pilot injection (shortens the main ignition delay, softens clatter). */
+  pilotInjection: boolean;
+  /** Diesel fuel cetane number (EN 590 ≥ 51, US #2 ≈ 40–45). */
+  cetaneNumber: number;
+  /** Two-stroke port timings (degrees ATDC the piston uncovers the port), widths and crankcase. */
+  exhaustPortOpenDeg: number;
+  transferPortOpenDeg: number;
+  exhaustPortWidthRatio: number;
+  transferPortWidthRatio: number;
+  crankcaseCompressionRatio: number;
+  twoStrokeIntake: 'reed' | 'piston-port';
+  scavengeQuality: number;
+  expansionChamber: boolean;
+  expansionChamberTunedRpm: number;
+  /** Rotary: porting (exhaust peripheral/side, intake side/peripheral) and port events in e-shaft degrees of a face's 1080° cycle. */
+  rotaryExhaustPort: 'peripheral' | 'side';
+  rotaryIntakePort: 'side' | 'peripheral';
+  rotaryIntakeOpenDeg: number;
+  rotaryIntakeCloseDeg: number;
+  rotaryExhaustOpenDeg: number;
+  rotaryExhaustCloseDeg: number;
+  /** Diesel full-load fuel per cylinder per cycle, mg (pump fuel-plate / calibration limit; default: smoke limit at rated boost). */
+  dieselFullLoadFuelMg: number;
+  /** Cylinder-to-cylinder build tolerance 0…1 (production ≈ 0.5). */
+  buildTolerance: number;
+  /** Intake snorkel Helmholtz resonator tuned frequency (Hz, 0 = none) and cavity volume (L). */
+  intakeResonatorHz: number;
+  intakeResonatorVolumeL: number;
+  /** Quarter-wave "J-pipe" drone tube tuned to this frequency, Hz (0 = none). */
+  droneTubeHz: number;
+  /** Helmholtz resonator tuned frequency (Hz) and cavity volume (L). */
+  helmholtzHz: number;
+  helmholtzVolumeL: number;
+  /** Valved exhaust: bypass opening speed (auto mode) and mode. */
+  exhaustValveOpenRpm: number;
+  exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
+  turboCount: number;
+  compressorWheelMm: number;
+  superchargerDisplacementL: number;
+  superchargerDriveRatio: number;
+}
+
+/** How the engine is listened to (does not change the physics). */
+export interface ListenerConfig {
+  perspective: ListenerPerspective;
+  monitorGainDb: number;
+}
+
 /**
  * Full engine configuration combining all settings.
  */
@@ -262,6 +283,10 @@ export interface EngineConfiguration {
   soundProfile?: SoundProfile;
   // Reference-derived sound shaping
   soundTuning?: EngineSoundTuning;
+  // Physical-core overrides (v16)
+  physical?: Partial<PhysicalOverrides>;
+  // Listener placement (v16)
+  listener?: Partial<ListenerConfig>;
   // Runtime state (not saved, used for playback)
   seed?: number; // For deterministic reproduction
 }
@@ -276,6 +301,40 @@ export interface PlaybackState {
   load: number; // 0-1
   targetRpm: number;
   boost: number; // PSI, 0 for NA
+  /** v16 only: free-running or dyno-held. */
+  driveMode?: 'free' | 'dyno' | 'vehicle';
+  /** v16 only: live physics telemetry from the core. */
+  telemetry?: {
+    rpm: number;
+    mapKpa: number;
+    boostKpa: number;
+    torqueNm: number;
+    brakeTorqueNm: number;
+    powerKw: number;
+    lambda: number;
+    egtC: number;
+    throttlePlate: number;
+    fuelCut: boolean;
+    limiter: boolean;
+    afterfire: number;
+    turboRpm: number;
+    imepBar: number;
+    peakPressureBar: number;
+    peakPressureAngle: number;
+    volumetricEfficiency: number;
+    knockRetardDeg: number;
+    knockEvents: number;
+    intakeCamAdvanceDeg: number;
+    exhaustCamRetardDeg: number;
+    highCam: boolean;
+    exhaustValve: number;
+    engineState: 'running' | 'cranking' | 'off';
+    gear: number;
+    speedKmh: number;
+    clutch: number;
+    shifting: boolean;
+    splDb: number;
+  };
 }
 
 /**

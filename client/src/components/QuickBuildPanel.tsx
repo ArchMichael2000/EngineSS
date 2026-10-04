@@ -2,8 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
-import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, SoundProfile } from '../../../shared/engineTypes';
-import { SOUND_PROFILE_HISTORY, normalizeSoundProfile } from '../../../shared/engineTypes';
+import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, EngineCycleType, FuelType } from '../../../shared/engineTypes';
 
 interface QuickBuildPanelProps {
   config: EngineConfiguration;
@@ -15,11 +14,11 @@ const TOOLTIPS = {
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
   crankshaft: 'Cross-plane creates the classic V8 burble with uneven exhaust pulses. Flat-plane produces an even, high-pitched scream. Odd-fire creates an asymmetric, distinctive rhythm.',
+  engineType: 'Working cycle and combustion. Diesels are compression-ignited and unthrottled: load is set by fuel quantity, and the rapid premixed burn after the ignition delay is the diesel clatter (softened by common-rail pilot injection). Two-strokes fire every revolution through piston-controlled ports; the crankcase pumps the charge and a tuned expansion chamber makes the power band. Wankel rotaries fire each rotor once per e-shaft revolution through ports the apex seals sweep open; idle character selects the porting (stock side ports → street → bridgeport → peripheral port).',
   aspiration: 'Naturally aspirated engines breathe freely. Turbochargers add spool whine and blow-off sounds. Superchargers add a constant mechanical whine proportional to RPM.',
   exhaustCharacter: 'Stock is quiet and muffled. Sport adds more mid-range presence. Race is loud with minimal restriction. Straight-pipe removes all muffling.',
   idleCharacter: 'Smooth idles are steady and even. Lumpy idles have slight variation. Aggressive idles have pronounced unevenness. Lopey idles have dramatic cam-driven rhythm.',
   redline: 'The maximum safe RPM. Higher redlines allow more rev range but change the engine character at the top end.',
-  soundProfile: 'Choose a saved ESS audio model version. v15 is current; v14 preserves the static-clean model for A/B testing.',
 };
 
 function InfoTooltip({ text }: { text: string }) {
@@ -61,13 +60,6 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
     });
   };
 
-  const updateSoundProfile = (value: SoundProfile) => {
-    onChange({
-      ...config,
-      soundProfile: value,
-    });
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -75,26 +67,6 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           Quick Build
         </h3>
         <div className="flex-1 h-px bg-gradient-to-r from-neon-pink/40 to-transparent" />
-      </div>
-
-      {/* A/B Sound Model */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Sound Model</label>
-          <InfoTooltip text={TOOLTIPS.soundProfile} />
-        </div>
-        <Select value={normalizeSoundProfile(config.soundProfile)} onValueChange={(v) => updateSoundProfile(v as SoundProfile)}>
-          <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-dark-elevated border-hud-line">
-            {SOUND_PROFILE_HISTORY.map((profile) => (
-              <SelectItem key={profile.value} value={profile.value}>
-                {profile.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Engine Layout */}
@@ -121,7 +93,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cylinders</label>
+            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{config.quick.cycle === 'rotary' ? 'Rotors' : 'Cylinders'}</label>
             <InfoTooltip text={TOOLTIPS.cylinderCount} />
           </div>
           <span className="text-xs font-[Orbitron] text-neon-cyan">{config.quick.cylinderCount}</span>
@@ -130,7 +102,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           value={[config.quick.cylinderCount]}
           onValueChange={([v]) => updateQuick('cylinderCount', v)}
           min={1}
-          max={16}
+          max={config.quick.cycle === 'rotary' ? 4 : 16}
           step={1}
           className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan [&_[role=slider]]:shadow-[0_0_6px_oklch(0.75_0.18_195/0.5)]"
         />
@@ -170,6 +142,42 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <SelectItem value="flat-plane">Flat-Plane</SelectItem>
             <SelectItem value="even-fire">Even-Fire</SelectItem>
             <SelectItem value="odd-fire">Odd-Fire</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Engine type (cycle + combustion) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Engine Type</label>
+          <InfoTooltip text={TOOLTIPS.engineType} />
+        </div>
+        <Select
+          value={`${config.quick.cycle ?? 'four-stroke'}:${config.quick.fuel ?? 'gasoline'}`}
+          onValueChange={(v) => {
+            const [cycle, fuel] = v.split(':');
+            onChange({
+              ...config,
+              quick: {
+                ...config.quick,
+                cycle: cycle as EngineCycleType,
+                fuel: fuel as FuelType,
+                // Diesels are governed far lower than spark engines.
+                ...(fuel === 'diesel' && config.quick.redline > 5200 && { redline: 4800 }),
+                // Rotary: the count is rotors (displacement = rotors × one chamber, Mazda convention).
+                ...(cycle === 'rotary' && config.quick.cylinderCount > 4 && { cylinderCount: 2, displacement: 1.3 }),
+              },
+            });
+          }}
+        >
+          <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-dark-elevated border-hud-line">
+            <SelectItem value="four-stroke:gasoline">Four-Stroke Gasoline</SelectItem>
+            <SelectItem value="four-stroke:diesel">Four-Stroke Diesel</SelectItem>
+            <SelectItem value="two-stroke:gasoline">Two-Stroke (crankcase-scavenged)</SelectItem>
+            <SelectItem value="rotary:gasoline">Wankel Rotary</SelectItem>
           </SelectContent>
         </Select>
       </div>
