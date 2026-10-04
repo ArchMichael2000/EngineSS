@@ -290,6 +290,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
         cetane: ph.cetaneNumber ?? 51,
         smokeLambda,
         fullLoadFuelMg: ph.dieselFullLoadFuelMg ?? (ratedAirKg / (14.5 * smokeLambda)) * 1e6,
+        // Pilot injection marks a common-rail system, whose smooth-running control trims most of the spread.
+        injectorSpreadMg: ph.dieselInjectorSpreadMg ?? (ph.pilotInjection ?? boosted ? 0.12 : 0.5),
       }
     : null;
 

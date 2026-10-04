@@ -1,5 +1,5 @@
 {
- "source": "EngineLab references/real-engine-audio/manifest.json (github.com/zolaski333/EngineLab, MIT); audio CC0-1.0 from freesound.org",
+ "source": "First 10: EngineLab references/real-engine-audio/manifest.json (github.com/zolaski333/EngineLab, MIT), audio CC0-1.0 from freesound.org. The rest: found on freesound.org in October 2026 with scripts/searchFreesound.py; CC0-1.0 or CC-BY (attribution per entry and in reference-audio/ATTRIBUTION.md). Files are Freesound's public high-quality previews.",
  "recordings": [
   {
    "key": "2JZ",
@@ -179,6 +179,270 @@
    "reference_engine": "pw-r985",
    "cylinders": 9,
    "fire_order": 4.5
+  },
+  {
+   "key": "PSA-BlueHDi",
+   "file": "peugeot-3008-bluehdi-revs.ogg",
+   "url": "https://cdn.freesound.org/previews/865/865222_10594370-hq.ogg",
+   "source_url": "https://freesound.org/people/Mihacappy/sounds/865222/",
+   "sha256": "9760e880dec3dfbfaebe15c183de0ad5d5dc6d4c0ccc26343800573e353eb20b",
+   "license": "CC0-1.0",
+   "creator": "Mihacappy",
+   "title": "3008gtrevving.wav",
+   "platform": "2022 Peugeot 3008 GT, 1.5 BlueHDi (DV5) common-rail diesel",
+   "source_kind": "phone-recording",
+   "conditions": [
+    "idle",
+    "free-revs-to-4000-limit"
+   ],
+   "reference_engine": "psa-dv5-bluehdi",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "VW-ALH",
+   "file": "vw-new-beetle-tdi.ogg",
+   "url": "https://cdn.freesound.org/previews/448/448217_8690770-hq.ogg",
+   "source_url": "https://freesound.org/people/Evilmikie/sounds/448217/",
+   "sha256": "4ab1e9771719d10c2e80f0cc9f273e0e3d8d9744bb364991dc6c168db806dd57",
+   "license": "CC0-1.0",
+   "creator": "Evilmikie",
+   "title": "vw diesel engine.mp3",
+   "platform": "VW New Beetle 1.9 TDI (ALH, VE distributor pump)",
+   "source_kind": "phone-recording",
+   "conditions": [
+    "start",
+    "idle",
+    "free-revs"
+   ],
+   "reference_engine": "vw-alh-tdi",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "Octavia-TDI",
+   "file": "skoda-octavia-tdi-idle.ogg",
+   "url": "https://cdn.freesound.org/previews/827/827862_10594370-hq.ogg",
+   "source_url": "https://freesound.org/people/Mihacappy/sounds/827862/",
+   "sha256": "3a6650b46d473e893adbcea2cf53ee8d1877eada5b516eb477967e9ae506c54d",
+   "license": "CC0-1.0",
+   "creator": "Mihacappy",
+   "title": "skoda_tdi_idle.wav",
+   "platform": "Early-2000s Skoda Octavia 1.9 TDI, ~10 m away",
+   "source_kind": "phone-recording",
+   "conditions": [
+    "idle"
+   ],
+   "reference_engine": "vw-alh-tdi",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "190D",
+   "file": "mercedes-190d.ogg",
+   "url": "https://cdn.freesound.org/previews/173/173011_773642-hq.ogg",
+   "source_url": "https://freesound.org/people/ninebilly/sounds/173011/",
+   "sha256": "fec2ee5d965b64f7d8fa76f5426cfb5f19cbb2ad42e2e7dad363fb552e136484",
+   "license": "CC0-1.0",
+   "creator": "ninebilly",
+   "title": "diesel mercedes 190 D.wav",
+   "platform": "Mercedes 190 D (W201; 2.0 OM601 assumed, 2.5 OM602 five-cylinder possible)",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "idle",
+    "free-revs"
+   ],
+   "reference_engine": "mercedes-om601",
+   "cylinders": 4,
+   "fire_order": null
+  },
+  {
+   "key": "OM636",
+   "file": "mercedes-om636-marine-ramps.ogg",
+   "url": "https://cdn.freesound.org/previews/274/274910_1835376-hq.ogg",
+   "source_url": "https://freesound.org/people/hantorio/sounds/274910/",
+   "sha256": "de42904e7ab3e1ba8240502803961dbeaea5f1f14bc0b22991e894a3d690762e",
+   "license": "CC-BY-3.0",
+   "creator": "hantorio",
+   "title": "Mercedes_180D_636_accelerate_up_down_rpm.wav",
+   "platform": "Mercedes 180 D OM636 marine conversion",
+   "source_kind": "zoom-h2",
+   "conditions": [
+    "steady",
+    "rpm-ramps"
+   ],
+   "reference_engine": null,
+   "cylinders": 4,
+   "fire_order": null,
+   "attribution": "\"Mercedes_180D_636_accelerate_up_down_rpm.wav\" by hantorio (https://freesound.org/people/hantorio/sounds/274910/), licensed CC-BY-3.0"
+  },
+  {
+   "key": "Cummins-5.9",
+   "file": "ram-cummins-5.9-idle.ogg",
+   "url": "https://cdn.freesound.org/previews/610/610771_13385150-hq.ogg",
+   "source_url": "https://freesound.org/people/Therancher01/sounds/610771/",
+   "sha256": "568fd09a276df5bd7d446524380806c7537d6bee568e853e588d533c33baa2cf",
+   "license": "CC0-1.0",
+   "creator": "Therancher01",
+   "title": "Ram 5.9 cummins-startup-idle.m4a",
+   "platform": "Ram 3500 5.9 Cummins (generation not stated)",
+   "source_kind": "phone-recording",
+   "conditions": [
+    "start",
+    "idle"
+   ],
+   "reference_engine": "cummins-6bt",
+   "cylinders": 6,
+   "fire_order": null
+  },
+  {
+   "key": "CRM250",
+   "file": "honda-crm250-kickstart-rev.ogg",
+   "url": "https://cdn.freesound.org/previews/148/148855_84709-hq.ogg",
+   "source_url": "https://freesound.org/people/martian/sounds/148855/",
+   "sha256": "d3caeebbb49cac1f0a99591599b6cb1018132ab1c477627444fc69e85eaec8fb",
+   "license": "CC-BY-4.0",
+   "creator": "martian",
+   "title": "motorbike crm 250cc kick start rev engine.wav",
+   "platform": "Honda CRM250 two-stroke dirt bike",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "kick-start",
+    "free-revs"
+   ],
+   "reference_engine": "honda-crm250",
+   "cylinders": 1,
+   "fire_order": 1,
+   "attribution": "\"motorbike crm 250cc kick start rev engine.wav\" by martian (https://freesound.org/people/martian/sounds/148855/), licensed CC-BY-4.0"
+  },
+  {
+   "key": "CRM250-onboard",
+   "file": "honda-crm250-onboard.ogg",
+   "url": "https://cdn.freesound.org/previews/148/148868_84709-hq.ogg",
+   "source_url": "https://freesound.org/people/martian/sounds/148868/",
+   "sha256": "bbf6f162a2aefad2b2262d8f98f02b0ee2b920c89df233ccb4ddc1a1671ed2ce",
+   "license": "CC0-1.0",
+   "creator": "martian",
+   "title": "motorbike crm 250 cc onboard ride pullaway.wav",
+   "platform": "Honda CRM250 two-stroke, onboard ride and pull-away",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "onboard",
+    "pull-away"
+   ],
+   "reference_engine": "honda-crm250",
+   "cylinders": 1,
+   "fire_order": 1
+  },
+  {
+   "key": "MZ-ETZ250",
+   "file": "mz-etz250-start.ogg",
+   "url": "https://cdn.freesound.org/previews/414/414263_5810358-hq.ogg",
+   "source_url": "https://freesound.org/people/Silbad/sounds/414263/",
+   "sha256": "010d81801d804b763c7f013c19edcd9ce4a0dbdd179c0678b6253e4d54859dbb",
+   "license": "CC-BY-4.0",
+   "creator": "Silbad",
+   "title": "MZ ETZ250 motorcycle two-stroke engine",
+   "platform": "MZ ETZ 250 two-stroke motorcycle starting",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "start",
+    "free-revs"
+   ],
+   "reference_engine": "mz-etz250",
+   "cylinders": 1,
+   "fire_order": 1,
+   "attribution": "\"MZ ETZ250 motorcycle two-stroke engine\" by Silbad (https://freesound.org/people/Silbad/sounds/414263/), licensed CC-BY-4.0"
+  },
+  {
+   "key": "CX9-cabin",
+   "file": "mazda-cx9-interior.ogg",
+   "url": "https://cdn.freesound.org/previews/614/614967_13313218-hq.ogg",
+   "source_url": "https://freesound.org/people/cloudiskies/sounds/614967/",
+   "sha256": "19a2179846ad689ae217cba81f6cb855721ec480c56c8d070291ad03e1550b19",
+   "license": "CC0-1.0",
+   "creator": "cloudiskies",
+   "title": "inside Mazda CX-9.m4a",
+   "platform": "Mazda CX-9, inside the cabin while driving (engine not stated)",
+   "source_kind": "phone-recording",
+   "conditions": [
+    "cabin",
+    "driving"
+   ],
+   "reference_engine": null,
+   "cylinders": null,
+   "fire_order": null
+  },
+  {
+   "key": "diesel-cabin",
+   "file": "diesel-car-interior-fast.ogg",
+   "url": "https://cdn.freesound.org/previews/89/89950_128303-hq.ogg",
+   "source_url": "https://freesound.org/people/Loffy/sounds/89950/",
+   "sha256": "dd590a7af577489000b0b5ecb8867e487d44ee0dc9250bc1350e887237325811",
+   "license": "CC-BY-3.0",
+   "creator": "Loffy",
+   "title": "car_inside_driving_fast_diesel_engine_normal.wav",
+   "platform": "Diesel car, inside, driving fast (car not stated)",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "cabin",
+    "driving"
+   ],
+   "reference_engine": null,
+   "cylinders": null,
+   "fire_order": null,
+   "attribution": "\"car_inside_driving_fast_diesel_engine_normal.wav\" by Loffy (https://freesound.org/people/Loffy/sounds/89950/), licensed CC-BY-3.0"
+  },
+  {
+   "key": "cabin-accel",
+   "file": "car-acceleration-interior.ogg",
+   "url": "https://cdn.freesound.org/previews/152/152661_2475830-hq.ogg",
+   "source_url": "https://freesound.org/people/alexftw123/sounds/152661/",
+   "sha256": "bae480a23be8fbb922291b93bda4c1371e4c923c448f3c6d158129ce9827edbb",
+   "license": "CC0-1.0",
+   "creator": "alexftw123",
+   "title": "Car Acceleration Inside Car.wav",
+   "platform": "Car acceleration recorded inside the car (car not stated)",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "cabin",
+    "acceleration"
+   ],
+   "reference_engine": null,
+   "cylinders": null,
+   "fire_order": null
+  },
+  {
+   "key": "cabin-idle-fast",
+   "file": "car-interior-idle-to-fast.ogg",
+   "url": "https://cdn.freesound.org/previews/848/848361_10041677-hq.ogg",
+   "source_url": "https://freesound.org/people/andrewfordham/sounds/848361/",
+   "sha256": "5b0a209574bfd7a19a8f607d6cad4c416fc7872c14285124ac71b220b25b8e8d",
+   "license": "CC0-1.0",
+   "creator": "andrewfordham",
+   "title": "Car Internal - Idle to Fast",
+   "platform": "Car interior, idle to fast driving (car not stated)",
+   "source_kind": "unknown-recorder",
+   "conditions": [
+    "cabin",
+    "idle",
+    "driving"
+   ],
+   "reference_engine": null,
+   "cylinders": null,
+   "fire_order": null
+  }
+ ],
+ "local_only": [
+  {
+   "file": "local/rotary-race-car.ogg",
+   "url": "https://cdn.freesound.org/previews/100/100791_1694378-hq.ogg",
+   "source_url": "https://freesound.org/people/Fuser10/sounds/100791/",
+   "sha256": "9010a9be5e83707b9da258bdff0dd9a86b9fec95d32e4c298156036b85132131",
+   "license": "Sampling+",
+   "creator": "Fuser10",
+   "note": "Measured locally only: the licence does not allow redistribution in this repository. Fetch it into reference-audio/local/ by hand.",
+   "title": "rotary engine.wav"
   }
  ]
 }

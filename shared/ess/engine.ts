@@ -234,12 +234,16 @@ export class EngineSimulator {
       c.flowScale = 1 + 0.03 * tol * clamp(build.gaussian(), -2.5, 2.5);
       c.burnScale = 1 + 0.05 * tol * clamp(build.gaussian(), -2.5, 2.5);
       c.fuelScale = 1 + 0.025 * tol * clamp(build.gaussian(), -2.5, 2.5);
+      // Injector delivery scatter is absolute, so it dominates at small (idle) quantities.
+      if (spec.diesel) c.fuelOffsetKg = 2 * tol * spec.diesel.injectorSpreadMg * 1e-6 * clamp(build.gaussian(), -2.5, 2.5);
     }
     this.intake = new IntakeSystem(spec, sampleRate, this.rng);
     this.exhaust = new ExhaustNetwork(spec, this.schedule, sampleRate, this.rng);
     this.fi = createForcedInduction(spec, sampleRate, this.rng, this.exhaust, this.intake);
     this.drivetrain = new Drivetrain(spec.vehicle, spec.calibration.idleRpm, spec.calibration.redlineRpm);
-    this.structure = new StructuralRadiator(sampleRate, this.displacementL, spec.cylinders, this.cylinders[0].area, this.rng, this.schedule.cylinders.map((c) => c.positionM));
+    // Two-strokes have no timing drive or valvetrain: no tooth-pass tone, about half the friction excitation.
+    const drive = spec.cycle === "two-stroke" ? { teeth: 0, level: 0.5 } : { teeth: 21, level: 1 };
+    this.structure = new StructuralRadiator(sampleRate, this.displacementL, spec.cylinders, this.cylinders[0].area, this.rng, this.schedule.cylinders.map((c) => c.positionM), drive);
     this.valveJets = this.cylinders.map(() => new BandNoise(this.rng, sampleRate, 0.5));
     this.allDucts = [...this.exhaust.ducts(), ...this.intake.ducts(), ...(this.fi?.ducts() ?? [])];
     this.pressureRates = new Float64Array(spec.cylinders);

@@ -177,6 +177,11 @@ def analyse(args):
         times, rpm = np.array(tr["t"], dtype=float), np.array(tr["rpm"], dtype=float)
     else:
         times, rpm, _ = track_rpm(x, args.rpm_min, args.rpm_max, args.cylinders, args.rpm_start, args.fire_order, args.max_step)
+    if args.highpass:
+        # Imitate the recording chain (phone microphones roll off steeply below ~100 Hz) on both sides
+        # of a comparison; applied after speed tracking so the tracker still sees the low orders.
+        from scipy.signal import butter, sosfiltfilt
+        x = sosfiltfilt(butter(4, args.highpass, "highpass", fs=SR, output="sos"), x)
     frames = order_frames(x, times, rpm)
     res = {"source": args.audio, "orders": ORDERS.tolist(), "rpm_track": {"t": times.round(3).tolist(), "rpm": rpm.round(1).tolist()}, "frames": frames}
     json.dump(res, open(args.out, "w"))
@@ -268,6 +273,7 @@ def main():
     a.add_argument("--t1", type=float, help="segment end (s)")
     a.add_argument("--steady", action="store_true", help="constant-speed segment: speed from the dominant order's peak near --rpm-start")
     a.add_argument("--max-step", type=float, help="hard per-50 ms speed-change limit, e.g. 0.03 for slow dyno pulls")
+    a.add_argument("--highpass", type=float, help="4th-order high-pass (Hz) before order analysis, to match a recording chain (phones: ~100)")
     a.add_argument("--rpm-min", type=float, default=500)
     a.add_argument("--rpm-max", type=float, default=9000)
     c = sub.add_parser("compare")

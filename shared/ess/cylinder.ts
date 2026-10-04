@@ -308,6 +308,8 @@ export class Cylinder {
   flowScale = 1;
   burnScale = 1;
   fuelScale = 1;
+  /** Diesel: fixed delivery offset of this cylinder's injector, kg per stroke (absolute, see DieselSpec). */
+  fuelOffsetKg = 0;
   /** Burned-gas (residual + EGR) mass fraction of the charge at the last spark. */
   lastResidualFraction = 0;
   /** Burn duration (Wiebe Δθ) the last combustion event used, before cycle-to-cycle scatter. */
@@ -817,7 +819,7 @@ export class Cylinder {
     const d = this.params.diesel!;
     this.lastResidualFraction = this.massBurned / Math.max(1e-12, this.mass);
     const airLimit = this.massAir / (this.params.stoichAfr * Math.max(1, cmd.smokeLambda));
-    const fuel = cmd.fuelEnabled ? Math.min(cmd.fuelMassKg * this.fuelScale, airLimit) : 0;
+    const fuel = cmd.fuelEnabled ? Math.min(Math.max(0, cmd.fuelMassKg * this.fuelScale + this.fuelOffsetKg), airLimit) : 0;
     if (fuel <= 1e-9) {
       this.misfired = true;
       this.burning = false;

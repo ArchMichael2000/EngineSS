@@ -364,8 +364,12 @@ export class AudioEngine {
   }
 }
 
-/** Renders a clip in a Web Worker (client/src/lib/ess/renderWorker.ts) and resolves with the PCM. */
-function renderInWorker(request: RenderRequest): Promise<{ left: Float32Array; right: Float32Array }> {
+/**
+ * Renders a clip in a Web Worker (client/src/lib/ess/renderWorker.ts) and resolves with the PCM.
+ * A worker whose script fails to load (an error with no message, before any reply) is retried once:
+ * on a flaky connection the chunk fetch can fail transiently.
+ */
+function renderInWorker(request: RenderRequest, retries = 1): Promise<{ left: Float32Array; right: Float32Array }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./ess/renderWorker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (event: MessageEvent<RenderResponse>) => {
@@ -375,6 +379,10 @@ function renderInWorker(request: RenderRequest): Promise<{ left: Float32Array; r
     };
     worker.onerror = (event) => {
       worker.terminate();
+      if (!event.message && retries > 0) {
+        renderInWorker(request, retries - 1).then(resolve, reject);
+        return;
+      }
       reject(new Error(event.message || "The export renderer failed to start."));
     };
     worker.postMessage(request);

@@ -6,7 +6,7 @@
  *   node scripts/browser/smoke.mjs --url http://127.0.0.1:5199/simulator --out browser-smoke
  *   python3 scripts/browser/report.py browser-smoke   (spectrogram contact sheet, needs numpy + matplotlib)
  *
- * Options: --only ls3,mazda-13b-fc   --skip-engines   --skip-controls   --skip-export
+ * Options: --only ls3,mazda-13b-fc   --skip-engines   --skip-controls   --skip-export   --stress   --ignore-https-errors
  *          --chrome /path/to/chrome  (default: the pre-installed Playwright Chromium)
  *
  * Audio is tapped after the output compressor (AnalyserNode → recorder worklet), so it is exactly
@@ -52,7 +52,8 @@ const fail = (where, message) => {
 };
 
 const browser = await chromium.launch({ executablePath: chrome, args: ["--autoplay-policy=no-user-gesture-required"] });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true });
+// --ignore-https-errors: for a live URL behind an intercepting proxy whose CA Chromium does not trust.
+const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true, ignoreHTTPSErrors: flag("ignore-https-errors") });
 const page = await context.newPage();
 page.on("console", (m) => {
   const text = m.text();
