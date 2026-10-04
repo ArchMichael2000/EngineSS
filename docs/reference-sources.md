@@ -101,7 +101,7 @@ Exhaust systems are representative builds for the vehicle class, not measured ha
   * neutral (no load) at three steady speeds.
 * Use: the target for the **engine-bay** listener perspective only. Exterior and tailpipe perspectives have no equivalent open dataset here yet.
 
-### EngineLab CC0 corpus (indexed, not yet downloaded)
+### EngineLab CC0 corpus (10 recordings downloaded to `reference-audio/`)
 
 [zolaski333/EngineLab](https://github.com/zolaski333/EngineLab) `references/real-engine-audio/manifest.json` indexes ten CC0-1.0 Freesound recordings, each with a SHA-256. They map onto the reference engines above:
 
