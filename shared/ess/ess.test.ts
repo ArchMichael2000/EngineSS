@@ -4,6 +4,7 @@ import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
 import { cycleDegrees } from "./spec";
 import { REFERENCE_ENGINES } from "./reference/engines";
+import { DEFAULT_ENGINE_CONFIG } from "../engineTypes";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
 
@@ -44,6 +45,19 @@ describe("firing schedules", () => {
     expect(solveFiringSchedule(specOf("harley-m8-107")).intervalsDeg.map(Math.round)).toEqual([315, 405]);
     expect(solveFiringSchedule(specOf("ducati-1299")).intervalsDeg.map(Math.round)).toEqual([270, 450]);
     expect(solveFiringSchedule(specOf("yamaha-cp4")).intervalsDeg.map(Math.round)).toEqual([90, 180, 270, 180]);
+  });
+
+  it("radials fire evenly at every cylinder count; even counts are staggered rows", () => {
+    for (const n of [3, 5, 7, 8, 9, 10, 12, 14, 18]) {
+      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n } }));
+      const s = solveFiringSchedule(spec);
+      for (const d of s.intervalsDeg) expect(d).toBeCloseTo(720 / n, 3);
+      if (n % 2 === 0 && (n / 2) % 2 === 1) {
+        // Rows of an odd count (2 × 5, 2 × 7, 2 × 9) alternate every event, as real two-row radials do.
+        const row = (cyl: number) => s.cylinders[cyl - 1].throwIndex;
+        for (let k = 0; k < n; k++) expect(row(s.firingOrder[k])).not.toBe(row(s.firingOrder[(k + 1) % n]));
+      }
+    }
   });
 
   it("every cycle sums to its cycle length (720° four-stroke, 360° two-stroke)", () => {
@@ -301,6 +315,30 @@ describe("numerical health", () => {
       expect(sim.rpm).toBeLessThan(spec.calibration.idleRpm * 1.8);
     }, 30_000);
   }
+});
+
+describe("valve wave solve", () => {
+  it("never steps a valve's outgoing wave near redline on a straight-piped V10", () => {
+    // Strong rarefactions arriving at a closing exhaust valve once sent the solver to a spurious
+    // root (a full-vacuum wave that ended in one sample): ~170 jumps of > 40 kPa per second here.
+    const config = { ...DEFAULT_ENGINE_CONFIG, soundProfile: "v16", seed: 3, quick: { ...DEFAULT_ENGINE_CONFIG.quick, layout: "v", cylinderCount: 10, displacement: 7.0, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "straight-pipe", redline: 8000 } } as EngineConfiguration;
+    const sim = new EngineSimulator(resolveEngineSpec(config), FS);
+    sim.setControls({ mode: "dyno", targetRpm: 7400, throttle: 1, load: 0.41 });
+    sim.prewarm(1);
+    const cylinders = (sim as unknown as { cylinders: { exhaustSend: number }[] }).cylinders;
+    const prev = cylinders.map((c) => c.exhaustSend);
+    const l = new Float32Array(1);
+    const r = new Float32Array(1);
+    let steps = 0;
+    for (let i = 0; i < FS; i++) {
+      sim.process(l, r, 1);
+      cylinders.forEach((c, k) => {
+        if (Math.abs(c.exhaustSend - prev[k]) > 40_000) steps++;
+        prev[k] = c.exhaustSend;
+      });
+    }
+    expect(steps).toBe(0);
+  }, 60_000);
 });
 
 describe("random configurations", () => {

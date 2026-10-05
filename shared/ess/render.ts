@@ -7,6 +7,7 @@ import { EngineSimulator } from "./engine";
 import type { DriveMode } from "./engine";
 import type { Perspective } from "./observer";
 import { resolveEngineSpec } from "./resolveSpec";
+import { OutputLeveler } from "./leveler";
 
 export type EssRenderProgram =
   /** Dyno WOT pull idle → redline, then a closed-throttle lift (decel fuel cut / afterfire). */
@@ -25,6 +26,12 @@ export interface EssRenderOptions {
   throttle?: number;
   perspective?: Perspective;
   normalize?: boolean;
+  /**
+   * "live" (default): the same OutputLeveler the AudioWorklet runs, so an export sounds like the live
+   * engine (auto level per `config.listener.autoLevel`, default on). "none": the calibrated pressure
+   * in full-scale units, which can exceed ±1 on loud engines (analysis only).
+   */
+  leveling?: "live" | "none";
   /** Seconds of silent pre-roll to settle temperatures, manifold pressure and idle. */
   prerollSec?: number;
 }
@@ -76,6 +83,25 @@ export function renderEssPcm(config: EngineConfiguration, options: EssRenderOpti
   for (let off = 0; off < n; off += CHUNK) {
     sim.setControls(controlAt(off / sampleRate));
     sim.process(left, right, Math.min(CHUNK, n - off), off);
+  }
+
+  if ((options.leveling ?? "live") === "live") {
+    const leveler = new OutputLeveler(sampleRate, { autoGain: config.listener?.autoLevel ?? true });
+    // Settle the gain rider on the first second so the export does not start with a level swell,
+    // then level the whole clip and drop the look-ahead delay so it stays aligned with the program.
+    const warm = Math.min(n, sampleRate);
+    leveler.process(left.slice(0, warm), right.slice(0, warm));
+    const lat = leveler.latency;
+    const padL = new Float32Array(n + lat);
+    const padR = new Float32Array(n + lat);
+    padL.set(left);
+    padR.set(right);
+    for (let off = 0; off < n + lat; off += CHUNK) {
+      const m = Math.min(CHUNK, n + lat - off);
+      leveler.process(padL.subarray(off, off + m), padR.subarray(off, off + m), m);
+    }
+    left.set(padL.subarray(lat, lat + n));
+    right.set(padR.subarray(lat, lat + n));
   }
 
   if (options.normalize) {

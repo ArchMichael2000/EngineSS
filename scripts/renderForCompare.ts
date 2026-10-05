@@ -95,6 +95,11 @@ writeFileSync(`${out}.track.json`, JSON.stringify({ t, rpm: smooth }));
 const buf = Buffer.alloc(44 + n * 2);
 buf.write("RIFF", 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write("WAVEfmt ", 8); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
 buf.writeUInt32LE(SR, 24); buf.writeUInt32LE(SR * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write("data", 36); buf.writeUInt32LE(n * 2, 40);
-for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, 0.5 * (L[i] + R[i]))) * 32767), 44 + i * 2);
+// The core's output is calibrated pressure and can exceed full scale; the analysis uses relative
+// levels only, so scale the whole file under full scale instead of clipping it.
+let filePeak = 0;
+for (let i = 0; i < n; i++) filePeak = Math.max(filePeak, Math.abs(0.5 * (L[i] + R[i])));
+const fileGain = filePeak > 0.98 ? 0.98 / filePeak : 1;
+for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, fileGain * 0.5 * (L[i] + R[i]))) * 32767), 44 + i * 2);
 writeFileSync(`${out}.wav`, buf);
 console.log("wrote", out, "mean rpm", (rpm.reduce((a, b) => a + b, 0) / rpm.length).toFixed(0));

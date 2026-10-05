@@ -91,7 +91,7 @@ export function ForcedInductionPanel({ config, onChange }: ForcedInductionPanelP
               min={1500}
               max={5500}
               step={100}
-              className="[&_[role=slider]]:bg-neon-purple [&_[role=slider]]:border-neon-purple"
+              tone="purple"
             />
           </div>
 
@@ -110,7 +110,7 @@ export function ForcedInductionPanel({ config, onChange }: ForcedInductionPanelP
               min={5}
               max={40}
               step={1}
-              className="[&_[role=slider]]:bg-neon-purple [&_[role=slider]]:border-neon-purple"
+              tone="purple"
             />
           </div>
 
@@ -180,7 +180,7 @@ export function ForcedInductionPanel({ config, onChange }: ForcedInductionPanelP
               min={3}
               max={25}
               step={1}
-              className="[&_[role=slider]]:bg-neon-purple [&_[role=slider]]:border-neon-purple"
+              tone="purple"
             />
           </div>
 
@@ -199,7 +199,7 @@ export function ForcedInductionPanel({ config, onChange }: ForcedInductionPanelP
               min={0}
               max={100}
               step={5}
-              className="[&_[role=slider]]:bg-neon-purple [&_[role=slider]]:border-neon-purple"
+              tone="purple"
             />
           </div>
         </div>

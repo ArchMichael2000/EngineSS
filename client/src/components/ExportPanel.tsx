@@ -240,7 +240,7 @@ export function ExportPanel({ config, isPlaying, onClose }: ExportPanelProps) {
             min={3}
             max={exportMode === 'server' ? 120 : 60}
             step={1}
-            className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan"
+            tone="cyan"
           />
           <p className="text-[10px] text-muted-foreground font-[Rajdhani]">
             {exportMode === 'server' ? 'Up to 2 minutes for server render' : 'Renders an RPM sweep from idle to redline and back'}

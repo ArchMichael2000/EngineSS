@@ -189,6 +189,8 @@ export class Cylinder {
   private vsU0 = 0;
   private vsT0 = 0;
   private vsDt = 0;
+  /** Lower bound of D: the most suction flow the port can carry (see solveValve). */
+  private vsDMin = -1;
   private prevExhaustD = 0;
   private prevIntakeD = 0;
   private prevExhaustD2 = 0;
@@ -914,21 +916,10 @@ export class Cylinder {
     this.knockRetard = clamp(this.knockRetard, 0, 30);
   }
 
-  /**
-   * Implicit valve flow against a duct end, with finite-amplitude wave superposition (Benson /
-   * Blair) for the pulsating part of the waves: each carries a pressure amplitude ratio
-   * X = (p/p_m)^k, k = (γ−1)/2γ, referred to the duct's own mean state (p_m, c). The slow (DC)
-   * parts stay linear, so the mean flow and mean pressure agree with the linear junctions. At the port the incident
-   * and outgoing waves superpose as X_s = X_i + X_r − 1, so p = p_ref·X_s^(1/k), particle velocity
-   * into the duct u = (2c/(γ−1))·(X_r − X_i) and ρ = ρ_ref·X_s^(2/(γ−1)). Suction saturates
-   * (pressure can't pass zero) and compression steepens, as in a real port; for small amplitudes
-   * it reduces to the linear relation p = 2p_in + (c/A)·ṁ used by the junctions. The secant's
-   * unknown is D = X_r − X_i; `out` (mass flow leaving the cylinder into the duct) follows from it.
-   */
-  private solveValve(cdA: number, port: Port, isExhaust: boolean, dt: number, intakeTempK: number, combustion?: CombustionCommand): number {
+  /** Wave state at a valve's duct end for this sample (see solveValve). */
+  private prepareWave(port: Port): void {
     const duct = port.duct;
     const pin = arriving(port);
-    const Tduct = isExhaust ? duct.temperatureK : intakeTempK;
     const gam = duct.gamma;
     const k = (gam - 1) / (2 * gam);
     const n = 2 / (gam - 1);
@@ -945,9 +936,40 @@ export class Cylinder {
     this.vsB = 2 * xi - 1;
     this.vsN = n;
     this.vsInvK = 1 / k;
+    // The finite-amplitude flow ∝ D·(B + D)^n is deepest in suction at D = −B/(n+1); a deeper
+    // rarefaction would carry less flow. Below that point waveFlow continues as linear acoustics, so
+    // g(D) stays monotone with a root in the physical range (the clamped power law alone has a
+    // spurious one ~10⁶ away: a full-vacuum wave that ended in one sample, a click at high rpm).
+    this.vsDMin = Math.max(-this.vsB / (n + 1), 0.05 - this.vsB);
     // ρ_m·A·u-scale: ρ_m = γ·p_m/c², u = n·c·D; plus the linear mean flow of the DC waves.
     this.vsK = ((gam * pm) / (duct.c * duct.c)) * duct.area * n * duct.c;
     this.vsMeanFlow = (duct.area / duct.c) * (dcOut - dcIn);
+  }
+
+  /** Mass flow the waves carry into the duct for a given D (monotone increasing). */
+  private waveFlow(d: number): number {
+    if (d < this.vsDMin) {
+      const dm = this.vsDMin;
+      return this.vsMeanFlow + this.vsK * (dm * this.vsPowN.at(Math.max(0.05, this.vsB + dm)) + (d - dm));
+    }
+    return this.vsMeanFlow + this.vsK * d * this.vsPowN.at(Math.max(0.05, this.vsB + d));
+  }
+
+  /**
+   * Implicit valve flow against a duct end, with finite-amplitude wave superposition (Benson /
+   * Blair) for the pulsating part of the waves: each carries a pressure amplitude ratio
+   * X = (p/p_m)^k, k = (γ−1)/2γ, referred to the duct's own mean state (p_m, c). The slow (DC)
+   * parts stay linear, so the mean flow and mean pressure agree with the linear junctions. At the port the incident
+   * and outgoing waves superpose as X_s = X_i + X_r − 1, so p = p_ref·X_s^(1/k), particle velocity
+   * into the duct u = (2c/(γ−1))·(X_r − X_i) and ρ = ρ_ref·X_s^(2/(γ−1)). Suction saturates
+   * (pressure can't pass zero) and compression steepens, as in a real port; for small amplitudes
+   * it reduces to the linear relation p = 2p_in + (c/A)·ṁ used by the junctions. The secant's
+   * unknown is D = X_r − X_i; `out` (mass flow leaving the cylinder into the duct) follows from it.
+   */
+  private solveValve(cdA: number, port: Port, isExhaust: boolean, dt: number, intakeTempK: number, combustion?: CombustionCommand): number {
+    const duct = port.duct;
+    const Tduct = isExhaust ? duct.temperatureK : intakeTempK;
+    this.prepareWave(port);
     this.vsT = Tduct;
     this.vsCdA = cdA;
     this.vsM0 = this.mass;
@@ -986,6 +1008,14 @@ export class Cylinder {
       if (fa !== 0) {
         let b = -fa / this.dOutdD(0);
         let fb = this.valveResidual(b);
+        // g is monotone on the whole line (waveFlow continues linearly past the suction limit), so
+        // widen until the root is bracketed instead of accepting an end that is not a solution.
+        for (let grow = 0; grow < 24 && Math.sign(fa) === Math.sign(fb) && fb !== 0; grow++) {
+          a = b;
+          fa = fb;
+          b *= 2;
+          fb = this.valveResidual(b);
+        }
         d = b;
         if (Math.sign(fa) !== Math.sign(fb)) {
           for (let it = 0; it < 30; it++) {
@@ -1113,6 +1143,7 @@ export class Cylinder {
 
   /** dṁ/dD at D (for scaling secant starts). */
   private dOutdD(d: number): number {
+    if (d < this.vsDMin) return this.vsK;
     const xs = Math.max(0.05, this.vsB + d);
     const xn = this.vsPowN.at(xs);
     return Math.max(1e-9, this.vsK * (xn + (this.vsN * d * xn) / xs));
@@ -1122,10 +1153,9 @@ export class Cylinder {
    * g(D) = ṁ_wave(D) − F(p_cyl(ṁ), p_port(D)); monotone increasing in D. Sets vsOut = ṁ_wave.
    */
   private valveResidual(d: number): number {
-    const xs = Math.max(0.05, this.vsB + d);
-    const out = this.vsMeanFlow + this.vsK * d * this.vsPowN.at(xs);
+    const out = this.waveFlow(d);
     this.vsOut = out;
-    const pPort = this.vsPm * this.vsPowInvK.at(xs);
+    const pPort = this.vsPm * this.vsPowInvK.at(Math.max(0.05, this.vsB + Math.max(d, this.vsDMin)));
     const dm = out * this.vsDt;
     const m0 = this.vsM0;
     const m = Math.max(m0 * 0.02, m0 - dm);

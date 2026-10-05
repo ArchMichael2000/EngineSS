@@ -396,13 +396,17 @@ export class EngineSimulator {
     for (let i = 0; i < n; i++) this.tick(false);
   }
 
-  /** Render `count` samples into the output buffers (full-scale units). */
+  /**
+   * Render `count` samples into the output buffers (full-scale units). The output is the calibrated
+   * pressure and may exceed ±1 for loud engines; level it with `OutputLeveler` (leveler.ts) before
+   * it reaches a DAC or a file. Only non-finite and absurd values are caught here.
+   */
   process(left: Float32Array, right: Float32Array, count = left.length, offset = 0): void {
     for (let i = 0; i < count; i++) {
       this.tick(true);
       const scale = this.observer.paToFullScale * this.monitorGain;
-      left[offset + i] = softLimit(this.ear[0] * scale);
-      right[offset + i] = softLimit(this.ear[1] * scale);
+      left[offset + i] = guard(this.ear[0] * scale);
+      right[offset + i] = guard(this.ear[1] * scale);
     }
   }
 
@@ -918,9 +922,8 @@ export class EngineSimulator {
 
 
 
-function softLimit(x: number): number {
-  const ax = Math.abs(x);
-  if (ax <= 0.9) return x;
-  const over = ax - 0.9;
-  return Math.sign(x) * (0.9 + 0.1 * Math.tanh(over / 0.1));
+/** Keep a numerical blow-up from reaching the leveler as NaN or as a value that would pin its gain. */
+function guard(x: number): number {
+  if (!(x > -1000 && x < 1000)) return x > 0 ? 1000 : x < 0 ? -1000 : 0;
+  return x;
 }

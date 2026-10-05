@@ -106,3 +106,40 @@
     box-shadow: 0 0 10px oklch(0.72 0.25 330 / 0.2);
   }
 }
+
+/* Range inputs (components/ui/slider.tsx): a 28 px hit area around a 6 px track and an 18 px thumb. */
+.ess-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+.ess-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.ess-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--range-accent) var(--range-fill), oklch(0.25 0.03 270) var(--range-fill));
+}
+.ess-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--range-accent);
+  border: 2px solid oklch(0.15 0.02 270);
+  box-shadow: 0 0 6px var(--range-accent);
+}
+.ess-range:focus-visible {
+  outline: none;
+}
+.ess-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--range-accent);
+  outline-offset: 2px;
+}

@@ -8,6 +8,7 @@ import { resolveEngineSpec } from "../../../../shared/ess/resolveSpec";
 import type { Perspective } from "../../../../shared/ess/observer";
 import type { EngineConfiguration } from "../../../../shared/engineTypes";
 import { RATE_TIERS, Upsampler } from "../../../../shared/ess/resample";
+import { OutputLeveler } from "../../../../shared/ess/leveler";
 
 declare const sampleRate: number;
 declare function registerProcessor(name: string, ctor: unknown): void;
@@ -23,7 +24,10 @@ type Message =
   | { type: "stems"; stems: Partial<StemGains> }
   | { type: "monitorGain"; db: number }
   | { type: "shift"; dir: 1 | -1 }
-  | { type: "ignition"; on: boolean };
+  | { type: "ignition"; on: boolean }
+  | { type: "autoLevel"; on: boolean }
+  /** The node is being discarded: stop rendering and let the browser collect the processor. */
+  | { type: "dispose" };
 
 const FADE_SAMPLES = 2400;
 const TELEMETRY_INTERVAL = 2048;
@@ -66,6 +70,9 @@ class EssProcessor extends AudioWorkletProcessor {
   private sinceTelemetry = 0;
   private readonly scratchL = new Float32Array(128);
   private readonly scratchR = new Float32Array(128);
+  /** Gain staging after the crossfade (shared/ess/leveler.ts), identical to the offline export. */
+  private readonly leveler = new OutputLeveler(sampleRate);
+  private disposed = false;
 
   constructor() {
     super();
@@ -78,6 +85,7 @@ class EssProcessor extends AudioWorkletProcessor {
         case "config": {
           if (msg.perspective) this.perspective = msg.perspective;
           this.config = msg.config;
+          if (msg.config.listener?.autoLevel !== undefined) this.leveler.autoGain = msg.config.listener.autoLevel;
           const next = this.build(msg.config, null);
           this.port.postMessage({ type: "ready", firingOrder: next.sim.schedule.firingOrder, intervals: next.sim.schedule.intervalsDeg, notes: next.sim.schedule.notes, displacementL: next.sim.displacementL, internalRate: next.sim.sampleRate });
           break;
@@ -105,6 +113,15 @@ class EssProcessor extends AudioWorkletProcessor {
         case "monitorGain":
           this.monitorDb = msg.db;
           this.voice?.sim.setMonitorGain(msg.db);
+          break;
+        case "autoLevel":
+          this.leveler.autoGain = msg.on;
+          break;
+        case "dispose":
+          this.disposed = true;
+          this.voice = null;
+          this.outgoing = null;
+          this.port.onmessage = null;
           break;
       }
     } catch (error) {
@@ -162,10 +179,11 @@ class EssProcessor extends AudioWorkletProcessor {
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+    if (this.disposed) return false;
     const out = outputs[0];
     const left = out[0];
-    const right = out[1] ?? out[0];
     if (!left) return true;
+    const right = out[1] ?? this.monoScratch(left.length);
     const n = left.length;
     const voice = this.voice;
     if (!voice) {
@@ -189,12 +207,20 @@ class EssProcessor extends AudioWorkletProcessor {
       this.fade += n;
       if (this.fade >= FADE_SAMPLES) this.outgoing = null;
     }
+    this.leveler.process(left, right, n);
     this.sinceTelemetry += n;
     if (this.sinceTelemetry >= TELEMETRY_INTERVAL) {
       this.sinceTelemetry = 0;
-      this.port.postMessage({ type: "telemetry", telemetry: { ...voice.sim.telemetry }, controls: voice.sim.currentControls, audio: { load: this.lastLoad, machineFactor: this.machineFactor, internalRate: voice.sim.sampleRate, tier: voice.tier } });
+      this.port.postMessage({ type: "telemetry", telemetry: { ...voice.sim.telemetry }, controls: voice.sim.currentControls, audio: { load: this.lastLoad, machineFactor: this.machineFactor, internalRate: voice.sim.sampleRate, tier: voice.tier, levelDb: 20 * Math.log10(Math.max(1e-6, this.leveler.lastGain)), autoLevel: this.leveler.autoGain } });
     }
     return true;
+  }
+
+  private monoRight: Float32Array | null = null;
+  /** A throwaway right channel for a mono output, so the leveler never processes one buffer twice. */
+  private monoScratch(n: number): Float32Array {
+    if (!this.monoRight || this.monoRight.length !== n) this.monoRight = new Float32Array(n);
+    return this.monoRight;
   }
 }
 

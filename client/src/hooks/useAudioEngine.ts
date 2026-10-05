@@ -4,6 +4,9 @@ import type { EngineConfiguration, ListenerPerspective, PlaybackState } from '..
 import type { DriveMode, StemGains } from '../../../shared/ess/engine';
 import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from '../../../shared/engineTypes';
 
+/** How often telemetry-driven numbers on screen may change. */
+const DISPLAY_HZ = 8;
+
 export function useAudioEngine() {
   const engineRef = useRef<AudioEngine | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -40,16 +43,56 @@ export function useAudioEngine() {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    // Telemetry arrives about 23 times a second; re-render only when the engine state actually changed.
-    let last = '';
-    const poll = () => {
+    // Telemetry arrives ~23 times a second and the crank speed swings within every cycle, so the
+    // display shows smoothed values (rpm over ~0.25 s, the rest over ~0.4 s), commits at most
+    // DISPLAY_HZ times a second, and holds a limiter/fuel-cut/pops flag for at least a second.
+    // Control changes (throttle, load, mode, start/stop) still show at once.
+    let lastControls = '';
+    let lastShown = '';
+    let lastCommit = 0;
+    let lastFrame = 0;
+    let rpm = -1;
+    let boost = 0;
+    let smooth: Record<string, number> = {};
+    const held = { limiter: 0, fuelCut: 0, afterfire: 0, afterfireCount: 0 };
+    const poll = (now: number) => {
       const engine = ensureEngine();
       if (engine) {
         const state = engine.getState();
-        const key = `${state.isPlaying}|${state.throttle}|${state.load}|${state.targetRpm}|${state.driveMode}|${state.rpm}|${state.boost}`;
-        if (key !== last) {
-          last = key;
-          setPlaybackState(state);
+        const dt = lastFrame ? Math.min(0.25, (now - lastFrame) / 1000) : 0;
+        lastFrame = now;
+        const a = (tau: number) => 1 - Math.exp(-dt / tau);
+        rpm = rpm < 0 || !state.isPlaying ? state.rpm : rpm + (state.rpm - rpm) * a(0.25);
+        boost += (state.boost - boost) * a(0.4);
+        let telemetry = state.telemetry;
+        if (telemetry) {
+          const next: Record<string, number> = {};
+          for (const [k, v] of Object.entries(telemetry)) {
+            if (typeof v !== 'number' || k === 'gear' || k === 'knockEvents' || k === 'afterfire') continue;
+            next[k] = k in smooth ? smooth[k] + (v - smooth[k]) * a(0.4) : v;
+          }
+          smooth = next;
+          if (telemetry.limiter) held.limiter = now;
+          if (telemetry.fuelCut) held.fuelCut = now;
+          if (telemetry.afterfire > held.afterfireCount) held.afterfire = now;
+          held.afterfireCount = telemetry.afterfire;
+          telemetry = {
+            ...telemetry,
+            ...smooth,
+            limiter: now - held.limiter < 1000,
+            fuelCut: now - held.fuelCut < 1000,
+            afterfire: now - held.afterfire < 1000 ? telemetry.afterfire : 0,
+          } as typeof telemetry;
+        }
+        const controls = `${state.isPlaying}|${state.throttle}|${state.load}|${state.targetRpm}|${state.driveMode}|${telemetry?.engineState}|${telemetry?.gear}`;
+        const shownRpm = Math.round(rpm / 10) * 10;
+        const shown = `${shownRpm}|${boost.toFixed(1)}|${telemetry ? Object.values(smooth).map((v) => v.toPrecision(3)).join(',') : ''}|${telemetry?.limiter}|${telemetry?.fuelCut}|${telemetry?.afterfire}`;
+        const due = now - lastCommit >= 1000 / DISPLAY_HZ;
+        if (controls !== lastControls || (due && shown !== lastShown)) {
+          lastControls = controls;
+          lastShown = shown;
+          lastCommit = now;
+          setPlaybackState({ ...state, rpm: shownRpm, boost, telemetry });
           setIsPlaying(state.isPlaying);
         }
       }
@@ -131,6 +174,11 @@ export function useAudioEngine() {
     setConfig((prev) => ({ ...prev, listener: { ...prev.listener, perspective } }));
   }, [ensureEngine]);
 
+  const setAutoLevel = useCallback((on: boolean) => {
+    ensureEngine().setAutoLevel(on);
+    setConfig((prev) => ({ ...prev, listener: { ...prev.listener, autoLevel: on } }));
+  }, [ensureEngine]);
+
   const setIgnition = useCallback((on: boolean) => {
     ensureEngine().setIgnition(on);
   }, [ensureEngine]);
@@ -164,6 +212,7 @@ export function useAudioEngine() {
     setDriveMode,
     setPerspective,
     setStemGains,
+    setAutoLevel,
     shift,
     setIgnition,
     vehicleOptions,

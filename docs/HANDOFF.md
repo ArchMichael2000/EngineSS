@@ -120,6 +120,13 @@ The full table is in `docs/reference-sources.md` §4. The tests require ±12 % f
 
 High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see the note in the docs.
 
+### Live-site feedback round (October 2026)
+- **Drone above ~6000 rpm.** The core no longer clips per sample. `shared/ess/leveler.ts` (slow auto level + 5 ms look-ahead limiter at −2 dBFS) runs in the worklet and in `render.ts`; `listener.autoLevel` switches Auto/Physical level. The browser compressor is now only a safety net.
+- **Exhaust valve solver.** Past the suction limit the wave flow continues linearly, and the bracketed fallback widens until it brackets the root. This removed full-vacuum waves that ended in one sample (test: "valve wave solve").
+- **Orphaned worklet nodes.** `stop()` sends `dispose`; the processor returns false and stale messages are ignored.
+- **Display.** Smoothed telemetry at ≤ 8 Hz, latched status flags, gauge hysteresis, slow firing chase. Sliders have a 28 px hit area and hold their value while dragged.
+- **Radials.** Even counts are staggered rows; every count 3–18 fires evenly (test: "radials fire evenly").
+
 ## 4. Conventions and gotchas
 
 - **Typecheck with `npx tsc -b`.** `npx tsc --noEmit -p .` checks nothing, because the root tsconfig only lists project references.
@@ -163,6 +170,9 @@ Done: variable-geometry turbines for common-rail diesels; Drive mode for every f
 11. **High-revving NA engines** read 9–15 % low above about 21 m/s mean piston speed (the S54's −31 % is limiter interference on the dyno test). Candidates are the speed-squared friction and accessory-drag terms; don't change them without friction data.
 12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
 13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
+
+### E. X-engine layout (the owner's goal; plan awaiting approval)
+The plan with computed firing and exhaust-order maps for eight candidate X engines is at https://claude.ai/artifact/5qFs4DJC53PjnWmfA4WHxP. Phases: P1 geometry + throw-by-throw firing solver + layout panel; P2 articulated rods (X and radial); P3 four-bank exhaust/intake; P4 structure, balance, listener presets; P5 CPU (X24 ≈ 1.38 cores at full rate) and validation. The owner still has to say which X they mean (one crank with four banks, or other), bank angles, rods, cycle and application.
 
 ### D. Performance and housekeeping
 14. CPU: no safe micro-optimisation left (valve tolerance tried and reverted; see §4 of the reference doc). The rate tiers hold real time (W16 at 32 kHz in Chromium). Next steps would be structural: sub-rate thermodynamics, or threads, which need cross-origin isolation that GitHub Pages can't provide.

@@ -44,7 +44,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
         </span>
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => set(key, v)}
-        className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan" />
+        tone="cyan" />
     </div>
   );
 

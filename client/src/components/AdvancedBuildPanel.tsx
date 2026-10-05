@@ -96,7 +96,7 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
           min={50}
           max={130}
           step={1}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan"
+          tone="cyan"
         />
       </div>
 
@@ -115,7 +115,7 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
           min={40}
           max={120}
           step={1}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan"
+          tone="cyan"
         />
       </div>
 
@@ -134,7 +134,7 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
           min={15}
           max={180}
           step={1}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan"
+          tone="cyan"
         />
       </div>
 

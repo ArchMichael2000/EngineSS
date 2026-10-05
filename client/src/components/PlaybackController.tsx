@@ -248,7 +248,7 @@ export function PlaybackController({
           max={100}
           step={1}
           disabled={!isPlaying || sweepActive}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan [&_[role=slider]]:shadow-[0_0_6px_oklch(0.75_0.18_195/0.5)]"
+          tone="cyan"
         />
         {/* Throttle bar visualization */}
         <div className="h-2 bg-dark-surface rounded-full overflow-hidden border border-hud-line/30">
@@ -290,7 +290,7 @@ export function PlaybackController({
           max={100}
           step={1}
           disabled={!isPlaying}
-          className="[&_[role=slider]]:bg-neon-purple [&_[role=slider]]:border-neon-purple [&_[role=slider]]:shadow-[0_0_6px_oklch(0.60_0.22_300/0.5)]"
+          tone="purple"
         />
       </div>
 
@@ -321,7 +321,7 @@ export function PlaybackController({
           max={redline}
           step={50}
           disabled={!isPlaying || sweepActive}
-          className="[&_[role=slider]]:bg-foreground/60 [&_[role=slider]]:border-foreground/60"
+          tone="muted"
         />
       </div>
 
