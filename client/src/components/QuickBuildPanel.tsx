@@ -104,7 +104,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           min={1}
           max={config.quick.cycle === 'rotary' ? 4 : 16}
           step={1}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan [&_[role=slider]]:shadow-[0_0_6px_oklch(0.75_0.18_195/0.5)]"
+          tone="cyan"
         />
       </div>
 
@@ -123,7 +123,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           min={5}
           max={80}
           step={1}
-          className="[&_[role=slider]]:bg-neon-cyan [&_[role=slider]]:border-neon-cyan [&_[role=slider]]:shadow-[0_0_6px_oklch(0.75_0.18_195/0.5)]"
+          tone="cyan"
         />
       </div>
 
@@ -253,7 +253,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           min={4000}
           max={12000}
           step={100}
-          className="[&_[role=slider]]:bg-neon-pink [&_[role=slider]]:border-neon-pink [&_[role=slider]]:shadow-[0_0_6px_oklch(0.72_0.25_330/0.5)]"
+          tone="pink"
         />
       </div>
     </div>

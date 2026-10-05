@@ -13,6 +13,7 @@ import { ExportPanel } from '@/components/ExportPanel';
 import { WaveformVisualizer } from '@/components/WaveformVisualizer';
 import { PhysicsPanel } from '@/components/PhysicsPanel';
 import { ListenerPanel } from '@/components/ListenerPanel';
+import { FiringChase } from '@/components/FiringChase';
 import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
 import { solveFiringSchedule } from '../../../shared/ess/geometry';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -37,6 +38,7 @@ export default function Simulator() {
     setDriveMode,
     setPerspective,
     setStemGains,
+    setAutoLevel,
     shift,
     setIgnition,
     vehicleOptions,
@@ -76,6 +78,8 @@ export default function Simulator() {
   }, [loadedConfig]);
 
   const firingOrder = schedule.firingOrder;
+  const cycleDeg = schedule.intervalsDeg.reduce((sum, d) => sum + d, 0) || 720;
+  const cyclesPerSecond = (playbackState.rpm / 60) * (360 / cycleDeg);
 
   const playbackResetKey = useMemo(() => JSON.stringify({
     layout: config.quick.layout,
@@ -257,23 +261,15 @@ export default function Simulator() {
                 <h4 className="text-xs font-[Rajdhani] text-muted-foreground uppercase tracking-wide mb-2">
                   Cylinder Firing Sequence
                 </h4>
-                <div className="flex items-center justify-center gap-1 flex-wrap">
-                  {firingOrder.map((cyl, i) => (
-                    <div
-                      key={i}
-                      className={`w-8 h-8 rounded flex items-center justify-center text-xs font-[Orbitron] font-bold border transition-all duration-100 ${
-                        isPlaying && Math.floor(playbackState.rpm / 60) % config.quick.cylinderCount === i
-                          ? 'border-neon-pink bg-neon-pink/20 text-neon-pink box-glow-pink'
-                          : 'border-hud-line/40 text-muted-foreground'
-                      }`}
-                    >
-                      {cyl}
-                    </div>
-                  ))}
-                </div>
+                <FiringChase firingOrder={firingOrder} running={isPlaying} />
                 <p className="mt-2 text-[10px] font-[Rajdhani] text-muted-foreground">
                   Firing intervals {schedule.intervalsDeg.map((d) => Math.round(d)).join(' / ')}° crank
                 </p>
+                {isPlaying && (
+                  <p className="text-[10px] font-[Rajdhani] text-muted-foreground/80">
+                    Shown slowed down: at {playbackState.rpm.toLocaleString()} rpm each cylinder fires {Math.round(cyclesPerSecond)} times a second, {Math.round(cyclesPerSecond * firingOrder.length).toLocaleString()} firings a second in all.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -305,6 +301,8 @@ export default function Simulator() {
                 perspective={config.listener?.perspective ?? 'exterior-rear'}
                 onPerspectiveChange={setPerspective}
                 onStemsChange={setStemGains}
+                autoLevel={config.listener?.autoLevel ?? true}
+                onAutoLevelChange={setAutoLevel}
               />
             </div>
 

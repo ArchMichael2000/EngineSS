@@ -9,6 +9,8 @@ interface ListenerPanelProps {
   perspective: ListenerPerspective;
   onPerspectiveChange: (perspective: ListenerPerspective) => void;
   onStemsChange: (stems: Partial<StemGains>) => void;
+  autoLevel: boolean;
+  onAutoLevelChange: (on: boolean) => void;
 }
 
 const STEMS: Array<{ key: keyof StemGains; label: string; hint: string }> = [
@@ -21,7 +23,7 @@ const STEMS: Array<{ key: keyof StemGains; label: string; hint: string }> = [
 ];
 
 /** v16 listener placement and stem mixer. Stems change only what reaches the microphone, never the physics. */
-export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange }: ListenerPanelProps) {
+export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange, autoLevel, onAutoLevelChange }: ListenerPanelProps) {
   const [gains, setGains] = useState<Record<string, number>>(() => Object.fromEntries(STEMS.map((s) => [s.key, 100])));
   return (
     <div className="space-y-3">
@@ -38,6 +40,24 @@ export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange 
           ))}
         </SelectContent>
       </Select>
+      <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label="Playback level">
+        {([
+          [true, 'Auto level', 'A slow gain rider keeps every engine at a comfortable playback level (what a recordist does).'],
+          [false, 'Physical level', "The microphone's calibrated SPL: a quiet diesel stays quiet, a straight-piped V10 stays loud (peaks are limited, never clipped)."],
+        ] as const).map(([on, label, hint]) => (
+          <button
+            key={label}
+            type="button"
+            role="radio"
+            aria-checked={autoLevel === on}
+            title={hint}
+            onClick={() => onAutoLevelChange(on)}
+            className={`h-7 rounded border text-[10px] font-[Rajdhani] uppercase tracking-wide ${autoLevel === on ? 'border-neon-cyan text-neon-cyan bg-neon-cyan/10' : 'border-hud-line text-foreground/70'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="space-y-2">
         {STEMS.map((stem) => (
           <div key={stem.key} className="space-y-1" title={stem.hint}>
@@ -54,7 +74,7 @@ export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange 
                 setGains((g) => ({ ...g, [stem.key]: v }));
                 onStemsChange({ [stem.key]: v / 100 });
               }}
-              className="[&_[role=slider]]:bg-foreground/60 [&_[role=slider]]:border-foreground/60"
+              tone="muted"
             />
           </div>
         ))}

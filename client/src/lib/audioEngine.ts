@@ -39,9 +39,10 @@ export class AudioEngine {
   private vehicleOptions: VehicleOptions = { autoShift: true, launchControl: false, brake: 0 };
   private perspective: ListenerPerspective = "exterior-rear";
   private stemGains: Partial<StemGains> = {};
+  private autoLevel = true;
   private telemetry: EngineTelemetry | null = null;
   /** Audio-thread figures from the worklet: measured load, learned machine factor, internal rate. */
-  private audioStats: { load: number; machineFactor: number; internalRate: number; tier: number } | null = null;
+  private audioStats: { load: number; machineFactor: number; internalRate: number; tier: number; levelDb?: number; autoLevel?: boolean } | null = null;
   private engineInfo: { firingOrder: number[]; intervals: number[]; notes: string[]; displacementL: number; internalRate?: number; builds: number } | null = null;
 
   private config: EngineConfiguration = DEFAULT_ENGINE_CONFIG;
@@ -80,13 +81,12 @@ export class AudioEngine {
   private setupAudioGraph(): void {
     if (!this.ctx) return;
 
-    // Output limiter. The physics sets the level (each perspective maps a fixed dB SPL to full
-    // scale), and loud engines legitimately peak above it: a V12 at full throttle reaches about
-    // +2.5 dBFS at the rear, 3 m. Below −3 dBFS this is transparent; above, the 20:1 ratio and
-    // the node's 6 ms look-ahead hold peaks near −1 dBFS (including the spec's automatic makeup
-    // gain of about +1.7 dB), so level differences between engines survive and nothing clips.
+    // Safety limiter. Gain staging happens in the worklet (shared/ess/leveler.ts: a slow automatic
+    // level and a look-ahead limiter at −2 dBFS, the same code the export runs), so this node only
+    // catches what the browser's own resampling or a stray overshoot might add; it never engages
+    // in normal use.
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -3;
+    this.compressor.threshold.value = -1;
     this.compressor.knee.value = 1;
     this.compressor.ratio.value = 20;
     this.compressor.attack.value = 0.001;
@@ -110,6 +110,7 @@ export class AudioEngine {
     // Saved configurations from the legacy profiles load into the physical core.
     const nextConfig = { ...config, soundProfile: CURRENT_SOUND_PROFILE, seed: config.seed ?? 42 };
     if (config.listener?.perspective) this.perspective = config.listener.perspective;
+    if (config.listener?.autoLevel !== undefined) this.autoLevel = config.listener.autoLevel;
     this.config = nextConfig;
     if (this.state.isPlaying) {
       this.ensureEssNode();
@@ -126,6 +127,8 @@ export class AudioEngine {
       outputChannelCount: [2],
     });
     node.port.onmessage = (event) => {
+      // A node from an earlier start can still deliver a queued message; only the current one counts.
+      if (node !== this.essNode) return;
       const msg = event.data || {};
       if (msg.type === "telemetry") {
         this.telemetry = msg.telemetry;
@@ -149,6 +152,7 @@ export class AudioEngine {
     this.essNode = node;
     this.postControls();
     if (Object.keys(this.stemGains).length) node.port.postMessage({ type: "stems", stems: this.stemGains });
+    node.port.postMessage({ type: "autoLevel", on: this.autoLevel });
     return node;
   }
 
@@ -176,8 +180,15 @@ export class AudioEngine {
 
   stop(): void {
     this.state.isPlaying = false;
-    this.essNode?.disconnect();
+    const node = this.essNode;
     this.essNode = null;
+    if (node) {
+      // Disconnecting alone leaves the processor running (and posting telemetry) until the page
+      // closes; a second engine would then alternate its readings with the new one's.
+      node.port.postMessage({ type: "dispose" });
+      node.port.onmessage = null;
+      node.disconnect();
+    }
     this.telemetry = null;
 
     if (this.ctx?.state === "running") {
@@ -225,6 +236,16 @@ export class AudioEngine {
   setPerspective(perspective: ListenerPerspective): void {
     this.perspective = perspective;
     this.essNode?.port.postMessage({ type: "perspective", perspective });
+  }
+
+  /** Automatic level (on) or the perspective's calibrated SPL under a peak limiter (off). */
+  setAutoLevel(on: boolean): void {
+    this.autoLevel = on;
+    this.essNode?.port.postMessage({ type: "autoLevel", on });
+  }
+
+  getAutoLevel(): boolean {
+    return this.autoLevel;
   }
 
   getPerspective(): ListenerPerspective {

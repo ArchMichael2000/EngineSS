@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 interface RpmGaugeProps {
   rpm: number;
@@ -12,7 +12,12 @@ export function RpmGauge({ rpm, redline, maxRpm, boost = 0, isPlaying }: RpmGaug
   const max = maxRpm || redline + 500;
   const percentage = Math.min(1, rpm / max);
   const redlinePercentage = redline / max;
-  const isRedlining = rpm >= redline * 0.95;
+  // Hysteresis: the needle colour changes at 95 % of redline and back below 92 %, so it can't
+  // flicker while the engine sits near the limiter.
+  const redRef = useRef(false);
+  if (rpm >= redline * 0.95) redRef.current = true;
+  else if (rpm < redline * 0.92) redRef.current = false;
+  const isRedlining = isPlaying && redRef.current;
 
   const arcPath = useMemo(() => {
     const startAngle = -225;
