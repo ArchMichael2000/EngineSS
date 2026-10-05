@@ -37,9 +37,13 @@ function wav(path: string, l: Float32Array, r: Float32Array): void {
   buf.writeUInt16LE(16, 34);
   buf.write("data", 36);
   buf.writeUInt32LE(n * 4, 40);
+  // Calibrated pressure can exceed full scale: scale the file under it rather than clip.
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(l[i]), Math.abs(r[i]));
+  const g = peak > 0.98 ? 0.98 / peak : 1;
   for (let i = 0; i < n; i++) {
-    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, l[i])) * 32767), 44 + i * 4);
-    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, r[i])) * 32767), 46 + i * 4);
+    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, g * l[i])) * 32767), 44 + i * 4);
+    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, g * r[i])) * 32767), 46 + i * 4);
   }
   writeFileSync(path, buf);
 }

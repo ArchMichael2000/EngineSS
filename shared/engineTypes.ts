@@ -271,6 +271,12 @@ export interface PhysicalOverrides {
 export interface ListenerConfig {
   perspective: ListenerPerspective;
   monitorGainDb: number;
+  /**
+   * Automatic level (default on): a slow gain rider keeps loud and quiet engines near the same
+   * playback level. Off, the output stays at the perspective's calibrated SPL (a look-ahead limiter
+   * still keeps it under full scale).
+   */
+  autoLevel?: boolean;
 }
 
 /**
