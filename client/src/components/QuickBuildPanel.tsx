@@ -102,7 +102,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           value={[config.quick.cylinderCount]}
           onValueChange={([v]) => updateQuick('cylinderCount', v)}
           min={1}
-          max={config.quick.cycle === 'rotary' ? 4 : 16}
+          max={config.quick.cycle === 'rotary' ? 4 : config.quick.layout === 'radial' ? 18 : 16}
           step={1}
           tone="cyan"
         />

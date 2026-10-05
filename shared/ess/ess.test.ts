@@ -47,6 +47,19 @@ describe("firing schedules", () => {
     expect(solveFiringSchedule(specOf("yamaha-cp4")).intervalsDeg.map(Math.round)).toEqual([90, 180, 270, 180]);
   });
 
+  it("radials fire evenly at every cylinder count; even counts are staggered rows", () => {
+    for (const n of [3, 5, 7, 8, 9, 10, 12, 14, 18]) {
+      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n } }));
+      const s = solveFiringSchedule(spec);
+      for (const d of s.intervalsDeg) expect(d).toBeCloseTo(720 / n, 3);
+      if (n % 2 === 0 && (n / 2) % 2 === 1) {
+        // Rows of an odd count (2 × 5, 2 × 7, 2 × 9) alternate every event, as real two-row radials do.
+        const row = (cyl: number) => s.cylinders[cyl - 1].throwIndex;
+        for (let k = 0; k < n; k++) expect(row(s.firingOrder[k])).not.toBe(row(s.firingOrder[(k + 1) % n]));
+      }
+    }
+  });
+
   it("every cycle sums to its cycle length (720° four-stroke, 360° two-stroke)", () => {
     for (const key of Object.keys(REFERENCE_ENGINES)) {
       const spec = specOf(key);

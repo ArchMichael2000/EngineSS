@@ -64,8 +64,17 @@ export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: n
     };
   }
   if (layout === "radial") {
-    const axes = Array.from({ length: n }, (_, k) => (k * 360) / n);
-    return { bankAxesDeg: axes, bankOf: (c) => c - 1, throwOf: () => 0 };
+    // Single row for odd counts; even counts are built as staggered rows (two rows of 7 or 9 as in
+    // the R-2600/R-2800/R-3350, four rows of 7 for 28 as in the R-4360), one crank throw per row,
+    // each row offset by a fraction of the cylinder spacing so the rows' cylinders interleave.
+    const rows = radialRows(n);
+    const perRow = n / rows;
+    const spacing = 360 / perRow;
+    const axes = Array.from({ length: n }, (_, i) => {
+      const row = Math.floor(i / perRow);
+      return mod((i % perRow) * spacing + (row * spacing) / rows, 360);
+    });
+    return { bankAxesDeg: axes, bankOf: (c) => c - 1, throwOf: (c) => Math.floor((c - 1) / perRow) };
   }
   // W: four narrow banks (two VR pairs) when the count divides by 4, else a 3-bank broad arrow.
   if (n % 4 === 0 && n >= 8) {
@@ -84,6 +93,13 @@ export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: n
     bankOf: (c) => (c - 1) % 3,
     throwOf: (c) => Math.floor((c - 1) / 3),
   };
+}
+
+/** Rows of a radial: odd counts are one row; even counts two rows (four for 28, 36). */
+export function radialRows(n: number): number {
+  if (n % 2 === 1 || n < 4) return 1;
+  if (n >= 28 && n % 4 === 0) return 4;
+  return 2;
 }
 
 /** Throw angles of a balanced even-firing inline crank with `m` throws. */
@@ -165,7 +181,7 @@ function realiseOrder(order: number[], c: number[]): number[] | null {
   return best;
 }
 
-function optimalSchedule(c: number[], throwOf: (cyl: number) => number): number[] {
+function optimalSchedule(c: number[], throwOf: (cyl: number) => number, radial = false): number[] {
   const n = c.length;
   if (n === 1) return [0];
   let best: number[] = [];
@@ -179,13 +195,14 @@ function optimalSchedule(c: number[], throwOf: (cyl: number) => number): number[
     }
     let cost = unevenness(fire);
     if (cost > bestCost + 1e-6) continue;
-    // Tie-break: avoid consecutive firing of adjacent throws (bearing load; how real orders are chosen).
+    // Tie-break: avoid consecutive firing of adjacent throws (bearing load; how real orders are
+    // chosen). A multi-row radial's throws are its rows, and real ones alternate rows every event.
     const order = fire.map((a, i) => [a, i] as const).sort((a, b) => a[0] - b[0]).map((t) => t[1]);
     let adjacency = 0;
     for (let k = 0; k < n; k++) {
-      const a = order[k];
-      const b = order[(k + 1) % n];
-      if (Math.abs(throwOf(a + 1) - throwOf(b + 1)) === 1) adjacency++;
+      const ta = throwOf(order[k] + 1);
+      const tb = throwOf(order[(k + 1) % n] + 1);
+      if (radial ? ta === tb : Math.abs(ta - tb) === 1) adjacency++;
     }
     cost += adjacency * 1e-3;
     if (cost < bestCost - 1e-9) {
@@ -244,11 +261,33 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     const throwTable = crank.type === "custom" && crank.pinAnglesDeg?.length === n
       ? null
       : throwAngles(crank.type, throwCount);
+    // A multi-row radial's "single pin" is one pin per row, the rows' pins evenly spaced.
+    const radialThrows = spec.layout === "radial" && crank.type === "single-pin" && throwCount > 1;
     pins = Array.from({ length: n }, (_, i) => crank.type === "custom" && crank.pinAnglesDeg?.length === n
       ? crank.pinAnglesDeg[i]
-      : throwTable![throwOf(i + 1)] ?? 0);
-    const c = pins.map((p, i) => mod(p - bankAxesDeg[bankOf(i + 1)], 360));
-    const optimal = optimalSchedule(c, throwOf);
+      : radialThrows
+        ? (throwOf(i + 1) * 360) / throwCount
+        : throwTable![throwOf(i + 1)] ?? 0);
+    let c = pins.map((p, i) => mod(p - bankAxesDeg[bankOf(i + 1)], 360));
+    let optimal = optimalSchedule(c, throwOf, spec.layout === "radial");
+    if (radialThrows && throwCount === 2 && unevenness(optimal) > 1) {
+      // Rows of an even count can't interleave evenly with pins 180° apart (2 × 4: 45/90/135°);
+      // another pin offset can (2 × 4 at 135°: even 90°). Search offsets on the 180°/n grid.
+      let bestCost = unevenness(optimal);
+      for (let k = 1; k < 2 * n; k++) {
+        const offset = (k * 180) / n;
+        const trialPins = Array.from({ length: n }, (_, i) => (throwOf(i + 1) === 1 ? offset : 0));
+        const trialC = trialPins.map((p, i) => mod(p - bankAxesDeg[bankOf(i + 1)], 360));
+        const trial = optimalSchedule(trialC, throwOf, true);
+        const cost = unevenness(trial);
+        if (cost < bestCost - 1) {
+          bestCost = cost;
+          optimal = trial;
+          pins = trialPins;
+          c = trialC;
+        }
+      }
+    }
     if (validOrder(spec.firingOrder, n)) {
       fire = realiseOrder(spec.firingOrder, c);
       honoured = !!fire;
