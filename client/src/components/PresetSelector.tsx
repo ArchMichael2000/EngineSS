@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FACTORY_PRESETS } from '../../../shared/engineTypes';
+import { FACTORY_PRESETS, SABER_PRESETS } from '../../../shared/engineTypes';
 import type { EngineConfiguration } from '../../../shared/engineTypes';
 import { REFERENCE_ENGINES } from '../../../shared/ess/reference/engines';
 
@@ -20,7 +20,7 @@ export function PresetSelector({ onSelect }: PresetSelectorProps) {
       </div>
       <Select
         onValueChange={(key) => {
-          const preset = key.startsWith(REF_PREFIX) ? REFERENCE_ENGINES[key.slice(REF_PREFIX.length)] : FACTORY_PRESETS[key];
+          const preset = key.startsWith(REF_PREFIX) ? REFERENCE_ENGINES[key.slice(REF_PREFIX.length)] : SABER_PRESETS[key] ?? FACTORY_PRESETS[key];
           if (preset) {
             onSelect(preset.config);
           }
@@ -30,6 +30,16 @@ export function PresetSelector({ onSelect }: PresetSelectorProps) {
           <SelectValue placeholder="Load a preset..." />
         </SelectTrigger>
         <SelectContent className="bg-dark-elevated border-hud-line max-h-[420px]">
+          <SelectGroup label="Saber Cross-Four (X layout)">
+            {Object.entries(SABER_PRESETS).map(([key, preset]) => (
+              <SelectItem key={key} value={key} className="font-[Rajdhani]">
+                <div className="flex flex-col">
+                  <span className="text-sm">{preset.name}</span>
+                  <span className="text-xs text-muted-foreground">{preset.description}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectGroup>
           <SelectGroup label="Reference engines (v16 physical core)">
             {Object.entries(REFERENCE_ENGINES).map(([key, ref]) => (
               <SelectItem key={key} value={REF_PREFIX + key} className="font-[Rajdhani]">

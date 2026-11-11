@@ -238,10 +238,14 @@ export default function Simulator() {
             <div className="hud-panel hud-bracket rounded-lg p-4 w-full">
               <div className="text-center space-y-1">
                 <h2 className="text-sm font-[Orbitron] text-neon-cyan glow-cyan uppercase tracking-widest">
-                  {config.quick.cylinderCount}-Cylinder {config.quick.layout.toUpperCase()}
+                  {config.quick.cycle === 'rotary'
+                    ? `${config.quick.cylinderCount}-Rotor Wankel`
+                    : config.quick.layout === 'x'
+                      ? `SB${firingOrder.length} Cross-Four X`
+                      : `${config.quick.cylinderCount}-Cylinder ${config.quick.layout.toUpperCase()}`}
                 </h2>
                 <p className="text-xs font-[Rajdhani] text-muted-foreground">
-                  {config.quick.displacement}L | {config.quick.crankshaft} | {config.quick.exhaustCharacter} exhaust
+                  {config.quick.displacement}L | {config.quick.layout === 'x' ? `${config.physical?.xTiltDeg ?? 15}° tilt` : config.quick.crankshaft} | {config.quick.exhaustCharacter} exhaust
                   {config.quick.aspiration !== 'na' && ` | ${config.quick.aspiration}`}
                 </p>
               </div>
