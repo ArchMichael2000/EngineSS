@@ -122,15 +122,15 @@ export class ExhaustNetwork {
             for (let k = 0; k < steps; k++) {
               const t = (k + 0.5) / steps;
               const diameter = from * Math.pow(to / from, t);
-              port = this.extend(port, { lengthM: length / steps, diameterM: diameter, name: `${name}${i}.${k}` }, d + length / steps / 2, g);
+              port = this.extend(port, { lengthM: length / steps, diameterM: diameter, steepening: true, name: `${name}${i}.${k}` }, d + length / steps / 2, g);
               d += length / steps;
             }
           };
           cone(primaryD, belly, 0.4 * lt, 4, "diffuser");
-          port = this.extend(port, { lengthM: 0.12 * lt, diameterM: belly, name: `belly${i}` }, d + 0.06 * lt, g);
+          port = this.extend(port, { lengthM: 0.12 * lt, diameterM: belly, steepening: true, name: `belly${i}` }, d + 0.06 * lt, g);
           d += 0.12 * lt;
           cone(belly, stinger, 0.36 * lt, 3, "baffle");
-          port = this.extend(port, { lengthM: 0.3 * lt, diameterM: stinger, name: `stinger${i}` }, d + 0.15 * lt, g);
+          port = this.extend(port, { lengthM: 0.3 * lt, diameterM: stinger, steepening: true, name: `stinger${i}` }, d + 0.15 * lt, g);
           d += 0.3 * lt;
         } else {
           port = this.extend(port, { lengthM: 0.6, diameterM: pipeD, name: `pipe${i}` }, d + 0.3, g);
@@ -366,7 +366,7 @@ export class ExhaustNetwork {
   }
 
   /** Append a duct after `from`, joined by an area-change junction. */
-  private extend(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; name: string }, distanceM: number, group: number): Port {
+  private extend(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; steepening?: boolean; name: string }, distanceM: number, group: number): Port {
     const duct = this.addDuct(opts, distanceM, group);
     this.addJunction([from, { duct, end: "a" }]);
     return { duct, end: "b" };

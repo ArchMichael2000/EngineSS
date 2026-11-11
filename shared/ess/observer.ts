@@ -96,7 +96,11 @@ export class Observer {
   private boomBp1 = 0;
   private boomBp2 = 0;
 
-  constructor(private readonly fs: number, perspective: Perspective, readonly sources: SourceDef[]) {
+  /**
+   * @param exposed the engine is in the open (motorcycle, kart): no bonnet, firewall or body
+   *   between it and an outside listener, and the "cabin" is a rider's helmet, not a car interior.
+   */
+  constructor(private readonly fs: number, perspective: Perspective, readonly sources: SourceDef[], private readonly exposed = false) {
     this.def = PERSPECTIVES[perspective];
     this.paToFullScale = 1 / (2e-5 * Math.pow(10, this.def.fullScaleDbSpl / 20));
     let maxDelay = 16;
@@ -115,7 +119,9 @@ export class Observer {
     this.lines = sources.map(() => new DelayLine(maxDelay));
     for (const g of geometry) {
       const src = sources[g.s];
-      const shield = this.def.shielding(src.kind, src.position);
+      // Exposed engine: nothing shields an outside listener. On the machine, a helmet takes about
+      // 6 dB above 2 kHz off everything (estimated; no rider's-ear recording to check it against).
+      const shield = this.exposed ? (this.def === PERSPECTIVES.cabin ? { cutoffHz: 2000, gainDb: -6 } : { cutoffHz: 0, gainDb: 0 }) : this.def.shielding(src.kind, src.position);
       // The ground image stays coherent only at low frequency: finite ground impedance, turbulence
       // and the source's own extent decorrelate it above a few hundred Hz at these ranges (Daigle
       // 1979; Embleton 1996), so interference notches stay a few dB deep as in field recordings.
@@ -147,7 +153,7 @@ export class Observer {
       if (p.ear === 0) l += x;
       else r += x;
     }
-    if (this.def === PERSPECTIVES.cabin) {
+    if (this.def === PERSPECTIVES.cabin && !this.exposed) {
       // Engine-mount transmitted torque ripple → body panels → cabin "boom" (band 25–180 Hz).
       const kLo = Math.exp((-2 * Math.PI * 25) / this.fs);
       const kHi = Math.exp((-2 * Math.PI * 180) / this.fs);

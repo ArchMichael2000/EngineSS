@@ -24,6 +24,11 @@ export interface VehicleSpec {
   shiftRpm: number;
   /** Launch-control hold speed, rpm. */
   launchRpm: number;
+  /**
+   * The engine sits in the open (motorcycle, kart, test stand) instead of under a car's bonnet:
+   * the listener hears its structure and intake directly, with no body in the way.
+   */
+  exposedEngine?: boolean;
 }
 
 export interface VehicleControls {
@@ -233,7 +238,7 @@ export function defaultVehicle(displacementL: number, redlineRpm: number, idleRp
     const massKg = 110 + 90 * displacementL + 80;
     const vTop = clamp(powerLimitedTopSpeed(0.9 * peakPowerW, massKg, 0.5, 0.015), 25, 90);
     const finalDrive = ((topRpm * 2 * Math.PI) / 60) * r / (vTop * ratios[ratios.length - 1]);
-    return { massKg, tireRadiusM: r, gearRatios: ratios, finalDrive, efficiency: 0.9, cdA: 0.5, rollingResistance: 0.015, clutchCapacityNm: peakTorqueGuessNm * 2.2, shiftRpm: topRpm * 0.96, launchRpm: Math.round(topRpm * 0.55) };
+    return { massKg, tireRadiusM: r, gearRatios: ratios, finalDrive, efficiency: 0.9, cdA: 0.5, rollingResistance: 0.015, clutchCapacityNm: peakTorqueGuessNm * 2.2, shiftRpm: topRpm * 0.96, launchRpm: Math.round(topRpm * 0.55), exposedEngine: true };
   }
   const ratios = [3.6, 2.19, 1.54, 1.21, 1.0, 0.84];
   const r = 0.33;

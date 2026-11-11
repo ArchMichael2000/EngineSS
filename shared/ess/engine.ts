@@ -122,6 +122,7 @@ export class EngineSimulator {
   private readonly sourceQdot: Float64Array;
   private readonly sourceDefs: SourceDef[];
   private readonly ear = new Float64Array(2);
+  private readonly exposed: boolean;
 
   // Mechanical state
   private crankDeg = 0;
@@ -263,14 +264,20 @@ export class EngineSimulator {
     this.popPulse = new Float64Array(this.exhaust.groups.length);
     this.popRemaining = new Float64Array(this.exhaust.groups.length);
 
+    // An exposed engine (motorcycle, kart) sits about 1.3 m ahead of its exhaust outlet with the
+    // airbox behind it; a car's engine is under the bonnet at the front.
+    this.exposed = !!spec.vehicle.exposedEngine;
+    const outletY = Math.max(...this.exhaust.outlets.map((o) => o.position.y));
+    const enginePosition = this.exposed ? { x: 0, y: outletY + 1.3, z: 0.45 } : ENGINE_POSITION;
+    const intakePosition = this.exposed ? { x: 0.12, y: outletY + 1.0, z: 0.75 } : INTAKE_MOUTH_POSITION;
     this.sourceDefs = [
       ...this.exhaust.outlets.map((o) => ({ kind: "exhaust" as const, position: o.position })),
-      { kind: "intake", position: INTAKE_MOUTH_POSITION },
-      { kind: "structure", position: ENGINE_POSITION },
+      { kind: "intake", position: intakePosition },
+      { kind: "structure", position: enginePosition },
       ...(this.fi?.sourceDefs ?? []),
     ];
     this.sourceQdot = new Float64Array(this.sourceDefs.length);
-    this.observer = new Observer(sampleRate, options.perspective ?? "exterior-rear", this.sourceDefs);
+    this.observer = new Observer(sampleRate, options.perspective ?? "exterior-rear", this.sourceDefs, this.exposed);
     this.setMonitorGain(options.monitorGainDb ?? 0);
 
     // Idle-air feed-forward from the energy balance at idle: gross indicated work must cover
@@ -342,7 +349,7 @@ export class EngineSimulator {
   }
 
   setPerspective(perspective: Perspective): void {
-    this.observer = new Observer(this.sampleRate, perspective, this.sourceDefs);
+    this.observer = new Observer(this.sampleRate, perspective, this.sourceDefs, this.exposed);
   }
 
   setMonitorGain(db: number): void {

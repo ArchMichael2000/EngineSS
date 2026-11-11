@@ -249,7 +249,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     exhaust.pipeDiameterMm = headerD * 0.62;
     exhaust.tailpipeDiameterMm = ph.tailpipeDiameterMm ?? headerD * 0.7;
     exhaust.tailpipeLengthMm = 150;
-    if (!ph.muffler) exhaust.muffler = { type: character === "straight-pipe" ? "none" : "straight-through", bodyDiameterMm: headerD * 2.2, bodyLengthMm: character === "stock" ? 380 : 300, packing: character === "stock" ? 0.85 : character === "sport" ? 0.6 : 0.4 };
+    // Silencer packing in a two-stroke soaks up oil mist and carbon and absorbs far less than dry
+    // glass fibre does: about half as effective when stock, less on sport and race cans (estimated;
+    // set with the chamber's shock waves against the CRM250 and MZ recordings' 2–8 kHz content).
+    if (!ph.muffler) exhaust.muffler = { type: character === "straight-pipe" ? "none" : "straight-through", bodyDiameterMm: headerD * 2.2, bodyLengthMm: character === "stock" ? 380 : 300, packing: ph.mufflerPacking ?? (character === "stock" ? 0.45 : character === "sport" ? 0.25 : 0.12) };
   }
 
   if (rotarySpec) {

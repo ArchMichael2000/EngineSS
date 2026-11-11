@@ -742,6 +742,17 @@ export class Cylinder {
       this.misfired = true;
       return;
     }
+    // Dilution limit: a flame kernel does not survive in a charge that is mostly burned gas. Ignition
+    // is certain up to half burned gas by mass and impossible past about two thirds (four-stroke EGR
+    // tolerance ends near 40–50 %; a two-stroke's fresh charge is stratified toward the plug, which
+    // stretches it). A misfire leaves its charge in the cylinder, the next scavenge dilutes the
+    // burned gas further, and the engine fires again once it is under the limit: a lightly loaded
+    // two-stroke fires every second, third or fourth revolution ("four-stroking").
+    if (this.rng.next() < clamp((residualFraction - 0.5) / 0.18, 0, 1)) {
+      this.misfired = true;
+      this.burning = false;
+      return;
+    }
     const density = this.mass / this.volume;
     const rpm = (omega * 60) / (2 * Math.PI);
     const baseDuration = wiebeDuration(this.params.boreM, rpm, density, residualFraction, lambda);
