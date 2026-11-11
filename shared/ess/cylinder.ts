@@ -11,6 +11,8 @@ import type { CamSpec, RotarySpec, TwoStrokeSpec } from "./spec";
 import { rotaryChamberVolume } from "./spec";
 import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, orificeMassFlow, waveExponents } from "./gas";
 import type { Port } from "./waveguide";
+import { MOTION_STEPS_PER_DEG } from "./rods";
+import type { PistonMotion } from "./rods";
 import { arriving } from "./waveguide";
 
 const DEG = Math.PI / 180;
@@ -352,12 +354,17 @@ export class Cylinder {
   private intakeWasOpen = false;
   private exhaustWasOpen = false;
 
-  constructor(readonly params: CylinderParams, readonly fireAngleDeg: number, private readonly rng: Rng) {
+  /**
+   * @param motion piston motion of a link-rod cylinder (rods.ts), lengths in metres; omitted for a
+   *   plain slider-crank. The head and barrel are the same parts on every cylinder, so the
+   *   clearance volume follows the nominal stroke and the swept volume this cylinder's own.
+   */
+  constructor(readonly params: CylinderParams, readonly fireAngleDeg: number, private readonly rng: Rng, private readonly motion: PistonMotion | null = null) {
     const { boreM, strokeM, rodM, compressionRatio, cam } = params;
     this.area = (Math.PI / 4) * boreM * boreM;
     this.crankRadius = strokeM / 2;
-    this.sweptVolume = this.area * strokeM;
-    this.clearanceVolume = this.sweptVolume / Math.max(1.5, compressionRatio - 1);
+    this.sweptVolume = this.area * (motion ? motion.stroke : strokeM);
+    this.clearanceVolume = (this.area * strokeM) / Math.max(1.5, compressionRatio - 1);
     this.lambdaRod = this.crankRadius / rodM;
     this.woschniBore = 3.26 * Math.pow(boreM, -0.2);
     // Cycle angle 0 = firing TDC, 360 = overlap TDC.
@@ -461,6 +468,16 @@ export class Cylinder {
   private kinDs = 0;
   /** Slider-crank position into kinS / kinDs (no allocation: this runs per cylinder per sample). */
   private slider(alphaDeg: number): void {
+    const motion = this.motion;
+    if (motion) {
+      // Link-rod cylinder: tabulated exact motion, one revolution from its own TDC.
+      const x = (alphaDeg >= 360 ? alphaDeg - 360 : alphaDeg) * MOTION_STEPS_PER_DEG;
+      const i = x | 0;
+      const f = x - i;
+      this.kinS = motion.displacement[i] + (motion.displacement[i + 1] - motion.displacement[i]) * f;
+      this.kinDs = motion.rate[i] + (motion.rate[i + 1] - motion.rate[i]) * f;
+      return;
+    }
     const a = alphaDeg * DEG;
     const r = this.crankRadius;
     const l = r / this.lambdaRod;

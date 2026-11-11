@@ -68,7 +68,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
   const toggle = (key: Key, label: string, value: boolean, onValue: unknown = true) => (
     <div className="flex items-center justify-between" key={key}>
       <span className="text-[11px] font-[Rajdhani] uppercase text-foreground/75">{label}</span>
-      <Switch checked={value} onCheckedChange={(v) => (onValue === true ? set(key, v) : v ? set(key, onValue) : reset(key))} />
+      <Switch checked={value} onCheckedChange={(v) => (onValue === true ? set(key, v) : onValue === false ? (v ? reset(key) : set(key, false)) : v ? set(key, onValue) : reset(key))} />
     </div>
   );
 
@@ -99,7 +99,14 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
         ['common-pin', 'Common-pin (bank angle sets intervals)'], ['single-pin', 'Single-pin (radial / master rod)'],
       ])}
       {slider('compressionRatio', 'Compression ratio', spec.compressionRatio, 6, spec.diesel ? 24 : 16, 0.1, ':1', 1)}
-      {slider('rodLengthMm', 'Rod length', spec.rodLengthMm, spec.strokeMm * 1.3, spec.strokeMm * 2.4, 1, ' mm')}
+      {slider('rodLengthMm', spec.linkRods ? 'Master rod length' : 'Rod length', spec.rodLengthMm, spec.strokeMm * 1.3, spec.strokeMm * 2.6, 1, ' mm')}
+      {spec.layout === 'radial' && spec.crank.type === 'single-pin' && !spec.twoStroke && (
+        <>
+          {toggle('articulatedRods', 'Master-and-link rods', !!spec.linkRods, false)}
+          {spec.linkRods && slider('knuckleRadiusRatio', 'Knuckle circle / master rod', spec.linkRods.knuckleRadiusMm / spec.rodLengthMm, 0.1, 0.4, 0.01, '', 2)}
+        </>
+      )}
+      {spec.layout === 'x' && spec.x && slider('xPlanePitchMm', 'Rod plane pitch', spec.x.planePitchMm, Math.max(20, spec.boreMm * 0.3), spec.boreMm * 1.2, 0.5, ' mm', 1)}
       {slider('inertiaKgM2', 'Rotating inertia', spec.inertiaKgM2, 0.01, 1.5, 0.005, ' kg·m²', 3)}
 
       {spec.twoStroke && (<>

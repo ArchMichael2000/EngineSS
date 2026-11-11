@@ -14,6 +14,8 @@
  * (45° V-twin → 315/405, 90° common-pin V6 → 90/150), never tabulated.
  */
 import type { CrankSpec, EngineSpec, EssCrankType, EssLayout, CollectorStrategy, XLayoutSpec } from "./spec";
+import { articulatedMotion } from "./rods";
+import type { ArticulatedRow, PistonMotion } from "./rods";
 
 export interface CylinderGeometry {
   /** 1-based cylinder number. */
@@ -27,6 +29,10 @@ export interface CylinderGeometry {
   pinAngleDeg: number;
   /** Firing TDC within the 720° cycle (cylinder in firing-order slot 0 fires at 0). */
   fireAngleDeg: number;
+  /** Master-and-link rods: the row this cylinder belongs to (index into FiringSchedule.linkRows), its place in it (0 = master) and its piston motion (lengths in mm). */
+  linkRow?: number;
+  linkIndex?: number;
+  motion?: PistonMotion;
 }
 
 export interface FiringSchedule {
@@ -42,8 +48,10 @@ export interface FiringSchedule {
   notes: string[];
   /** Exhaust grouping must follow banks exactly (rotary: one port per rotor shared by its faces). */
   groupByBank?: boolean;
-  /** Cross-Four: crank offset of each module, degrees, and the engine's peak rocking couple (see xRockingCouple). */
+  /** Cross-Four: crank offset of each module, degrees. */
   moduleOffsetsDeg?: number[];
+  /** Master-and-link rod rows (radials), lengths in mm. */
+  linkRows?: ArticulatedRow[];
 }
 
 const mod = (x: number, m: number) => ((x % m) + m) % m;
@@ -89,9 +97,11 @@ export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: n
     const rows = radialRows(n);
     const perRow = n / rows;
     const spacing = 360 / perRow;
+    // Cylinders are numbered in the direction the crank turns (as on real radials), so a single row
+    // fires 1-3-5-7-9-2-4-6-8: the axis angle falls with the cylinder number, like the pin's.
     const axes = Array.from({ length: n }, (_, i) => {
       const row = Math.floor(i / perRow);
-      return mod((i % perRow) * spacing + (row * spacing) / rows, 360);
+      return mod(-((i % perRow) * spacing + (row * spacing) / rows), 360);
     });
     return { bankAxesDeg: axes, bankOf: (c) => c - 1, throwOf: (c) => Math.floor((c - 1) / perRow) };
   }
@@ -507,7 +517,7 @@ export function defaultFiringOrder(layout: EssLayout, cylinders: number, crank: 
   return (key8 && table[key8]) || table[`${layout}-${cylinders}`] || [];
 }
 
-export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm"> & Partial<Pick<EngineSpec, "cycle" | "x" | "strokeMm" | "rodLengthMm">>): FiringSchedule {
+export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm"> & Partial<Pick<EngineSpec, "cycle" | "x" | "strokeMm" | "rodLengthMm" | "linkRods">>): FiringSchedule {
   const n = Math.max(1, Math.floor(spec.cylinders));
   const notes: string[] = [];
   const cross = spec.layout === "x" && n % 4 === 0 && spec.cycle !== "rotary" ? spec.x ?? { tiltDeg: 15, phasing: "even-firing" as const, planePitchMm: 46 } : null;
@@ -597,7 +607,31 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     pinAngleDeg: mod(pins[i], 360),
     fireAngleDeg: mod(fire![i], 720),
   }));
-  const order = cylindersGeom.slice().sort((a, b) => a.fireAngleDeg - b.fireAngleDeg);
+  // Master-and-link rods: each link piston reaches TDC a few degrees off its plain-rod angle, and
+  // the ignition is timed to its own TDC (compensated magneto cams), so the firing angles shift too.
+  let linkRows: ArticulatedRow[] | undefined;
+  const link = spec.linkRods;
+  const explicit = crank.type === "custom" && crank.fireAnglesDeg?.length === n;
+  if (link && spec.layout === "radial" && !explicit && spec.strokeMm && spec.rodLengthMm) {
+    linkRows = [];
+    for (let row = 0; row < throwCount; row++) {
+      const members = cylindersGeom.filter((c) => c.throwIndex === row);
+      if (members.length < 2) continue;
+      const def: ArticulatedRow = { axesDeg: members.map((c) => c.bankAxisDeg), pinDeg: members[0].pinAngleDeg, crankRadius: spec.strokeMm / 2, masterRod: spec.rodLengthMm, knuckleRadius: link.knuckleRadiusMm, linkRod: link.lengthMm };
+      const motion = articulatedMotion(def);
+      members.forEach((c, k) => {
+        c.linkRow = linkRows!.length;
+        c.linkIndex = k;
+        c.motion = motion[k];
+        c.fireAngleDeg = mod(c.fireAngleDeg + motion[k].tdcOffsetDeg, 720);
+      });
+      linkRows.push(def);
+    }
+    if (linkRows.length) notes.push("Master-and-link rods: link cylinders reach TDC up to a few degrees early or late.");
+  }
+  // A shift of under a degree must not move a cylinder from the start of the cycle to its end.
+  const startOf = (a: number) => (linkRows?.length && a > 700 ? a - 720 : a);
+  const order = cylindersGeom.slice().sort((a, b) => startOf(a.fireAngleDeg) - startOf(b.fireAngleDeg));
   // Normalise so the first cylinder in the order fires at 0.
   const zero = order[0].fireAngleDeg;
   for (const cyl of cylindersGeom) cyl.fireAngleDeg = mod(cyl.fireAngleDeg - zero, 720);
@@ -618,6 +652,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     requestedOrderHonoured: honoured,
     notes,
     moduleOffsetsDeg: moduleOffsets,
+    linkRows,
   };
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { EngineSpec } from '../../../shared/ess/spec';
 import type { FiringSchedule } from '../../../shared/ess/geometry';
+import { articulatedState } from '../../../shared/ess/rods';
 
 /**
  * Animated cross-section of the engine as the simulator has it: every bank axis, crank pin, rod
@@ -109,7 +110,17 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
         const py = -Math.cos(pinAngle) * r;
         const along = px * ux + py * uy;
         const across = px * nx + py * ny;
-        const wrist = along + Math.sqrt(Math.max(0, rod * rod - across * across));
+        let wrist = along + Math.sqrt(Math.max(0, rod * rod - across * across));
+        // Master-and-link rods: a link rod runs from its knuckle pin on the master rod's big end.
+        let rodX = px;
+        let rodY = py;
+        const row = c.linkRow !== undefined ? schedule.linkRows?.[c.linkRow] : undefined;
+        if (row && c.linkIndex !== undefined) {
+          const state = articulatedState(row, c.linkIndex, theta);
+          wrist = state.distance;
+          rodX = -state.knuckle[0];
+          rodY = -state.knuckle[1];
+        }
         const a = mod(cycleAngle - c.fireAngleDeg, model.cycle);
         const stroke = strokeAt(a, model.cycle);
         const tone = STROKE_COLOR[stroke.kind];
@@ -159,9 +170,24 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
         ctx.lineWidth = Math.max(1.5, bore * 0.16 * scale);
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(cx + px * scale, cy + py * scale);
+        ctx.moveTo(cx + rodX * scale, cy + rodY * scale);
         ctx.lineTo(...P(wrist, 0));
         ctx.stroke();
+        if (row && c.linkIndex === 0) {
+          // The master rod's big end carries the knuckle pins: a disc of their radius about the crank pin.
+          ctx.fillStyle = alpha(METAL, 0.95);
+          ctx.strokeStyle = alpha(TEXT, 0.7);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(cx + px * scale, cy + py * scale, row.knuckleRadius * 1.12 * scale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else if (row) {
+          ctx.fillStyle = alpha(TEXT, 0.9);
+          ctx.beginPath();
+          ctx.arc(cx + rodX * scale, cy + rodY * scale, Math.max(1.5, bore * 0.05 * scale), 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         // Piston
         ctx.fillStyle = alpha(METAL, ghost);
@@ -402,7 +428,7 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [spec, model]);
+  }, [spec, model, schedule]);
 
   return (
     <div className="w-full">

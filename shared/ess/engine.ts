@@ -226,7 +226,13 @@ export class EngineSimulator {
       twoStroke: spec.twoStroke,
       rotary: spec.rotary,
     };
-    this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
+    this.cylinders = this.schedule.cylinders.map((g) => {
+      // Link-rod motion comes from the schedule in millimetres; the cylinder works in metres.
+      const motion = g.motion
+        ? { ...g.motion, stroke: g.motion.stroke / 1000, tdcDistance: g.motion.tdcDistance / 1000, displacement: g.motion.displacement.map((v) => v / 1000), rate: g.motion.rate.map((v) => v / 1000) }
+        : null;
+      return new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729), motion);
+    });
     for (const c of this.cylinders) c.dt = 1 / sampleRate;
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
     const tol = spec.calibration.buildTolerance;

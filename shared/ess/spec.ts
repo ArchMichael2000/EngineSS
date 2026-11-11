@@ -315,6 +315,12 @@ export interface EngineSpec {
   vrAngleDeg: number;
   /** Cross-Four geometry (layout "x"). */
   x?: XLayoutSpec | null;
+  /**
+   * Master-and-link rods (radial rows on a shared crank pin): the first cylinder of each row
+   * carries the master rod (`rodLengthMm`), the others link rods on knuckle pins around its big
+   * end. See rods.ts. Null = every cylinder on a plain rod.
+   */
+  linkRods?: { knuckleRadiusMm: number; lengthMm: number } | null;
   crank: CrankSpec;
   /** Requested firing order (1-based cylinder numbers). Empty = derive from crank. */
   firingOrder: number[];

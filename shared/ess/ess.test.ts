@@ -49,7 +49,8 @@ describe("firing schedules", () => {
 
   it("radials fire evenly at every cylinder count; even counts are staggered rows", () => {
     for (const n of [3, 5, 7, 8, 9, 10, 12, 14, 18]) {
-      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n } }));
+      // Plain rods: the idealised crank, exactly even. (Master-and-link rods are tested below.)
+      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n }, physical: { ...c.physical, articulatedRods: false } }));
       const s = solveFiringSchedule(spec);
       for (const d of s.intervalsDeg) expect(d).toBeCloseTo(720 / n, 3);
       if (n % 2 === 0 && (n / 2) % 2 === 1) {
@@ -57,6 +58,27 @@ describe("firing schedules", () => {
         const row = (cyl: number) => s.cylinders[cyl - 1].throwIndex;
         for (let k = 0; k < n; k++) expect(row(s.firingOrder[k])).not.toBe(row(s.firingOrder[(k + 1) % n]));
       }
+    }
+  });
+
+  it("a nine-cylinder radial fires 1-3-5-7-9-2-4-6-8, and its link rods make the intervals uneven", () => {
+    const s = solveFiringSchedule(specOf("pw-r985"));
+    expect(s.firingOrder).toEqual([1, 3, 5, 7, 9, 2, 4, 6, 8]);
+    expect(s.linkRows).toHaveLength(1);
+    // The master cylinder keeps its plain-rod TDC; link cylinders are up to about 4° off.
+    const offsets = s.cylinders.map((c) => c.motion!.tdcOffsetDeg);
+    expect(offsets[0]).toBeCloseTo(0, 6);
+    expect(Math.max(...offsets.map(Math.abs))).toBeGreaterThan(2.5);
+    expect(Math.max(...offsets.map(Math.abs))).toBeLessThan(5);
+    // Opposite sides of the master rod are mirror images.
+    for (let k = 1; k < 9; k++) expect(offsets[k]).toBeCloseTo(-offsets[9 - k], 3);
+    expect(s.intervalsDeg.reduce((a, b) => a + b, 0)).toBeCloseTo(720, 6);
+    expect(Math.max(...s.intervalsDeg) - Math.min(...s.intervalsDeg)).toBeGreaterThan(5);
+    // Strokes differ by well under a percent, and every piston returns to TDC (zero displacement) once a revolution.
+    for (const c of s.cylinders) {
+      expect(c.motion!.stroke / 131.8).toBeGreaterThan(0.999);
+      expect(c.motion!.stroke / 131.8).toBeLessThan(1.01);
+      expect(Math.min(...c.motion!.displacement)).toBeGreaterThan(-1e-6);
     }
   });
 

@@ -263,6 +263,10 @@ export interface PhysicalOverrides {
    * Cross-Four X layout: cylinder tilt off horizontal (0–45°, default 15), how the modules are
    * clocked along the crank, explicit module crank offsets (phasing 'custom'), and the rod-plane pitch.
    */
+  /** Radial engines: master-and-link rods (default on). Off = idealised plain rods, exactly even firing. */
+  articulatedRods: boolean;
+  /** Knuckle-pin circle radius as a fraction of the master rod length (default 0.22). */
+  knuckleRadiusRatio: number;
   xTiltDeg: number;
   xPhasing: 'even-firing' | 'low-couple' | 'custom';
   xModuleOffsetsDeg: number[];

@@ -9,6 +9,7 @@ import type { EngineConfiguration } from "../engineTypes";
 import type { CamSpec, CollectorStrategy, CrossoverType, DieselSpec, EngineSpec, RotarySpec, TwoStrokeSpec, EssCrankType, ExhaustRoutingType, ForcedInductionSpec, MufflerSpec } from "./spec";
 import { clamp } from "./gas";
 import { bankLayout } from "./geometry";
+import { KNUCKLE_RADIUS_RATIO } from "./rods";
 
 interface CamPreset {
   intake: number;
@@ -321,6 +322,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : twoStroke ? 12 : rotaryEngine ? (boosted ? 9.0 : 9.7) : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
+    linkRods:
+      layout === "radial" && crankType === "single-pin" && !twoStroke && (ph.articulatedRods ?? true)
+        ? { knuckleRadiusMm: rod * clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4), lengthMm: rod * (1 - clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4)) }
+        : null,
     x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch } : null,
     crank: {
       type: ph.fireAnglesDeg?.length === n ? "custom" : crankType,
