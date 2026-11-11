@@ -40,8 +40,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const rotaryEngine = q.cycle === "rotary";
   const rotors = clamp(Math.round(q.cylinderCount), 1, 4);
   // Rotaries: three working chambers per rotor.
-  const n = rotaryEngine ? rotors * 3 : clamp(Math.round(q.cylinderCount), 1, 24);
-  const layout = n === 1 || rotaryEngine ? "inline" : q.layout;
+  // Cross-Four X: whole modules of four cylinders (SB4 … SB24).
+  const crossFour = q.layout === "x" && !rotaryEngine;
+  const n = rotaryEngine ? rotors * 3 : crossFour ? clamp(Math.round(q.cylinderCount / 4), 1, 6) * 4 : clamp(Math.round(q.cylinderCount), 1, 24);
+  const layout = (n === 1 || rotaryEngine) && !crossFour ? "inline" : q.layout;
   const displacement = clamp(q.displacement, 0.05, 30);
   const perCyl = rotaryEngine ? displacement / rotors : displacement / n;
   const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6 && !rotaryEngine;
@@ -51,7 +53,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
 
   // ---- Bore / stroke
   // Diesels are undersquare (stroke ≈ 1.1–1.2 × bore) for combustion-chamber shape and torque.
-  const defaultRatio = twoStroke ? 1.0 : diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
+  // Cross-Four: the Saber study's long-stroke proportions (96 × 190 mm, 400 mm rod) unless overridden.
+  const defaultRatio = crossFour ? 96 / 190 : twoStroke ? 1.0 : diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
   let bore: number;
   let stroke: number;
   if (adv.bore && adv.stroke) {
@@ -100,11 +103,14 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     bore = Math.sqrt(3) * r * 1000;
     stroke = ((Math.PI * r) / 3) * 1000;
   }
-  const rod = ph.rodLengthMm ?? stroke * (twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
+  const rod = ph.rodLengthMm ?? stroke * (crossFour ? 400 / 190 : twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
 
   // ---- Crank
   const crankType: EssCrankType = ph.crankType ?? mapCrank(q.crankshaft, layout);
-  const bankAngle = adv.bankAngle ?? defaultBankAngle(layout, n);
+  const xTilt = clamp(ph.xTiltDeg ?? 15, 0, 45);
+  // Cross-Four: the angle between the upper and lower cylinder on each side is twice the tilt.
+  const bankAngle = crossFour ? 2 * xTilt : adv.bankAngle ?? defaultBankAngle(layout, n);
+  const xPlanePitch = ph.xPlanePitchMm ?? bore * (46 / 96);
 
   // ---- Valvetrain
   const pushrod = layout === "v" && n >= 8 && q.redline <= 7000 && !motorcycleLike;
@@ -163,14 +169,14 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
 
   // ---- Exhaust
   const character = q.exhaustCharacter;
-  const routing: ExhaustRoutingType = adv.exhaustRouting ?? ((layout === "v" || layout === "flat" || layout === "w") && n >= 6 ? "dual" : "single");
+  const routing: ExhaustRoutingType = adv.exhaustRouting ?? (crossFour || ((layout === "v" || layout === "flat" || layout === "w") && n >= 6) ? "dual" : "single");
   const crossPlaneV8 = layout === "v" && n === 8 && q.crankshaft === "cross-plane";
   const collector: CollectorStrategy = ph.collector ?? (layout === "radial" ? "all" : n === 4 && layout === "inline" && character !== "stock" ? "pairs-then-bank" : "bank");
   const primaryD = ph.primaryDiameterMm ?? clamp(24 + 25 * Math.sqrt(perCyl), 28, 64);
   const basePrimary = adv.primaryTubeLengthCm ? adv.primaryTubeLengthCm * 10 : character === "stock" ? 420 : character === "sport" ? 620 : 760;
   // Header primary plus the exhaust port in the head (~1.0 × bore).
   const portMm = bore * 1.0;
-  const primaryLengths = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : primaryLengthsFor(layout, n, bankAngle, basePrimary, adv.headerGeometry ?? (layout === "flat" && n === 4 && character !== "race" ? "unequal-length" : "equal-length"), bore).map((l) => l + portMm);
+  const primaryLengths = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : primaryLengthsFor(layout, n, bankAngle, xTilt, basePrimary, adv.headerGeometry ?? (layout === "flat" && n === 4 && character !== "race" ? "unequal-length" : "equal-length"), bore).map((l) => l + portMm);
   const groups = collector === "all" ? 1 : routing === "dual" || layout !== "inline" ? Math.max(1, Math.min(2, layout === "inline" ? (n >= 6 ? 2 : 1) : 2)) : n >= 6 ? 2 : 1;
   const perGroup = Math.max(1, n / groups);
   const pipeD = ph.pipeDiameterMm ?? clamp(34 + 17 * Math.sqrt(displacement / (routing === "dual" ? 2 : 1)), 38, 110);
@@ -299,7 +305,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const inertia = ph.inertiaKgM2 ?? (rotaryEngine ? 0.07 + 0.035 * rotors : twoStroke && displacement <= 1.6 ? 0.008 + 0.03 * displacement : motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
 
   return {
-    name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
+    name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : crossFour ? `SB${n} Cross-Four ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
     cycle: rotaryEngine ? "rotary" : twoStroke ? "two-stroke" : "four-stroke",
     twoStroke: twoStrokeSpec,
     rotary: rotarySpec,
@@ -314,6 +320,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     compressionRatio: ph.compressionRatio ?? (diesel ? (boosted ? 16.5 : 19) : twoStroke ? 12 : rotaryEngine ? (boosted ? 9.0 : 9.7) : boosted ? 9.4 : q.idleCharacter === "aggressive" || q.idleCharacter === "lopey" ? 11.6 : 10.8),
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
+    x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch } : null,
     crank: {
       type: ph.fireAnglesDeg?.length === n ? "custom" : crankType,
       pinAnglesDeg: ph.crankPinAnglesDeg,
@@ -337,7 +344,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       calibration.revLimiterRpm,
     ),
     inertiaKgM2: inertia,
-    borePitchMm: bore * 1.12 + 9,
+    borePitchMm: crossFour ? xPlanePitch : bore * 1.12 + 9,
     fuelLhvMjKg: diesel ? 42.8 : 43,
     fuelStoichAfr: diesel ? 14.5 : 14.7,
     seed: config.seed ?? 42,
@@ -377,9 +384,9 @@ function defaultBankAngle(layout: string, n: number): number {
  * headers take the shortest path from each port to a collector at one end of
  * the bank — the Subaru-EJ "boxer rumble" geometry.
  */
-function primaryLengthsFor(layout: string, n: number, bankAngle: number, base: number, geometry: string, boreMm: number): number[] {
+function primaryLengthsFor(layout: string, n: number, bankAngle: number, xTilt: number, base: number, geometry: string, boreMm: number): number[] {
   if (geometry !== "unequal-length") return Array(n).fill(base);
-  const { bankOf, throwOf } = bankLayout(layout as never, n, bankAngle, 15);
+  const { bankOf, throwOf } = bankLayout(layout as never, n, bankAngle, 15, xTilt);
   const pitch = boreMm * 1.12 + 9;
   const throws = Array.from({ length: n }, (_, i) => throwOf(i + 1));
   const maxThrow = Math.max(...throws);

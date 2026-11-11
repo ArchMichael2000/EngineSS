@@ -8,7 +8,32 @@ import type { VehicleSpec } from "./vehicle";
  * family-typical values whose provenance is recorded in docs/reference-sources.md.
  */
 
-export type EssLayout = "inline" | "v" | "flat" | "w" | "radial";
+export type EssLayout = "inline" | "v" | "flat" | "w" | "radial" | "x";
+
+/**
+ * Cross-Four X engine (the owner's Saber SB4 … SB16 study). The engine is a stack of modules, each
+ * one X of four cylinders with its own four crank pins set 90° apart, one plain rod per cylinder
+ * (no master or link rods). Seen from the front with the crank turning clockwise:
+ *
+ *   cylinder 1 upper left   axis 180° + t   pin  45°
+ *   cylinder 2 lower left   axis 180° − t   pin 135°
+ *   cylinder 3 lower right  axis   t        pin 225°
+ *   cylinder 4 upper right  axis  −t        pin 315°      (angles clockwise from "right")
+ *
+ * where t is the cylinder tilt off horizontal. Opposed cylinders (1 and 3, 2 and 4) reach outer
+ * dead centre together, like a boxer pair; the two pairs run 90° + 2t apart. Each further module
+ * turns on the shaft by its crank offset. Rod planes run 1 · 3 · 2 · 4 front to back.
+ */
+export interface XLayoutSpec {
+  /** Cylinder tilt off horizontal, degrees: 0 = a flat four-pin opposed engine, 45 = a square X. */
+  tiltDeg: number;
+  /** How the modules are clocked: evenest power pulses, smallest rocking couple, or explicit offsets. */
+  phasing: "even-firing" | "low-couple" | "custom";
+  /** Crank offset of each module, degrees (index 0 = front module). Used by `custom`. */
+  moduleOffsetsDeg?: number[];
+  /** Rod plane to rod plane spacing along the crank, mm. */
+  planePitchMm: number;
+}
 
 /**
  * Crank strategy.
@@ -288,6 +313,8 @@ export interface EngineSpec {
   bankAngleDeg: number;
   /** Narrow (VR) angle for W layouts, degrees. */
   vrAngleDeg: number;
+  /** Cross-Four geometry (layout "x"). */
+  x?: XLayoutSpec | null;
   crank: CrankSpec;
   /** Requested firing order (1-based cylinder numbers). Empty = derive from crank. */
   firingOrder: number[];

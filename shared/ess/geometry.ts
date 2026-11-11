@@ -13,7 +13,7 @@
  * Firing intervals are therefore *derived* from bank angle and throw layout
  * (45° V-twin → 315/405, 90° common-pin V6 → 90/150), never tabulated.
  */
-import type { CrankSpec, EngineSpec, EssCrankType, EssLayout, CollectorStrategy } from "./spec";
+import type { CrankSpec, EngineSpec, EssCrankType, EssLayout, CollectorStrategy, XLayoutSpec } from "./spec";
 
 export interface CylinderGeometry {
   /** 1-based cylinder number. */
@@ -42,11 +42,18 @@ export interface FiringSchedule {
   notes: string[];
   /** Exhaust grouping must follow banks exactly (rotary: one port per rotor shared by its faces). */
   groupByBank?: boolean;
+  /** Cross-Four: crank offset of each module, degrees, and the engine's peak rocking couple (see xRockingCouple). */
+  moduleOffsetsDeg?: number[];
 }
 
 const mod = (x: number, m: number) => ((x % m) + m) % m;
 
-export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: number, vrAngleDeg: number): {
+/** Rod plane (front to back) of cylinders 1–4 within a Cross-Four module: 1 · 3 · 2 · 4. */
+export const X_PLANE_ORDER = [0, 2, 1, 3] as const;
+/** Crank pin of cylinders 1–4 within a Cross-Four module, front view, degrees clockwise from "right". */
+const X_PINS = [45, 135, 225, 315] as const;
+
+export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: number, vrAngleDeg: number, xTilt = 15): {
   bankAxesDeg: number[];
   bankOf: (cyl: number) => number;
   throwOf: (cyl: number) => number;
@@ -61,6 +68,18 @@ export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: n
       bankAxesDeg: [-half, half],
       bankOf: (c) => (c % 2 === 1 ? 0 : 1),
       throwOf: (c) => Math.floor((c - 1) / 2),
+    };
+  }
+  if (layout === "x") {
+    // Cross-Four (see XLayoutSpec), in this file's convention (seen from the rear, so the crank
+    // turns the same way as every other layout here): banks upper right, lower right, lower left,
+    // upper left for cylinders 1–4 of each module; every cylinder has its own throw, in the rod-plane
+    // order 1 · 3 · 2 · 4.
+    const t = xTilt;
+    return {
+      bankAxesDeg: [90 - t, 90 + t, -90 - t, -90 + t],
+      bankOf: (c) => (c - 1) % 4,
+      throwOf: (c) => Math.floor((c - 1) / 4) * 4 + X_PLANE_ORDER[(c - 1) % 4],
     };
   }
   if (layout === "radial") {
@@ -158,59 +177,315 @@ function unevenness(fire: number[]): number {
  * firing TDC (c or c + 360) so the events occur in exactly this order within
  * one 720° cycle, preferring the most even such schedule. Null when the crank
  * cannot fire in this order.
+ *
+ * Each cylinder has two candidates, so walking the order with "which candidate did the previous
+ * cylinder take" as the state finds the optimum in O(n) (the former search tried all 2^(n−1)
+ * combinations). Ties resolve as that search did: the lowest choice mask wins, highest cylinder
+ * first.
  */
-function realiseOrder(order: number[], c: number[]): number[] | null {
+export function realiseOrder(order: number[], c: number[]): number[] | null {
   const n = c.length;
   if (order.length !== n) return null;
   const first = order[0] - 1;
-  let best: number[] | null = null;
-  let bestCost = Infinity;
-  const fire = new Array<number>(n);
-  for (let mask = 0; mask < 1 << (n - 1); mask++) {
-    let bit = 0;
-    for (let i = 0; i < n; i++) {
-      if (i === first) { fire[i] = 0; continue; }
-      fire[i] = mod(c[i] - c[first] + ((mask >> bit++) & 1 ? 360 : 0), 720);
+  const ideal = 720 / n;
+  // Candidate 0 / 1 of each cylinder, as offsets from the first cylinder in the order.
+  const cand = (i: number, bit: number) => mod(c[i] - c[first] + (bit ? 360 : 0), 720);
+  const forced = new Int8Array(n).fill(-1);
+  const sq = (d: number) => (d - ideal) * (d - ideal);
+  const solve = (): number => {
+    // cost[b]: best cost with the previous cylinder in the order on candidate b.
+    let prevA = 0;
+    let costA = 0;
+    let prevB = 0;
+    let costB = Infinity;
+    for (let k = 1; k < n; k++) {
+      const i = order[k] - 1;
+      let nA = Infinity;
+      let nB = Infinity;
+      const a = cand(i, 0);
+      const b = cand(i, 1);
+      if (forced[i] !== 1) {
+        if (costA < Infinity && a > prevA + 1e-6) nA = Math.min(nA, costA + sq(a - prevA));
+        if (costB < Infinity && a > prevB + 1e-6) nA = Math.min(nA, costB + sq(a - prevB));
+      }
+      if (forced[i] !== 0) {
+        if (costA < Infinity && b > prevA + 1e-6) nB = Math.min(nB, costA + sq(b - prevA));
+        if (costB < Infinity && b > prevB + 1e-6) nB = Math.min(nB, costB + sq(b - prevB));
+      }
+      prevA = a;
+      prevB = b;
+      costA = nA;
+      costB = nB;
     }
-    let ok = true;
-    for (let k = 1; k < n && ok; k++) ok = fire[order[k] - 1] > fire[order[k - 1] - 1] + 1e-6;
-    if (!ok) continue;
-    const cost = unevenness(fire);
-    if (cost < bestCost - 1e-9) { bestCost = cost; best = fire.slice(); }
+    return Math.min(costA + sq(720 - prevA), costB + sq(720 - prevB));
+  };
+  const best = solve();
+  if (!(best < Infinity)) return null;
+  for (let i = n - 1; i >= 0; i--) {
+    if (i === first) continue;
+    forced[i] = 0;
+    if (!(solve() <= best + 1e-7)) forced[i] = 1;
   }
-  return best;
+  return Array.from({ length: n }, (_, i) => (i === first ? 0 : cand(i, forced[i])));
 }
 
-function optimalSchedule(c: number[], throwOf: (cyl: number) => number, radial = false): number[] {
+/**
+ * The most even firing schedule a crank allows. Cylinder i reaches TDC at c[i] (mod 360) and fires
+ * on that revolution or the next; the schedule minimises Σ(interval − 720/n)², then the number of
+ * consecutive firings on adjacent throws (bearing load; how real orders are chosen. A multi-row
+ * radial's throws are its rows, and real ones alternate rows every event).
+ *
+ * Solved exactly by dynamic programming over the cylinders sorted by TDC: the firing sequence is
+ * the first-revolution cylinders in TDC order followed by the second-revolution ones, so the cost
+ * so far depends only on the last cylinder placed on each revolution. That is O(n³) per evaluation
+ * where the former search was O(2ⁿ) (12 s for 24 cylinders, doubling per cylinder). Ties resolve as
+ * that search did: among equal schedules the highest-numbered cylinders keep the first TDC after
+ * cylinder 1's.
+ */
+export function optimalSchedule(c: number[], throwOf: (cyl: number) => number, radial = false): number[] {
   const n = c.length;
   if (n === 1) return [0];
-  let best: number[] = [];
-  let bestCost = Infinity;
-  const combos = 1 << (n - 1);
-  const fire = new Array<number>(n);
-  for (let mask = 0; mask < combos; mask++) {
-    fire[0] = 0;
-    for (let i = 1; i < n; i++) {
-      fire[i] = mod(c[i] - c[0] + ((mask >> (i - 1)) & 1 ? 360 : 0), 720);
+  const ideal = 720 / n;
+  const rel = c.map((x) => mod(x - c[0], 360));
+  const sorted = rel.map((r, i) => [r, i] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const R = Float64Array.from(sorted, (t) => t[0]);
+  const C = sorted.map((t) => t[1]);
+  const throws = C.map((i) => throwOf(i + 1));
+  const g = (p: number, q: number, gap: number): number => {
+    const adjacent = radial ? throws[p] === throws[q] : Math.abs(throws[p] - throws[q]) === 1;
+    return (gap - ideal) * (gap - ideal) + (adjacent ? 1e-3 : 0);
+  };
+  // forced[p]: −1 free, 0 first revolution, 1 second revolution (by sorted position).
+  const forced = new Int8Array(n).fill(-1);
+  forced[0] = 0;
+  let a = new Float64Array(n);
+  let b = new Float64Array(n);
+  let na = new Float64Array(n);
+  let nb = new Float64Array(n);
+  const solve = (): number => {
+    let best = Infinity;
+    // Every cylinder on the first revolution.
+    {
+      let cost = 0;
+      let ok = true;
+      for (let p = 1; p < n && ok; p++) {
+        ok = forced[p] !== 1;
+        cost += g(p - 1, p, R[p] - R[p - 1]);
+      }
+      if (ok) best = cost + g(n - 1, 0, 720 - R[n - 1]);
     }
-    let cost = unevenness(fire);
-    if (cost > bestCost + 1e-6) continue;
-    // Tie-break: avoid consecutive firing of adjacent throws (bearing load; how real orders are
-    // chosen). A multi-row radial's throws are its rows, and real ones alternate rows every event.
-    const order = fire.map((a, i) => [a, i] as const).sort((a, b) => a[0] - b[0]).map((t) => t[1]);
-    let adjacency = 0;
-    for (let k = 0; k < n; k++) {
-      const ta = throwOf(order[k] + 1);
-      const tb = throwOf(order[(k + 1) % n] + 1);
-      if (radial ? ta === tb : Math.abs(ta - tb) === 1) adjacency++;
+    // fb: first cylinder (in TDC order) on the second revolution.
+    let prefix = 0;
+    for (let fb = 1; fb < n; fb++) {
+      if (fb > 1) {
+        if (forced[fb - 1] === 1) break;
+        prefix += g(fb - 2, fb - 1, R[fb - 1] - R[fb - 2]);
+      }
+      if (forced[fb] === 0) continue;
+      // a[j]: previous cylinder on revolution A, last B cylinder j. b[j]: previous on B, last A cylinder j.
+      a.fill(Infinity);
+      b.fill(Infinity);
+      b[fb - 1] = prefix;
+      for (let p = fb + 1; p < n; p++) {
+        na.fill(Infinity);
+        nb.fill(Infinity);
+        const step = R[p] - R[p - 1];
+        for (let j = 0; j < p - 1; j++) {
+          const ca = a[j];
+          const cb = b[j];
+          if (ca < Infinity) {
+            if (forced[p] !== 1) na[j] = Math.min(na[j], ca + g(p - 1, p, step));
+            if (forced[p] !== 0) nb[p - 1] = Math.min(nb[p - 1], ca + g(j, p, R[p] - R[j]));
+          }
+          if (cb < Infinity) {
+            if (forced[p] !== 1) na[p - 1] = Math.min(na[p - 1], cb + g(j, p, R[p] - R[j]));
+            if (forced[p] !== 0) nb[j] = Math.min(nb[j], cb + g(p - 1, p, step));
+          }
+        }
+        [a, na] = [na, a];
+        [b, nb] = [nb, b];
+      }
+      for (let j = 0; j < n - 1; j++) {
+        // Close the cycle: last A → first B (one revolution on), and last B → the first cylinder.
+        if (a[j] < Infinity) best = Math.min(best, a[j] + g(n - 1, fb, R[fb] + 360 - R[n - 1]) + g(j, 0, 360 - R[j]));
+        if (b[j] < Infinity) best = Math.min(best, b[j] + g(j, fb, R[fb] + 360 - R[j]) + g(n - 1, 0, 360 - R[n - 1]));
+      }
     }
-    cost += adjacency * 1e-3;
-    if (cost < bestCost - 1e-9) {
-      bestCost = cost;
-      best = fire.slice();
-    }
+    return best;
+  };
+  const best = solve();
+  const position = new Array<number>(n);
+  C.forEach((cyl, p) => { position[cyl] = p; });
+  for (let cyl = n - 1; cyl >= 1; cyl--) {
+    const p = position[cyl];
+    // The former search's zero choice: the first TDC after cylinder 1's, in absolute crank angle.
+    const preferred = mod(c[cyl] - c[0], 720) >= 360 ? 1 : 0;
+    forced[p] = preferred;
+    if (!(solve() <= best + 1e-7)) forced[p] = 1 - preferred;
   }
-  return best;
+  return rel.map((r, i) => mod(r + (forced[position[i]] === 1 ? 360 : 0), 720));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cross-Four X engine: module phasing. Ported from the owner's Saber kinematic study, whose results
+// these functions reproduce for the same tilt, module count and rod ratio.
+
+/** Gaps between a Cross-Four's outer-dead-centre events over one revolution, degrees. Each module contributes two, 90° + 2t apart. */
+export function xPulseGaps(offsetsDeg: number[], tiltDeg: number): number[] {
+  const ev: number[] = [];
+  for (const d of offsetsDeg) {
+    ev.push(mod(135 + tiltDeg - d, 360));
+    ev.push(mod(45 - tiltDeg - d, 360));
+  }
+  ev.sort((a, b) => a - b);
+  return ev.map((v, i) => (i + 1 < ev.length ? ev[i + 1] : ev[0] + 360) - v);
+}
+
+function xPulseScore(offsets: number[], t: number): number {
+  const g = xPulseGaps(offsets, t);
+  const ideal = 360 / g.length;
+  return g.reduce((sum, v) => sum + (v - ideal) * (v - ideal), 0);
+}
+
+/** Module crank offsets (whole degrees) that spread the power pulses as evenly as the tilt allows. */
+export function xEvenFiringOffsets(modules: number, tiltDeg: number): number[] {
+  const n = modules;
+  if (n <= 1) return [0];
+  let best: { s: number; off: number[] } | null = null;
+  for (const base of [360 / n, 180 / n, 180]) {
+    const off = Array.from({ length: n }, (_, k) => Math.round(k * base) % 360);
+    let s = xPulseScore(off, tiltDeg);
+    for (let pass = 0; pass < 6; pass++) {
+      let improved = false;
+      for (let k = 1; k < n; k++) {
+        let bestD = off[k];
+        let bestS = s;
+        for (let d = 0; d < 360; d++) {
+          off[k] = d;
+          const sc = xPulseScore(off, tiltDeg);
+          if (sc < bestS - 1e-9) { bestS = sc; bestD = d; }
+        }
+        off[k] = bestD;
+        if (bestS < s - 1e-9) { s = bestS; improved = true; }
+      }
+      if (!improved) break;
+    }
+    if (!best || s < best.s) best = { s, off: off.slice() };
+  }
+  return best!.off;
+}
+
+/**
+ * Piston acceleration of cylinders 1–4 of a module per unit ω², mm, at whole crank degrees 0…719
+ * (second difference over ±1°), and each cylinder's axis direction. The arithmetic follows the
+ * study's expression for expression, so searches that end in a tie between mirror-image
+ * solutions break it the same way.
+ */
+function xAccelerationTables(tiltDeg: number, crankRadiusMm: number, rodMm: number): { acc: Float64Array[]; ux: number[]; uy: number[] } {
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const axes = [180 + tiltDeg, 180 - tiltDeg, tiltDeg, -tiltDeg];
+  const ux = axes.map((a) => Math.cos(rad(a)));
+  const uy = axes.map((a) => Math.sin(rad(a)));
+  const travel = (id: number, th: number) => {
+    const pa = rad(X_PINS[id] + th);
+    const px = crankRadiusMm * Math.cos(pa);
+    const py = crankRadiusMm * Math.sin(pa);
+    const pu = px * ux[id] + py * uy[id];
+    const pn = -px * uy[id] + py * ux[id];
+    return pu + Math.sqrt(rodMm * rodMm - pn * pn);
+  };
+  const h = rad(1);
+  const acc = axes.map((_, id) => {
+    const table = new Float64Array(720);
+    for (let th = 0; th < 720; th++) table[th] = (travel(id, th + 1) - 2 * travel(id, th) + travel(id, th - 1)) / (h * h);
+    return table;
+  });
+  return { acc, ux, uy };
+}
+
+/**
+ * Peak reciprocating rocking couple of a Cross-Four over one revolution, per unit piston mass and
+ * ω², in mm² (the study's "m·ω²·u²"), about the engine's centre. Offsets are whole degrees.
+ */
+export function xRockingCouple(offsetsDeg: number[], tiltDeg: number, crankRadiusMm: number, rodMm: number, planePitchMm: number, stepDeg = 2): number {
+  return rockingPeak(xAccelerationTables(tiltDeg, crankRadiusMm, rodMm), offsetsDeg, planePitchMm, stepDeg);
+}
+
+function rockingPeak(tables: ReturnType<typeof xAccelerationTables>, offsets: number[], pitch: number, stepDeg: number): number {
+  const n = offsets.length;
+  const planes = 4 * n;
+  let peak = 0;
+  for (let d = 0; d < 360; d += stepDeg) {
+    let mx = 0;
+    let my = 0;
+    for (let k = 0; k < n; k++) {
+      const th = d + mod(Math.round(offsets[k]), 360);
+      for (let id = 0; id < 4; id++) {
+        const a = tables.acc[id][th];
+        const y = (4 * k + X_PLANE_ORDER[id] - (planes - 1) / 2) * pitch;
+        mx += a * y * tables.ux[id];
+        my += a * y * tables.uy[id];
+      }
+    }
+    peak = Math.max(peak, Math.hypot(mx, my));
+  }
+  return peak;
+}
+
+/** Module crank offsets (whole degrees) that minimise the rocking couple; pulse evenness breaks ties. */
+export function xLowCoupleOffsets(modules: number, tiltDeg: number, crankRadiusMm: number, rodMm: number): number[] {
+  const n = modules;
+  if (n <= 1) return [0];
+  const tables = xAccelerationTables(tiltDeg, crankRadiusMm, rodMm);
+  // The couple scales with the pitch, so the best offsets do not depend on it (the study's reference pitch).
+  const cost = (off: number[]) => rockingPeak(tables, off, 46, 6) + 0.01 * xPulseScore(off, tiltDeg);
+  const starts = [
+    Array.from({ length: n }, (_, k) => Math.round((k * 360) / n) % 360),
+    Array.from({ length: n }, (_, k) => Math.round((k * 180) / n) % 360),
+    xEvenFiringOffsets(n, tiltDeg),
+  ];
+  let best: { c: number; off: number[] } | null = null;
+  for (const s0 of starts) {
+    const off = s0.slice();
+    let c = cost(off);
+    for (const step of [15, 5, 1]) {
+      for (let pass = 0; pass < 3; pass++) {
+        let improved = false;
+        for (let k = 1; k < n; k++) {
+          const base = off[k];
+          const span = step === 15 ? 180 : step * 3;
+          let bestD = base;
+          let bestC = c;
+          for (let dd = -span; dd <= span; dd += step) {
+            off[k] = mod(base + dd, 360);
+            const cc = cost(off);
+            if (cc < bestC - 1e-9) { bestC = cc; bestD = off[k]; }
+          }
+          off[k] = bestD;
+          if (bestC < c - 1e-9) { c = bestC; improved = true; }
+        }
+        if (!improved) break;
+      }
+    }
+    if (!best || c < best.c) best = { c, off: off.slice() };
+  }
+  return best!.off;
+}
+
+const xOffsetCache = new Map<string, number[]>();
+
+/** The module offsets a Cross-Four spec asks for (searches are cached: they run on every edit in the app). */
+export function xModuleOffsets(x: XLayoutSpec, modules: number, crankRadiusMm: number, rodMm: number): number[] {
+  if (x.phasing === "custom" && x.moduleOffsetsDeg?.length === modules) return x.moduleOffsetsDeg.map((d) => mod(d, 360));
+  const lowCouple = x.phasing === "low-couple";
+  const key = `${lowCouple ? "c" : "f"}/${modules}/${x.tiltDeg}/${lowCouple ? (rodMm / crankRadiusMm).toFixed(4) : ""}`;
+  let off = xOffsetCache.get(key);
+  if (!off) {
+    off = lowCouple ? xLowCoupleOffsets(modules, x.tiltDeg, crankRadiusMm, rodMm) : xEvenFiringOffsets(modules, x.tiltDeg);
+    if (xOffsetCache.size > 400) xOffsetCache.clear();
+    xOffsetCache.set(key, off);
+  }
+  return off.slice();
 }
 
 export function defaultFiringOrder(layout: EssLayout, cylinders: number, crank: EssCrankType): number[] {
@@ -232,15 +507,27 @@ export function defaultFiringOrder(layout: EssLayout, cylinders: number, crank: 
   return (key8 && table[key8]) || table[`${layout}-${cylinders}`] || [];
 }
 
-export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm"> & Partial<Pick<EngineSpec, "cycle">>): FiringSchedule {
+export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders" | "bankAngleDeg" | "vrAngleDeg" | "crank" | "firingOrder" | "borePitchMm"> & Partial<Pick<EngineSpec, "cycle" | "x" | "strokeMm" | "rodLengthMm">>): FiringSchedule {
   const n = Math.max(1, Math.floor(spec.cylinders));
   const notes: string[] = [];
-  const { bankAxesDeg, bankOf, throwOf } = bankLayout(spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg);
-  if (spec.cycle === "two-stroke") return twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf);
+  const cross = spec.layout === "x" && n % 4 === 0 && spec.cycle !== "rotary" ? spec.x ?? { tiltDeg: 15, phasing: "even-firing" as const, planePitchMm: 46 } : null;
+  const { bankAxesDeg, bankOf, throwOf } = bankLayout(cross ? "x" : spec.layout === "x" ? "inline" : spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg, cross?.tiltDeg);
+  // Cross-Four: every cylinder on its own pin, the module's four pins 90° apart, each module clocked by its offset.
+  let crossPins: number[] | null = null;
+  let moduleOffsets: number[] | undefined;
+  if (cross) {
+    const stroke = spec.strokeMm ?? 190;
+    moduleOffsets = xModuleOffsets(cross, n / 4, stroke / 2, spec.rodLengthMm ?? stroke * 2.105);
+    crossPins = Array.from({ length: n }, (_, i) => mod(-(X_PINS[i % 4] + 90 + moduleOffsets![Math.floor(i / 4)]), 360));
+  }
+  const pitch = (cross ? cross.planePitchMm : spec.borePitchMm || 100) / 1000;
+  if (spec.cycle === "two-stroke") {
+    const tdc = crossPins ? crossPins.map((p, i) => mod(p - bankAxesDeg[bankOf(i + 1)], 360)) : null;
+    return { ...twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf, pitch, tdc), moduleOffsetsDeg: moduleOffsets };
+  }
   if (spec.cycle === "rotary") return rotarySchedule(spec, n);
   const crank: CrankSpec = spec.crank;
   const throwCount = Math.max(...Array.from({ length: n }, (_, i) => throwOf(i + 1))) + 1;
-  const pitch = (spec.borePitchMm || 100) / 1000;
 
   let pins: number[];
   let fire: number[] | null = null;
@@ -250,7 +537,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     fire = crank.fireAnglesDeg.map((a) => mod(a - crank.fireAnglesDeg![0], 720));
     pins = Array.from({ length: n }, (_, i) => mod(fire![i] + bankAxesDeg[bankOf(i + 1)], 360));
     honoured = true;
-  } else if (crank.type === "even-fire") {
+  } else if (crank.type === "even-fire" && !cross) {
     const tableOrder = defaultFiringOrder(spec.layout, n, "cross-plane");
     const requested = validOrder(spec.firingOrder, n) ? spec.firingOrder : validOrder(tableOrder, n) ? tableOrder : evenDefaultOrder(n, throwOf);
     fire = new Array(n);
@@ -263,7 +550,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
       : throwAngles(crank.type, throwCount);
     // A multi-row radial's "single pin" is one pin per row, the rows' pins evenly spaced.
     const radialThrows = spec.layout === "radial" && crank.type === "single-pin" && throwCount > 1;
-    pins = Array.from({ length: n }, (_, i) => crank.type === "custom" && crank.pinAnglesDeg?.length === n
+    pins = crossPins ?? Array.from({ length: n }, (_, i) => crank.type === "custom" && crank.pinAnglesDeg?.length === n
       ? crank.pinAnglesDeg[i]
       : radialThrows
         ? (throwOf(i + 1) * 360) / throwCount
@@ -330,6 +617,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     bankAxesDeg,
     requestedOrderHonoured: honoured,
     notes,
+    moduleOffsetsDeg: moduleOffsets,
   };
 }
 
@@ -344,11 +632,17 @@ function twoStrokeSchedule(
   bankAxesDeg: number[],
   bankOf: (cyl: number) => number,
   throwOf: (cyl: number) => number,
+  pitch: number,
+  /** TDC of each cylinder when the crank geometry fixes it (Cross-Four); otherwise an even-firing crank is assumed. */
+  tdc: number[] | null,
 ): FiringSchedule {
-  const pitch = (spec.borePitchMm || 100) / 1000;
   const fire = new Array<number>(n).fill(0);
   let honoured = false;
-  if (spec.crank.fireAnglesDeg?.length === n) {
+  if (tdc && spec.crank.fireAnglesDeg?.length !== n) {
+    tdc.forEach((a, i) => { fire[i] = a; });
+    const zero = Math.min(...fire);
+    for (let i = 0; i < n; i++) fire[i] -= zero;
+  } else if (spec.crank.fireAnglesDeg?.length === n) {
     spec.crank.fireAnglesDeg.forEach((a, i) => { fire[i] = mod(a - spec.crank.fireAnglesDeg![0], 360); });
     honoured = true;
   } else {
@@ -482,11 +776,19 @@ export function exhaustGroups(schedule: FiringSchedule, strategy: CollectorStrat
       return [{ cylinders: all, bank: 0 }];
     }
     if (schedule.bankCount > 2) {
-      // W / radial: pair adjacent banks onto two sides of the vehicle.
+      // W / X / radial: banks leaning left and banks leaning right collect on their own side.
       const left: number[] = [];
       const right: number[] = [];
-      for (const c of cyls) (schedule.bankAxesDeg[c.bank] < 0 ? left : right).push(c.number);
-      return [{ cylinders: left, bank: 0 }, { cylinders: right, bank: 1 }].filter((g) => g.cylinders.length);
+      for (const c of cyls) (Math.sin((schedule.bankAxesDeg[c.bank] * Math.PI) / 180) < -1e-9 ? left : right).push(c.number);
+      const sides = [{ cylinders: left, bank: 0 }, { cylinders: right, bank: 1 }].filter((g) => g.cylinders.length);
+      if (!schedule.moduleOffsetsDeg) return sides;
+      // Cross-Four with several modules: each bank (upper, lower) merges first, then the two join on its side.
+      return sides.map((g) => {
+        const banks = new Map<number, number[]>();
+        for (const c of g.cylinders) banks.set(cyls[c - 1].bank, [...(banks.get(cyls[c - 1].bank) ?? []), c]);
+        const pairs = [...banks.values()];
+        return pairs.length > 1 && pairs[0].length > 1 ? { ...g, pairs } : g;
+      });
     }
     return [0, 1].map((bank) => ({ cylinders: byBank(bank), bank })).filter((g) => g.cylinders.length);
   }

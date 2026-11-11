@@ -152,7 +152,8 @@ export class ExhaustNetwork {
       this.groups.forEach((g, gi) => {
         const cyl = g.cylinders[0];
         const duct = this.primaries[cyl - 1];
-        const side = this.sideOf(g.bank, gi);
+        // Three or more banks (W, X, radial): each stack exits on the side its bank leans to.
+        const side = schedule.bankCount > 2 ? (Math.sin((schedule.bankAxesDeg[g.bank] * Math.PI) / 180) < -1e-9 ? -1 : 1) : this.sideOf(g.bank, gi);
         this.addOutlet(duct, primaryD, { x: side * 0.35, y: 1.1 - 0.1 * gi, z: 0.45 });
       });
       return;

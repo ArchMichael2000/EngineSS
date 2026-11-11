@@ -1,5 +1,5 @@
 /** Engine layout types */
-export type EngineLayout = 'inline' | 'v' | 'flat' | 'w' | 'radial';
+export type EngineLayout = 'inline' | 'v' | 'flat' | 'w' | 'radial' | 'x';
 
 /** Crankshaft character types */
 export type CrankshaftType = 'cross-plane' | 'flat-plane' | 'even-fire' | 'odd-fire';
@@ -259,6 +259,14 @@ export interface PhysicalOverrides {
   /** Valved exhaust: bypass opening speed (auto mode) and mode. */
   exhaustValveOpenRpm: number;
   exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
+  /**
+   * Cross-Four X layout: cylinder tilt off horizontal (0–45°, default 15), how the modules are
+   * clocked along the crank, explicit module crank offsets (phasing 'custom'), and the rod-plane pitch.
+   */
+  xTiltDeg: number;
+  xPhasing: 'even-firing' | 'low-couple' | 'custom';
+  xModuleOffsetsDeg: number[];
+  xPlanePitchMm: number;
   turboCount: number;
   /** Variable-geometry turbine (default: boosted common-rail diesels). */
   turboVgt: boolean;
