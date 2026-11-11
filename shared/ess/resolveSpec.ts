@@ -103,7 +103,8 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     bore = Math.sqrt(3) * r * 1000;
     stroke = ((Math.PI * r) / 3) * 1000;
   }
-  const rod = ph.rodLengthMm ?? stroke * (crossFour ? 400 / 190 : twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
+  // Radials need long rods for the cylinders to clear each other around the crankcase (≈ 2.1 × stroke on the Wasp family).
+  const rod = ph.rodLengthMm ?? stroke * (crossFour ? 400 / 190 : layout === "radial" ? 2.1 : twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
 
   // ---- Crank
   const crankType: EssCrankType = ph.crankType ?? mapCrank(q.crankshaft, layout);

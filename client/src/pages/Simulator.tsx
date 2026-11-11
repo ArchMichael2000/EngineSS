@@ -14,6 +14,7 @@ import { WaveformVisualizer } from '@/components/WaveformVisualizer';
 import { PhysicsPanel } from '@/components/PhysicsPanel';
 import { ListenerPanel } from '@/components/ListenerPanel';
 import { FiringChase } from '@/components/FiringChase';
+import { EngineView } from '@/components/EngineView';
 import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
 import { solveFiringSchedule } from '../../../shared/ess/geometry';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -44,7 +45,8 @@ export default function Simulator() {
     vehicleOptions,
     setVehicleOptions,
   } = useAudioEngine();
-  const schedule = useMemo(() => solveFiringSchedule(resolveEngineSpec(config)), [config]);
+  const spec = useMemo(() => resolveEngineSpec(config), [config]);
+  const schedule = useMemo(() => solveFiringSchedule(spec), [spec]);
 
   const [activeTab, setActiveTab] = useState('quick');
   const [showExport, setShowExport] = useState(false);
@@ -258,6 +260,14 @@ export default function Simulator() {
               boost={playbackState.boost}
               isPlaying={isPlaying}
             />
+
+            {/* Engine cross-section */}
+            <div className="hud-panel rounded-lg p-4 w-full">
+              <h4 className="text-xs font-[Rajdhani] text-muted-foreground uppercase tracking-wide mb-2 text-center">
+                Engine Cross-Section
+              </h4>
+              <EngineView spec={spec} schedule={schedule} rpm={playbackState.rpm} running={isPlaying} />
+            </div>
 
             {/* Firing Order Visualization */}
             <div className="hud-panel rounded-lg p-4 w-full">
