@@ -13,7 +13,7 @@ import type { EngineSpec } from "./spec";
 import type { ExhaustGroup, FiringSchedule } from "./geometry";
 import { exhaustGroups } from "./geometry";
 import { BandNoise, C_AIR, P_AMBIENT, R_AIR, RHO_AIR, Rng, T_AMBIENT, clamp, orificeMassFlow } from "./gas";
-import { Duct, Junction, RadiationLoad, ReservoirOrifice, ResistiveJoint, send } from "./waveguide";
+import { Duct, Junction, RadiationLoad, ReservoirOrifice, ResistiveJoint } from "./waveguide";
 import type { Port } from "./waveguide";
 
 export interface Vec3 {
@@ -72,7 +72,7 @@ export class ExhaustNetwork {
   /** Pending injected mass-equivalent flow per collector (afterfire expansion, kg/s). */
   readonly collectorInjection: Float64Array;
   private readonly chain: ChainDuct[] = [];
-  private readonly solvers: Array<(dt: number) => void> = [];
+  private readonly solvers: Array<() => void> = [];
   private readonly joints: ResistiveJoint[] = [];
   private readonly groupOfCylinder: number[];
   private readonly egtByGroup: Float64Array;
@@ -219,7 +219,7 @@ export class ExhaustNetwork {
           orifice: new ReservoirOrifice({ duct: downpipe, end: "a" }, this.sampleRate),
         };
         this.turbines.push(stage);
-        this.solvers.push((dt) => this.solveTurbine(stage, dt));
+        this.solvers.push(() => this.solveTurbine(stage, 1 / this.sampleRate));
         heads.push({ duct: downpipe, end: "b" });
       }
       chainHeads = heads;
@@ -322,12 +322,14 @@ export class ExhaustNetwork {
 
   private addJunction(ports: Port[], volumeM3 = 0, autoSolve = true): Junction {
     const j = new Junction(ports, volumeM3, P_AMBIENT, 1.34);
+    j.dt = 1 / this.sampleRate;
     if (!autoSolve) return j;
     const index = this.collectors.length;
     const isCollector = ports.length >= 2;
-    this.solvers.push((dt) => {
+    this.solvers.push(() => {
       const inj = isCollector && this.collectors[index] === j ? this.collectorInjection[index] : 0;
-      j.solve(inj, dt);
+      if (inj === 0) j.passive();
+      else j.solve(inj, j.dt);
     });
     return j;
   }
@@ -440,8 +442,7 @@ export class ExhaustNetwork {
     let tick = 0;
     this.solvers.push(() => {
       if ((tick++ & 15) === 0) load.setSpeedOfSound(duct.c);
-      const reflected = load.process(duct.arrivingB, duct.Z);
-      send({ duct, end: "b" }, reflected);
+      duct.sendB = load.process(duct.arrivingB, duct.Z);
       outlet.volumeAcceleration = load.volumeAcceleration;
     });
   }
@@ -473,13 +474,15 @@ export class ExhaustNetwork {
   }
 
   /** Solve every non-valve boundary for this sample (ducts' beginSample must already have run). */
-  step(dt: number): void {
-    for (let i = 0; i < this.solvers.length; i++) this.solvers[i](dt);
+  step(_dt: number): void {
+    for (let i = 0; i < this.solvers.length; i++) this.solvers[i]();
     this.collectorInjection.fill(0);
   }
 
   /** Record exhaust flow from a cylinder (for temperatures and jet noise). */
-  noteCylinderFlow(cylinderIndex: number, massFlow: number, gasTempK: number): void {
+  noteCylinderFlow(cylinderIndex: number, cylinder: { exhaustMassFlow: number; exhaustGasTemp: number }): void {
+    const massFlow = cylinder.exhaustMassFlow;
+    const gasTempK = cylinder.exhaustGasTemp;
     if (massFlow <= 0) return;
     const g = this.groupOfCylinder[cylinderIndex];
     const w = massFlow * 2e-3;

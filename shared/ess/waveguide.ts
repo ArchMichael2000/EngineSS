@@ -20,8 +20,9 @@ const BETA_NL = (GAMMA_GAS + 1) / 2;
 
 export class DelayLine {
   readonly buf: Float64Array;
-  private readonly mask: number;
-  private w = 0;
+  /** Buffer length − 1 (the length is a power of two) and the write index; read by Duct.beginSample. */
+  readonly mask: number;
+  w = 0;
 
   constructor(maxDelaySamples: number) {
     let size = 8;
@@ -37,8 +38,9 @@ export class DelayLine {
 
   /** Cubic Hermite read `d` samples behind the most recent write (d ≥ 1). */
   read(d: number): number {
-    const pos = this.w - d;
-    const i = Math.floor(pos);
+    // Offset by the buffer size so the position is positive and truncation is a floor.
+    const pos = this.w + this.buf.length - d;
+    const i = pos | 0;
     const f = pos - i;
     const m = this.mask;
     const xm1 = this.buf[(i - 1) & m];
@@ -53,8 +55,8 @@ export class DelayLine {
 
   /** Linear-interpolated read (used for the second, amplitude-corrected steepening read). */
   readLinear(d: number): number {
-    const pos = this.w - d;
-    const i = Math.floor(pos);
+    const pos = this.w + this.buf.length - d;
+    const i = pos | 0;
     const f = pos - i;
     const a = this.buf[i & this.mask];
     return a + (this.buf[(i + 1) & this.mask] - a) * f;
@@ -88,16 +90,19 @@ export interface DuctOptions {
  * then `endSample(sendA, sendB)`.
  */
 export class Duct {
+  // Every number that changes while running starts as a number here. A field first created as
+  // `undefined` is stored by the engine as a generic value, and each later store of a fraction
+  // then allocates (60 ducts × 4 fields × 48 000 samples a second of garbage).
   readonly area: number;
   readonly radius: number;
-  lengthM: number;
-  temperatureK: number;
-  meanPressurePa: number;
-  c: number;
-  rho: number;
+  lengthM = 0;
+  temperatureK = 0;
+  meanPressurePa = 0;
+  c = 0;
+  rho = 0;
   /** Admittance A/(ρc), m³/(s·Pa). */
-  Y: number;
-  delaySamples: number;
+  Y = 0;
+  delaySamples = 1;
   /** Delay the line glides toward (temperature changes become smooth Doppler shifts, not steps). */
   private targetDelay = 1.5;
   private targetLossCoeff = 0;
@@ -184,10 +189,12 @@ export class Duct {
     this.targetDelay = Math.min(maxD, Math.max(1.5, transit - Math.min(filterDelay, transit * 0.5)));
     this.targetLossCoeff = lossCoeff;
     this.targetLossGain = lossGain;
+    this.gliding = true;
     if (!this.initialised) {
       this.delaySamples = this.targetDelay;
       this.lossCoeff = lossCoeff;
       this.lossGain = lossGain;
+      this.stiffness = rho * c * c;
       this.initialised = true;
     }
   }
@@ -214,22 +221,109 @@ export class Duct {
     return 1 / this.Y;
   }
 
-  beginSample(): void {
-    // Gas state glides (≈10 ms) so impedance and delay never step: a step in ρc/A under mean flow
-    // is a pressure step at every junction, i.e. broadband clicks.
+  /** True while the gas state is still moving toward its targets (see glide). */
+  private gliding = true;
+
+  /**
+   * Gas state glides (≈10 ms) so impedance and delay never step: a step in ρc/A under mean flow
+   * is a pressure step at every junction, i.e. broadband clicks. Once every quantity is within
+   * 1e-10 of its target it is set there and the glide stops until the next setTemperature.
+   */
+  private glide(): void {
     const g = 0.002;
-    this.delaySamples += (this.targetDelay - this.delaySamples) * g;
-    this.c += (this.targetC - this.c) * g;
-    this.rho += (this.targetRho - this.rho) * g;
+    const dDelay = this.targetDelay - this.delaySamples;
+    const dC = this.targetC - this.c;
+    const dRho = this.targetRho - this.rho;
+    const dLoss = this.targetLossCoeff - this.lossCoeff;
+    const dGain = this.targetLossGain - this.lossGain;
+    const tol = 1e-10;
+    if (Math.abs(dDelay) < tol * this.targetDelay && Math.abs(dC) < tol * this.targetC && Math.abs(dRho) < tol * this.targetRho && Math.abs(dLoss) < tol && Math.abs(dGain) < tol) {
+      this.delaySamples = this.targetDelay;
+      this.c = this.targetC;
+      this.rho = this.targetRho;
+      this.lossCoeff = this.targetLossCoeff;
+      this.lossGain = this.targetLossGain;
+      this.gliding = false;
+    } else {
+      this.delaySamples += dDelay * g;
+      this.c += dC * g;
+      this.rho += dRho * g;
+      this.lossCoeff += dLoss * g;
+      this.lossGain += dGain * g;
+    }
     this.Y = this.area / (this.rho * this.c);
-    this.lossCoeff += (this.targetLossCoeff - this.lossCoeff) * 0.002;
-    this.lossGain += (this.targetLossGain - this.lossGain) * 0.002;
-    let rawB = this.fwd.read(this.delaySamples);
-    let rawA = this.bwd.read(this.delaySamples);
+    this.stiffness = this.rho * this.c * this.c;
+  }
+
+  private stiffness = 1;
+
+  /**
+   * Read both travelling waves at the duct's delay. The delay-line reads are written out here
+   * rather than called: a call that returns a fraction allocates unless the compiler inlines it,
+   * and this runs for every duct every sample.
+   */
+  beginSample(): void {
+    if (this.gliding) this.glide();
+    const fwd = this.fwd;
+    const bwd = this.bwd;
+    const fb = fwd.buf;
+    const bb = bwd.buf;
+    const m = fwd.mask;
+    const size = m + 1;
+    const d = this.delaySamples;
+    let rawB: number;
+    let rawA: number;
     if (this.steepening) {
-      const stiffness = this.rho * this.c * this.c;
-      rawB = this.fwd.readLinear(this.steepenedDelay(rawB - this.dcB, stiffness));
-      rawA = this.bwd.readLinear(this.steepenedDelay(rawA - this.dcA, stiffness));
+      // The wave's own amplitude sets its speed: dx/dt = c + β·u, so the read delay shrinks by
+      // 1/(1 + M) with M = β·p/(ρc²) (limited to ±0.3). A two-point read of that amplitude is
+      // enough to place the steepened read, which is the one that is heard.
+      const maxD = fb.length - 12;
+      const scale = BETA_NL / this.stiffness;
+      let pos = fwd.w + size - d;
+      let i = pos | 0;
+      let a = fb[i & m];
+      let mach = (a + (fb[(i + 1) & m] - a) * (pos - i) - this.dcB) * scale;
+      if (mach > 0.3) mach = 0.3;
+      else if (mach < -0.3) mach = -0.3;
+      let ds = d / (1 + mach);
+      if (ds > maxD) ds = maxD;
+      if (ds < 1.5) ds = 1.5;
+      pos = fwd.w + size - ds;
+      i = pos | 0;
+      a = fb[i & m];
+      rawB = a + (fb[(i + 1) & m] - a) * (pos - i);
+
+      pos = bwd.w + size - d;
+      i = pos | 0;
+      a = bb[i & m];
+      mach = (a + (bb[(i + 1) & m] - a) * (pos - i) - this.dcA) * scale;
+      if (mach > 0.3) mach = 0.3;
+      else if (mach < -0.3) mach = -0.3;
+      ds = d / (1 + mach);
+      if (ds > maxD) ds = maxD;
+      if (ds < 1.5) ds = 1.5;
+      pos = bwd.w + size - ds;
+      i = pos | 0;
+      a = bb[i & m];
+      rawA = a + (bb[(i + 1) & m] - a) * (pos - i);
+    } else {
+      // Cubic Hermite, as DelayLine.read.
+      let pos = fwd.w + size - d;
+      let i = pos | 0;
+      let f = pos - i;
+      let xm1 = fb[(i - 1) & m];
+      let x0 = fb[i & m];
+      let x1 = fb[(i + 1) & m];
+      let x2 = fb[(i + 2) & m];
+      rawB = ((((0.5 * (x2 - xm1) + 1.5 * (x0 - x1)) * f + (xm1 - 2.5 * x0 + 2 * x1 - 0.5 * x2)) * f + 0.5 * (x1 - xm1)) * f) + x0;
+      pos = bwd.w + size - d;
+      i = pos | 0;
+      f = pos - i;
+      xm1 = bb[(i - 1) & m];
+      x0 = bb[i & m];
+      x1 = bb[(i + 1) & m];
+      x2 = bb[(i + 2) & m];
+      rawA = ((((0.5 * (x2 - xm1) + 1.5 * (x0 - x1)) * f + (xm1 - 2.5 * x0 + 2 * x1 - 0.5 * x2)) * f + 0.5 * (x1 - xm1)) * f) + x0;
     }
     const k = this.lossCoeff;
     this.lossB = rawB + k * (this.lossB - rawB);
@@ -240,13 +334,6 @@ export class Duct {
     this.arrivingA = this.dcA + (this.lossA - this.dcA) * this.lossGain;
     this.sendA = this.arrivingA;
     this.sendB = this.arrivingB;
-  }
-
-  private steepenedDelay(p: number, stiffness: number): number {
-    let mach = (BETA_NL * p) / stiffness;
-    if (mach > 0.3) mach = 0.3;
-    else if (mach < -0.3) mach = -0.3;
-    return Math.max(1.5, Math.min(this.fwd.capacity - 4, this.delaySamples / (1 + mach)));
   }
 
   /** Inject the waves leaving end a (travelling downstream) and end b (travelling upstream). */
@@ -331,6 +418,30 @@ export class Junction {
    * @param conductance dmExt/dp (kg/(s·Pa), ≤ 0 for a feed that weakens as node pressure rises)
    */
   solve(mExt: number, dt: number, conductance = 0): void {
+    this.inFlow = mExt;
+    this.dt = dt;
+    this.inConductance = conductance;
+    this.run();
+  }
+
+  /** Time step for `passive`, s. */
+  dt = 1 / 48000;
+  private inFlow = 0;
+  private inConductance = 0;
+
+  /** Solve with nothing injected at the node (the common case), using the stored time step. */
+  passive(): void {
+    this.inFlow = 0;
+    this.inConductance = 0;
+    this.run();
+  }
+
+  // Inputs arrive in fields: a fraction passed as an argument is a heap allocation when the call
+  // is not inlined, and an engine has forty-odd junctions solved every sample.
+  private run(): void {
+    const mExt = this.inFlow;
+    const dt = this.dt;
+    const conductance = this.inConductance;
     const lossy = this.lossIntoDuct > 0 || this.lossOutOfDuct > 0;
     let sumY = 0;
     let sumYP = 0;

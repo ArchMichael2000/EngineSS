@@ -125,7 +125,7 @@ export class EngineSimulator {
 
   // Mechanical state
   private crankDeg = 0;
-  private omega: number;
+  private omega = 0;
   private indicatedTorque = 0;
   private torqueRipple = 0;
   private absorberIntegral = 0;
@@ -227,6 +227,7 @@ export class EngineSimulator {
       rotary: spec.rotary,
     };
     this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
+    for (const c of this.cylinders) c.dt = 1 / sampleRate;
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
     const tol = spec.calibration.buildTolerance;
     const build = new Rng(spec.seed * 31337 + 17);
@@ -373,12 +374,12 @@ export class EngineSimulator {
 
   /**
    * Estimated CPU cost as a real-time factor on the reference machine (fit over the reference
-   * engines: 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers at 48 kHz, ±25 %).
+   * engines: 0.086 + 0.039·cylinders + 0.0031·ducts + 0.057·turbochargers at 48 kHz, ±25 %).
    * Scales with the sample rate; the worklet multiplies it by a measured machine factor.
    */
   get costEstimate(): number {
     const turbos = this.fi ? this.fi.sourceVolumeAccelerations.length : 0;
-    return (0.11 + 0.05 * this.cylinders.length + 0.004 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
+    return (0.086 + 0.039 * this.cylinders.length + 0.0031 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
   }
 
   private modCycle(x: number): number {
@@ -445,14 +446,20 @@ export class EngineSimulator {
     const primaries = this.exhaust.primaries;
     const runners = this.intake.runners;
     const intakeT = this.intake.airTempK;
-    const dilutionGain = 1;
     const plenumFraction = clamp(this.plenumBurned / Math.max(1e-6, this.plenumGasMass), 0, 0.8);
+    const cycle = this.cycleDeg;
+    const omega = this.omega;
+    this.prepareCommand();
     for (let i = 0; i < cyls.length; i++) {
       const cyl = cyls[i];
       cyl.plenumBurnedFraction = plenumFraction;
-      const alpha = this.modCycle(this.crankDeg - cyl.fireAngleDeg);
+      let alpha = (this.crankDeg - cyl.fireAngleDeg) % cycle;
+      if (alpha < 0) alpha += cycle;
       const cmd = this.commandFor(i);
-      cyl.step(alpha, this.omega, dt, this.exhaust.primaryPorts[i], this.intake.runnerPorts[i], intakeT, cmd, dilutionGain);
+      cyl.alphaDeg = alpha;
+      cyl.omega = omega;
+      cyl.intakeTempK = intakeT;
+      cyl.step(this.exhaust.primaryPorts[i], this.intake.runnerPorts[i], cmd);
       // Exhaust-valve throat jet: broadband turbulence injected at the port while the jet is fast.
       let jetQ = 0;
       if (cyl.exhaustMassFlow > 0 && cyl.exhaustCdA > 0) {
@@ -471,7 +478,7 @@ export class EngineSimulator {
       this.pressureRates[i] = cyl.pressure - P_AMBIENT + cyl.knockPressure;
       if (cyl.knocked) this.telemetry.knockEvents++;
       if (cyl.exhaustMassFlow > 0) {
-        this.exhaust.noteCylinderFlow(i, cyl.exhaustMassFlow, cyl.exhaustGasTemp);
+        this.exhaust.noteCylinderFlow(i, cyl);
         this.blockExhaustFlow += cyl.exhaustMassFlow;
         const g = this.exhaust.groupOf(i);
         this.exhaustFuel[g] += cyl.unburnedFuelOut;
@@ -501,7 +508,9 @@ export class EngineSimulator {
 
     // ---- Radiation to the listener
     let s = 0;
-    for (const outlet of this.exhaust.outlets) {
+    const outlets = this.exhaust.outlets;
+    for (let k = 0; k < outlets.length; k++) {
+      const outlet = outlets[k];
       this.sourceQdot[s++] = outlet.volumeAcceleration * this.stems.exhaust + this.exhaust.outletJetNoise(outlet) * this.stems.exhaustJet;
     }
     this.sourceQdot[s++] = this.intake.mouthVolumeAcceleration * this.stems.intake;
@@ -515,37 +524,51 @@ export class EngineSimulator {
     this.splN++;
   }
 
-  private commandFor(i: number): CombustionCommand {
-    const cut = this.sparkCuts[i] === 1;
+  // Parts of the combustion command shared by every cylinder this sample (see prepareCommand).
+  private cmdFuel = true;
+  private cmdSpark = true;
+  private cmdSoft = false;
+
+  /** Per-sample part of the combustion command: everything that does not depend on the cylinder. */
+  private prepareCommand(): void {
     const lim = this.spec.calibration.revLimiter;
-    const fuelEnabled = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && !(cut && lim === "soft");
-    // Soft limiter: a cut cylinder loses spark as well as fuel, so the cut acts on the charge
-    // already inducted instead of one cycle later. Every strategy keeps a hard ignition backstop on
-    // instantaneous speed 150 rpm past the limiter (overspeed protection in production ECUs).
+    // Every strategy keeps a hard ignition backstop on instantaneous speed 150 rpm past the limiter
+    // (overspeed protection in production ECUs).
     const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + 150 && this.running;
-    const ignitionCut =
-      overspeed ||
-      (cut && lim === "soft") ||
-      (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) ||
-      (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
     const live = this.running || this.cranking;
-    const sparkEnabled = !ignitionCut && live;
+    this.cmdSoft = lim === "soft";
+    this.cmdFuel = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && live;
+    this.cmdSpark =
+      !(
+        overspeed ||
+        (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) ||
+        (this.controls.mode === "vehicle" && this.drivetrain.shiftCut)
+      ) && live;
     const cal = this.spec.calibration;
-    // One reused command object: this runs per cylinder per sample, and cylinders never keep it.
+    // One reused command object: cylinders never keep it.
     const c = this.command;
     c.sparkAdvanceDeg = this.sparkAdvance;
     c.lambda = this.lambdaTarget;
-    c.fuelEnabled = fuelEnabled && live;
-    c.sparkEnabled = sparkEnabled;
     c.fuelOctane = cal.fuelOctane;
     c.knockControl = cal.knockControl;
     if (this.spec.diesel) {
       // Compression ignition: the only lever is fuel; overspeed cuts injection.
-      c.fuelEnabled = c.fuelEnabled && !overspeed;
+      this.cmdFuel = this.cmdFuel && !overspeed;
       c.fuelMassKg = this.dieselFuel;
       c.injectionAdvanceDeg = this.injectionAdvance;
       c.smokeLambda = this.spec.diesel.smokeLambda;
     }
+  }
+
+  /**
+   * The command for cylinder i. Soft limiter: a cut cylinder loses spark as well as fuel, so the
+   * cut acts on the charge already inducted instead of one cycle later.
+   */
+  private commandFor(i: number): CombustionCommand {
+    const cut = this.cmdSoft && this.sparkCuts[i] === 1;
+    const c = this.command;
+    c.fuelEnabled = this.cmdFuel && !cut;
+    c.sparkEnabled = this.cmdSpark && !cut;
     return c;
   }
 

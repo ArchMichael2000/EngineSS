@@ -9,7 +9,7 @@
  */
 import type { CamSpec, RotarySpec, TwoStrokeSpec } from "./spec";
 import { rotaryChamberVolume } from "./spec";
-import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, lerpTable, orificeMassFlow, waveExponents } from "./gas";
+import { CP_GAS, CV_GAS, GAMMA_GAS, P_AMBIENT, PowTable, R_AIR, Rng, clamp, orificeMassFlow, waveExponents } from "./gas";
 import type { Port } from "./waveguide";
 import { arriving } from "./waveguide";
 
@@ -50,6 +50,22 @@ export class CamLobe {
     const i = x | 0;
     const f = x - i;
     return this.table[i] + (this.table[i + 1] - this.table[i]) * f;
+  }
+  /** Lift at α into `out` (the hot path's form of `lift`: nothing passed or returned as a fraction). */
+  out = 0;
+  at(owner: { alphaDeg: number }): void {
+    let d = owner.alphaDeg - this.centreDeg - this.phaseDeg;
+    if (d > 360) d -= 720;
+    else if (d < -360) d += 720;
+    const ad = d < 0 ? -d : d;
+    if (ad >= this.halfOpenDeg) {
+      this.out = 0;
+      return;
+    }
+    const x = ad * 4;
+    const i = x | 0;
+    const f = x - i;
+    this.out = this.table[i] + (this.table[i + 1] - this.table[i]) * f;
   }
   /** Opening and closing cycle angles (crank deg) where lift leaves zero. */
   get openCloseDeg(): [number, number] {
@@ -181,6 +197,8 @@ export class Cylinder {
   private vsPm = P_AMBIENT;
   private vsDcOut = 0;
   private vsMeanFlow = 0;
+  private waveTables = waveExponents(GAMMA_GAS);
+  private waveTablesGamma = GAMMA_GAS;
   private vsPowN: PowTable = waveExponents(GAMMA_GAS).n;
   private vsPowInvK: PowTable = waveExponents(GAMMA_GAS).invK;
   private vsT = 0;
@@ -191,6 +209,12 @@ export class Cylinder {
   private vsDt = 0;
   /** Lower bound of D: the most suction flow the port can carry (see solveValve). */
   private vsDMin = -1;
+  /** Results of valveResidual, dOutdD and valveArea. */
+  private vsD = 0;
+  private vsG = 0;
+  private vsSlope = 1;
+  private vsArea = 0;
+  private vsLift = 0;
   private prevExhaustD = 0;
   private prevIntakeD = 0;
   private prevExhaustD2 = 0;
@@ -429,15 +453,22 @@ export class Cylinder {
 
   /** Piston displacement from TDC (m) and its derivative wrt crank angle (m/rad) at cycle angle α. */
   kinematics(alphaDeg: number): [number, number] {
+    this.slider(alphaDeg);
+    return [this.kinS, this.kinDs];
+  }
+
+  private kinS = 0;
+  private kinDs = 0;
+  /** Slider-crank position into kinS / kinDs (no allocation: this runs per cylinder per sample). */
+  private slider(alphaDeg: number): void {
     const a = alphaDeg * DEG;
     const r = this.crankRadius;
     const l = r / this.lambdaRod;
     const sa = Math.sin(a);
     const ca = Math.cos(a);
     const root = Math.sqrt(l * l - r * r * sa * sa);
-    const s = r * (1 - ca) + l - root;
-    const ds = r * sa * (1 + (r * ca) / root);
-    return [s, ds];
+    this.kinS = r * (1 - ca) + l - root;
+    this.kinDs = r * sa * (1 + (r * ca) / root);
   }
 
   initialise(alphaDeg: number, pressurePa: number, temperatureK: number): void {
@@ -459,21 +490,26 @@ export class Cylinder {
     this.pressure = (this.mass * R_AIR * this.temperature) / this.volume;
   }
 
-  /**
-   * Advance one sample.
-   * @param alphaDeg cycle angle (0 = firing TDC) at the end of the step
-   * @param omega crank angular speed (rad/s)
-   */
-  step(
-    alphaDeg: number,
-    omega: number,
-    dt: number,
-    exhaustPort: Port,
-    intakePort: Port,
-    intakeTempK: number,
-    combustion: CombustionCommand,
-    dilutionCovGain: number,
-  ): void {
+  // Per-sample inputs, set by the engine before `step` (passed as fields, not arguments, so the
+  // call allocates nothing).
+  /** Cycle angle (0 = firing TDC) at the end of the step, degrees. */
+  alphaDeg = 0;
+  /** Crank angular speed, rad/s. */
+  omega = 0;
+  /** Time step, s. */
+  dt = 1 / 48000;
+  /** Temperature of the air the intake valve draws, K. */
+  intakeTempK = 300;
+  /** Scale on the dilution-driven cycle-to-cycle variation. */
+  dilutionCovGain = 1;
+
+  /** Advance one sample from the inputs above. */
+  step(exhaustPort: Port, intakePort: Port, combustion: CombustionCommand): void {
+    const alphaDeg = this.alphaDeg;
+    const omega = this.omega;
+    const dt = this.dt;
+    const intakeTempK = this.intakeTempK;
+    const dilutionCovGain = this.dilutionCovGain;
     this.sparked = false;
     this.misfired = false;
     this.spilledToPlenum = 0;
@@ -486,10 +522,21 @@ export class Cylinder {
     this.prevAlpha = alphaDeg;
 
     // ---- Volume change: reversible piston work on the contents
-    const [s] = this.kinematics(alphaDeg);
-    const [newVolume, dVdth] = this.chamber(alphaDeg);
-    const dV = newVolume - this.volume;
     const rot = this.params.rotary;
+    let s = 0;
+    let newVolume: number;
+    let dVdth: number;
+    if (rot) {
+      const a = (2 * alphaDeg * DEG) / 3;
+      newVolume = this.clearanceVolume + 0.5 * this.rotaryVd * (1 - Math.cos(a));
+      dVdth = (this.rotaryVd / 3) * Math.sin(a);
+    } else {
+      this.slider(alphaDeg);
+      s = this.kinS;
+      newVolume = this.clearanceVolume + this.area * s;
+      dVdth = this.area * this.kinDs;
+    }
+    const dV = newVolume - this.volume;
     this.energy -= this.pressure * dV;
     this.volume = newVolume;
 
@@ -504,6 +551,16 @@ export class Cylinder {
       if (crossed(prev, alphaDeg, sparkAngle)) this.ignite(combustion, omega, dilutionCovGain);
     }
 
+    // Valve lifts for this sample (two-stroke and rotary engines have ports, not valves).
+    let exLiftNow = 0;
+    let inLiftNow = 0;
+    if (!ts && !rot) {
+      this.exhaustLobe.at(this);
+      exLiftNow = this.exhaustLobe.out;
+      this.intakeLobe.at(this);
+      inLiftNow = this.intakeLobe.out;
+    }
+
     // ---- Combustion heat release (Wiebe)
     this.heatReleaseRate = 0;
     if (this.burning) {
@@ -514,7 +571,7 @@ export class Cylinder {
         ? this.rotaryPort(alphaDeg, rot.exhaustOpenDeg, rot.exhaustCloseDeg, 1, 1) > 0
         : ts
           ? s > this.sExhaustOpen
-          : this.exhaustLobe.lift(alphaDeg) > 0.0003;
+          : exLiftNow > 0.0003;
       if (theta > 0 && !exhaustOpening) {
         if (this.ringPending > 0) this.startRinging(this.ringPending, dt);
         const x = this.params.diesel
@@ -532,7 +589,7 @@ export class Cylinder {
         this.massFuel -= fuelBurn;
         this.massAir -= airBurn;
         this.massBurned += fuelBurn + airBurn;
-        if (this.knockPending) this.integrateKnock(x, dt, combustion);
+        if (this.knockPending) this.integrateKnock(combustion);
         if (x > 0.999) this.burning = false;
       } else if (exhaustOpening && theta > 0) {
         // Exhaust valve opened before the burn completed: remaining fuel leaves unburned (late/partial burn).
@@ -560,7 +617,7 @@ export class Cylinder {
     this.updateState();
 
     // ---- Exhaust valve (two-stroke: piston-uncovered exhaust port)
-    const exLift = ts || rot ? 0 : this.exhaustLobe.lift(alphaDeg);
+    const exLift = exLiftNow;
     const exPortArea = rot
       ? this.rotaryPort(alphaDeg, rot.exhaustOpenDeg, rot.exhaustCloseDeg, rot.exhaustPort === "peripheral" ? 30 : 100, rot.exhaustAreaMm2 * 1e-6) * this.flowScale
       : ts
@@ -569,9 +626,15 @@ export class Cylinder {
     this.exhaustMassFlow = 0;
     this.unburnedFuelOut = 0;
     if (exLift > 0 || exPortArea > 0) {
-      const cdA = ts || rot ? exPortArea : flowArea(exLift, this.params.exhaustValveD, this.params.exhaustValves) * this.flowScale;
+      let cdA = exPortArea;
+      if (!ts && !rot) {
+        this.vsLift = exLift;
+        this.valveArea(true);
+        cdA = this.vsArea;
+      }
       this.exhaustCdA = cdA;
-      this.exhaustMassFlow = this.solveValve(cdA, exhaustPort, true, dt, 0);
+      this.vsCdA = cdA;
+      this.solveValve(exhaustPort, true);
       this.exhaustWasOpen = true;
     } else {
       this.exhaustCdA = 0;
@@ -587,15 +650,21 @@ export class Cylinder {
     }
 
     // ---- Intake valve (two-stroke: transfer ports from the crankcase, and the crankcase pump)
-    const inLift = ts || rot ? 0 : this.intakeLobe.lift(alphaDeg);
+    const inLift = inLiftNow;
     const inPortArea = rot ? this.rotaryPort(alphaDeg, rot.intakeOpenDeg, rot.intakeCloseDeg, rot.intakePort === "peripheral" ? 30 : 100, rot.intakeAreaMm2 * 1e-6) * this.flowScale : 0;
     this.intakeMassFlow = 0;
     if (ts) {
       this.transferFlow(s, dt);
       this.stepCrankcase(alphaDeg, s, dt, intakePort, intakeTempK, combustion);
     } else if (inLift > 0 || inPortArea > 0) {
-      const cdA = rot ? inPortArea : flowArea(inLift, this.params.intakeValveD, this.params.intakeValves) * this.flowScale;
-      this.intakeMassFlow = this.solveValve(cdA, intakePort, false, dt, intakeTempK, combustion);
+      let cdA = inPortArea;
+      if (!rot) {
+        this.vsLift = inLift;
+        this.valveArea(false);
+        cdA = this.vsArea;
+      }
+      this.vsCdA = cdA;
+      this.solveValve(intakePort, false, combustion);
       this.intakeWasOpen = true;
     } else {
       this.intakeSend = arriving(intakePort);
@@ -883,7 +952,9 @@ export class Cylinder {
    * isentropic compression of the spark-time charge (γu ≈ 1.32). Onset (integral ≥ 1) rings the
    * chamber with an amplitude set by the end-gas fraction still unburned.
    */
-  private integrateKnock(x: number, dt: number, cmd: CombustionCommand): void {
+  private integrateKnock(cmd: CombustionCommand): void {
+    const x = this.burnFraction;
+    const dt = this.dt;
     const p = Math.max(this.pressure, 1e4);
     const tu = this.sparkTemperature * Math.pow(p / Math.max(1e4, this.sparkPressure), 0.2424);
     const tauS = KNOCK_TAU_SCALE * 17.68e-3 * Math.pow(cmd.fuelOctane / 100, 3.402) * Math.pow(p / P_AMBIENT, -1.7) * Math.exp(3800 / tu);
@@ -926,10 +997,22 @@ export class Cylinder {
     const dcIn = duct.dcArriving(port.end);
     const dcOut = duct.dcLeaving(port.end);
     const pm = Math.max(0.05 * P_AMBIENT, P_AMBIENT + dcIn + dcOut);
-    const tables = waveExponents(gam);
+    // The exponent tables depend only on the duct gas (one set for exhaust, one for intake).
+    let tables = this.waveTables;
+    if (this.waveTablesGamma !== gam) {
+      tables = waveExponents(gam);
+      this.waveTables = tables;
+      this.waveTablesGamma = gam;
+    }
     this.vsPowN = tables.n;
     this.vsPowInvK = tables.invK;
-    const xi = tables.k.at(1 + (pin - dcIn) / pm);
+    const tx = tables.k;
+    let xix = 1 + (pin - dcIn) / pm;
+    if (xix < tx.lo) xix = tx.lo;
+    else if (xix > tx.hi) xix = tx.hi;
+    const xiu = (xix - tx.lo) * tx.scale;
+    const xii = xiu | 0;
+    const xi = tx.table[xii] + (tx.table[xii + 1] - tx.table[xii]) * (xiu - xii);
     this.vsPm = pm;
     this.vsDcOut = dcOut;
     this.vsXi = xi;
@@ -946,15 +1029,6 @@ export class Cylinder {
     this.vsMeanFlow = (duct.area / duct.c) * (dcOut - dcIn);
   }
 
-  /** Mass flow the waves carry into the duct for a given D (monotone increasing). */
-  private waveFlow(d: number): number {
-    if (d < this.vsDMin) {
-      const dm = this.vsDMin;
-      return this.vsMeanFlow + this.vsK * (dm * this.vsPowN.at(Math.max(0.05, this.vsB + dm)) + (d - dm));
-    }
-    return this.vsMeanFlow + this.vsK * d * this.vsPowN.at(Math.max(0.05, this.vsB + d));
-  }
-
   /**
    * Implicit valve flow against a duct end, with finite-amplitude wave superposition (Benson /
    * Blair) for the pulsating part of the waves: each carries a pressure amplitude ratio
@@ -965,13 +1039,14 @@ export class Cylinder {
    * (pressure can't pass zero) and compression steepens, as in a real port; for small amplitudes
    * it reduces to the linear relation p = 2p_in + (c/A)·ṁ used by the junctions. The secant's
    * unknown is D = X_r − X_i; `out` (mass flow leaving the cylinder into the duct) follows from it.
+   * The effective flow area is taken from vsCdA.
    */
-  private solveValve(cdA: number, port: Port, isExhaust: boolean, dt: number, intakeTempK: number, combustion?: CombustionCommand): number {
+  private solveValve(port: Port, isExhaust: boolean, combustion?: CombustionCommand): void {
     const duct = port.duct;
-    const Tduct = isExhaust ? duct.temperatureK : intakeTempK;
+    const dt = this.dt;
+    const Tduct = isExhaust ? duct.temperatureK : this.intakeTempK;
     this.prepareWave(port);
     this.vsT = Tduct;
-    this.vsCdA = cdA;
     this.vsM0 = this.mass;
     this.vsU0 = this.energy;
     this.vsT0 = this.temperature;
@@ -982,14 +1057,20 @@ export class Cylinder {
     const dPrev = isExhaust ? this.prevExhaustD : this.prevIntakeD;
     const dPrev2 = isExhaust ? this.prevExhaustD2 : this.prevIntakeD2;
     let x0 = 2 * dPrev - dPrev2;
-    let g0 = this.valveResidual(x0);
+    this.vsD = x0;
+    this.valveResidual();
+    let g0 = this.vsG;
     let d = x0;
     let converged = Math.abs(g0) < 1e-9 + 1e-6 * Math.abs(this.vsOut);
     let x1 = x0;
     let g1 = g0;
     if (!converged) {
-      x1 = x0 - g0 / this.dOutdD(x0);
-      g1 = this.valveResidual(x1);
+      this.vsD = x0;
+      this.dOutdD();
+      x1 = x0 - g0 / this.vsSlope;
+      this.vsD = x1;
+      this.valveResidual();
+      g1 = this.vsG;
       d = x1;
     }
     for (let it = 0; it < 6 && !converged; it++) {
@@ -998,29 +1079,42 @@ export class Cylinder {
       if (denom === 0) break;
       const x2 = x1 - (g1 * (x1 - x0)) / denom;
       x0 = x1; g0 = g1;
-      x1 = x2; g1 = this.valveResidual(x1);
+      x1 = x2;
+      this.vsD = x1;
+      this.valveResidual();
+      g1 = this.vsG;
       d = x1;
     }
     if (!converged && !(Math.abs(g1) < 1e-8 + 1e-5 * Math.abs(this.vsOut))) {
       let a = 0;
-      let fa = this.valveResidual(0);
+      this.vsD = 0;
+      this.valveResidual();
+      let fa = this.vsG;
       d = 0;
       if (fa !== 0) {
-        let b = -fa / this.dOutdD(0);
-        let fb = this.valveResidual(b);
+        this.vsD = 0;
+        this.dOutdD();
+        let b = -fa / this.vsSlope;
+        this.vsD = b;
+        this.valveResidual();
+        let fb = this.vsG;
         // g is monotone on the whole line (waveFlow continues linearly past the suction limit), so
         // widen until the root is bracketed instead of accepting an end that is not a solution.
         for (let grow = 0; grow < 24 && Math.sign(fa) === Math.sign(fb) && fb !== 0; grow++) {
           a = b;
           fa = fb;
           b *= 2;
-          fb = this.valveResidual(b);
+          this.vsD = b;
+          this.valveResidual();
+          fb = this.vsG;
         }
         d = b;
         if (Math.sign(fa) !== Math.sign(fb)) {
           for (let it = 0; it < 30; it++) {
             d = fb !== fa ? b - (fb * (b - a)) / (fb - fa) : 0.5 * (a + b);
-            const fo = this.valveResidual(d);
+            this.vsD = d;
+            this.valveResidual();
+            const fo = this.vsG;
             if (Math.abs(fo) < 1e-10 + 1e-7 * Math.abs(this.vsOut)) break;
             if (Math.sign(fo) === Math.sign(fb)) { b = d; fb = fo; fa *= 0.5; } else { a = d; fa = fo; fb *= 0.5; }
           }
@@ -1135,27 +1229,72 @@ export class Cylinder {
     this.updateState();
 
     // Outgoing wave as its own gauge amplitude: p_ref·(X_r^(1/k) − 1).
-    const send = this.vsDcOut + this.vsPm * (this.vsPowInvK.at(this.vsXi + d) - 1);
-    if (isExhaust) this.exhaustSend = send;
-    else this.intakeSend = send;
-    return isExhaust ? out : -out;
+    const tk = this.vsPowInvK;
+    let xrx = this.vsXi + d;
+    if (xrx < tk.lo) xrx = tk.lo;
+    else if (xrx > tk.hi) xrx = tk.hi;
+    const xru = (xrx - tk.lo) * tk.scale;
+    const xri = xru | 0;
+    const xr = tk.table[xri] + (tk.table[xri + 1] - tk.table[xri]) * (xru - xri);
+    const send = this.vsDcOut + this.vsPm * (xr - 1);
+    // Mass flow leaving through the exhaust valve, or entering through the intake valve.
+    if (isExhaust) {
+      this.exhaustSend = send;
+      this.exhaustMassFlow = out;
+    } else {
+      this.intakeSend = send;
+      this.intakeMassFlow = -out;
+    }
   }
 
-  /** dṁ/dD at D (for scaling secant starts). */
-  private dOutdD(d: number): number {
-    if (d < this.vsDMin) return this.vsK;
+  /** dṁ/dD at D (for scaling secant starts), into vsSlope. */
+  private dOutdD(): void {
+    const d = this.vsD;
+    if (d < this.vsDMin) {
+      this.vsSlope = this.vsK;
+      return;
+    }
     const xs = Math.max(0.05, this.vsB + d);
-    const xn = this.vsPowN.at(xs);
-    return Math.max(1e-9, this.vsK * (xn + (this.vsN * d * xn) / xs));
+    const tn = this.vsPowN;
+    let xnx = xs;
+    if (xnx < tn.lo) xnx = tn.lo;
+    else if (xnx > tn.hi) xnx = tn.hi;
+    const xnu = (xnx - tn.lo) * tn.scale;
+    const xni = xnu | 0;
+    const xn = tn.table[xni] + (tn.table[xni + 1] - tn.table[xni]) * (xnu - xni);
+    this.vsSlope = Math.max(1e-9, this.vsK * (xn + (this.vsN * d * xn) / xs));
   }
 
   /**
-   * g(D) = ṁ_wave(D) − F(p_cyl(ṁ), p_port(D)); monotone increasing in D. Sets vsOut = ṁ_wave.
+   * g(D) = ṁ_wave(D) − F(p_cyl(ṁ), p_port(D)) at D = vsD; monotone increasing in D. Sets
+   * vsOut = ṁ_wave and vsG = g. (Arguments and results travel in fields: a fraction passed to or
+   * returned from a call is a heap allocation whenever the compiler does not inline the call, and
+   * this runs several times per open valve per sample.)
+   *
+   * ṁ_wave: the mass flow the waves carry into the duct for a given D, which below the suction
+   * limit vsDMin continues as linear acoustics (see prepareWave).
    */
-  private valveResidual(d: number): number {
-    const out = this.waveFlow(d);
+  private valveResidual(): void {
+    const d = this.vsD;
+    // Table lookups are written out (the arithmetic of PowTable.at): see the note above.
+    const tn = this.vsPowN;
+    const tk = this.vsPowInvK;
+    const dLim = d < this.vsDMin ? this.vsDMin : d;
+    let xnx = Math.max(0.05, this.vsB + dLim);
+    if (xnx < tn.lo) xnx = tn.lo;
+    else if (xnx > tn.hi) xnx = tn.hi;
+    const xnu = (xnx - tn.lo) * tn.scale;
+    const xni = xnu | 0;
+    const xn = tn.table[xni] + (tn.table[xni + 1] - tn.table[xni]) * (xnu - xni);
+    const out = d < this.vsDMin ? this.vsMeanFlow + this.vsK * (dLim * xn + (d - dLim)) : this.vsMeanFlow + this.vsK * d * xn;
     this.vsOut = out;
-    const pPort = this.vsPm * this.vsPowInvK.at(Math.max(0.05, this.vsB + Math.max(d, this.vsDMin)));
+    let xpx = Math.max(0.05, this.vsB + Math.max(d, this.vsDMin));
+    if (xpx < tk.lo) xpx = tk.lo;
+    else if (xpx > tk.hi) xpx = tk.hi;
+    const xpu = (xpx - tk.lo) * tk.scale;
+    const xpi = xpu | 0;
+    const xp = tk.table[xpi] + (tk.table[xpi + 1] - tk.table[xpi]) * (xpu - xpi);
+    const pPort = this.vsPm * xp;
     const dm = out * this.vsDt;
     const m0 = this.vsM0;
     const m = Math.max(m0 * 0.02, m0 - dm);
@@ -1163,7 +1302,31 @@ export class Cylinder {
     const Uc = Math.max(U, m * CV_GAS * 200);
     const pc = ((GAMMA_GAS - 1) * Uc) / this.volume;
     const tc = Uc / (m * CV_GAS);
-    return out - orificeMassFlow(this.vsCdA, pc, tc, pPort, this.vsT);
+    this.vsG = out - orificeMassFlow(this.vsCdA, pc, tc, pPort, this.vsT);
+  }
+
+  /**
+   * Effective flow area of the exhaust or intake valves at lift vsLift, into vsArea: discharge
+   * coefficient (CD_TABLE) × the smaller of the curtain and the throat.
+   */
+  private valveArea(isExhaust: boolean): void {
+    const liftM = this.vsLift;
+    const valveD = isExhaust ? this.params.exhaustValveD : this.params.intakeValveD;
+    const count = isExhaust ? this.params.exhaustValves : this.params.intakeValves;
+    const ld = liftM / valveD;
+    let cd: number;
+    if (ld <= 0) cd = 0;
+    else if (ld >= 0.35) cd = 0.72;
+    else {
+      let i = 1;
+      while (ld > CD_TABLE[i][0]) i++;
+      const lo = CD_TABLE[i - 1];
+      const hi = CD_TABLE[i];
+      cd = lo[1] + ((hi[1] - lo[1]) * (ld - lo[0])) / (hi[0] - lo[0]);
+    }
+    const curtain = Math.PI * valveD * liftM;
+    const throat = Math.PI * 0.25 * valveD * valveD * 0.88;
+    this.vsArea = cd * Math.min(curtain, throat) * count * this.flowScale;
   }
 }
 
@@ -1199,12 +1362,3 @@ function crossed(prev: number, cur: number, target: number): boolean {
   // wrapped through 720 → 0: target lies in (prev, 720) or [0, cur]
   return prev < target || target <= cur;
 }
-
-function flowArea(liftM: number, valveD: number, count: number): number {
-  const ld = liftM / valveD;
-  const cd = lerpTable(CD_TABLE, ld);
-  const curtain = Math.PI * valveD * liftM;
-  const throat = Math.PI * 0.25 * valveD * valveD * 0.88;
-  return cd * Math.min(curtain, throat) * count;
-}
-
