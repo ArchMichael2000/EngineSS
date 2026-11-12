@@ -7,13 +7,13 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | | |
 |---|---|
 | Repository | `ArchMichael2000/EngineSS` |
-| Working branch | `ccr-96a885ac-rsc0db` (the v16 work from `claude/serene-wozniak-vibhtn`, plus the legacy split and browser testing), merged to `main` |
+| Working branch | `claude/elegant-albattani-7t1qgq` (PR #4, November 2026): X layout, link rods, faster core, two-stroke work, engine view. Earlier work is merged to `main`. |
 | `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
 | Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
-| Tests | `npx vitest run`: 166 tests pass (≈ 100 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
+| Tests | `npx vitest run`: 195 tests pass (≈ 100 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
 | Browser | `npm run test:browser -- --url <app>/simulator --stress`: every reference engine, every control and export in Chromium. Results: `docs/browser-verification.md`. |
 | Typecheck and build | `npm run build` (runs `tsc -b`, then `vite build`) |
-| Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 20 1`: 80/80 random configurations pass across seeds 1–80 |
+| Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 40 1`: 120/120 random configurations pass across seeds 1–120 (X engines included) |
 
 **Goal (from the owner):** take over EngineSS and rebuild the core sound engine for quality and realism across all configurations, including ones that don't exist but could. Also rebuild the reference and data sources, researching the internet and public repositories.
 
@@ -34,7 +34,8 @@ Every sound comes from physics. Nothing is a sampled or synthesised "engine tone
 |---|---|
 | `shared/ess/spec.ts` | `EngineSpec`: the physical description (geometry, cam, intake, exhaust, forced induction, calibration, vehicle, `cycle`, `twoStroke`, `rotary`, `diesel`). Also `cycleDegrees()`, `displacementLitres()` and `rotaryChamberVolume()`. |
 | `shared/ess/resolveSpec.ts` | Maps the app's Quick/Advanced/Physical config (`shared/engineTypes.ts`) to an `EngineSpec`, filling gaps with family defaults. All per-family default logic lives here. |
-| `shared/ess/geometry.ts` | Firing-schedule solver: crank types, banks, firing orders. Has separate two-stroke (360°) and rotary (1080°, faces) schedules, plus exhaust grouping. |
+| `shared/ess/geometry.ts` | Firing-schedule solver: crank types, banks, firing orders (an exact dynamic programme; 24 cylinders in ≈ 40 ms). Has separate two-stroke (360°) and rotary (1080°, faces) schedules, the Cross-Four X layout with its module phasing, and exhaust grouping. |
+| `shared/ess/rods.ts` | Master-and-link rod kinematics for radial rows: per-cylinder TDC offset, stroke and tabulated piston motion. |
 | `shared/ess/cylinder.ts` | Chamber model. Slider-crank or Wankel volume (`chamber()`), cam lobes with VVT and lift switching, two-stroke ports and crankcase pump, rotary ports, implicit finite-amplitude valve/port flow (`solveValve`), spark Wiebe or diesel double-Wiebe combustion, knock (Livengood–Wu) with ringing, Woschni heat transfer. |
 | `shared/ess/engine.ts` | `EngineSimulator`: per-sample crank dynamics and block-rate ECU control (idle PI and spark, VVT schedule, rev limiters, overrun fuel cut, diesel governor, afterfire, start/stop, vehicle mode). Telemetry, and a `costEstimate` for CPU budgeting. |
 | `shared/ess/waveguide.ts` | Ducts (fractional-delay lines, losses, mean-flow damping, steepening), junctions, radiation loads, resistive joints. |
@@ -50,8 +51,9 @@ Every sound comes from physics. Nothing is a sampled or synthesised "engine tone
 | `shared/ess/render.ts` | Offline rendering (export). |
 | `client/src/lib/ess/essProcessor.ts` | AudioWorklet. Chooses the internal rate tier (1, 5/6 or 2/3 of the device rate) from `costEstimate` × a measured machine factor, steps down on sustained overload, and crossfades on config changes. |
 | `client/src/lib/audioEngine.ts`, `client/src/hooks/useAudioEngine.ts` | Main-thread bridge (config, controls, shift, ignition, telemetry). |
-| `client/src/components/QuickBuildPanel.tsx` | Includes the **Engine Type** selector (four-stroke gasoline/diesel, two-stroke, Wankel rotary) and a Rotors count. |
+| `client/src/components/QuickBuildPanel.tsx` | Includes the **Engine Type** selector (four-stroke gasoline/diesel, two-stroke, Wankel rotary), a Rotors count, and the **X (Cross-Four)** controls: modules, cylinder tilt, module phasing, with the pair phase, crank offsets and rocking couple read out. Slider values can be typed. |
 | `client/src/components/PhysicsPanel.tsx` | Detailed controls: VVT/VTEC, exhaust hardware, diesel injection, two-stroke ports and pipe, rotary ports. |
+| `client/src/components/EngineView.tsx` | Animated cross-section drawn from the solved schedule and spec: banks, pins, rods (link rods on radials), strokes, firing; plan along the crank; firing timeline. Wankels draw housing and rotors. |
 | `client/src/components/PlaybackController.tsx` | Free/Dyno/Drive modes, crank and ignition-off, shifting, launch control, brake, gear and speed readouts. |
 
 The legacy v0–v15 additive model (`legacy/engineSoundModel.ts`, its worklet, mix and profile switches) is kept in `legacy/` for A/B renders (`scripts/renderBaseline.ts`) and runs its tests with the suite. `shared/legacyIsolation.test.ts` fails on any import of it from `client/`, `shared/` or `server/`. Saved configurations with an old `soundProfile` play on v16.
@@ -62,6 +64,8 @@ The legacy v0–v15 additive model (`legacy/engineSoundModel.ts`, its worklet, m
 - `scripts/fetchReferenceAudio.py`: fetches and verifies the 10 CC0 recordings in `reference-audio/` (manifest: `shared/ess/reference/real-audio-manifest.json`).
 - `scripts/fuzzConfigs.ts -- [count] [firstSeed]`: robustness sweep.
 - `scripts/verifyForcedInduction.ts -- [outDir]`: 19 turbo/supercharger acoustic checks.
+- `scripts/renderPreset.ts -- <presetKey> sweep|steady|free-rev <seconds> <out.wav>`: any preset (reference, Saber, factory) through the live chain to a stereo WAV.
+- `scripts/plotSpectrograms.py out.png "Title=a.wav" …`: spectrogram contact sheet.
 - `scripts/renderV16.ts`, `scripts/renderBaseline.ts`, `scripts/analyzeBaseline.py`, `scripts/analyzeReferenceCorpus.py`: audit and corpus tooling.
 
 ## 3. What has been done
@@ -127,7 +131,22 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
 - **Display.** Smoothed telemetry at ≤ 8 Hz, latched status flags, gauge hysteresis, slow firing chase. Sliders have a 28 px hit area and hold their value while dragged.
 - **Radials.** Even counts are staggered rows; every count 3–18 fires evenly (test: "radials fire evenly").
 
+### November 2026: X layout, link rods, faster core, two-strokes (PR #4)
+- **Cross-Four X layout (`x`).** Built to the owner's Saber SB4–SB16 study (`docs/reference-sources.md` §4): modules of four cylinders on four pins 90° apart, axes tilted t off horizontal, opposed pairs in phase, pairs 90° + 2t apart, rod planes 1·3·2·4, modules clocked for even firing or least rocking couple (ported from the study; 64/64 cases agree). Default proportions 96 × 190 mm with 400 mm rods. Presets: SB4, SB8, SB12, SB16, a square (45°) SB16, a low-couple SB12 and a turbo-diesel SB8. The study does not say whether the engine is spark or diesel, two- or four-stroke; the presets are four-stroke gasoline except the diesel one, and the Engine Type selector switches the rest.
+- **Firing solver.** Exact dynamic programme instead of trying 2^(n−1) assignments; reproduces all 2,330 schedules of the old solver (the test keeps an exhaustive search as its oracle).
+- **Master-and-link rods on radials** (`rods.ts`): link pistons reach TDC up to 3.7° off, so a Wasp Junior fires at 75–83° where it was a flat 80°. Radial cylinders are numbered with the rotation (1-3-5-7-9-2-4-6-8). `physical.articulatedRods: false` restores plain rods.
+- **CPU: 15–38 % less** by removing heap allocation from the audio loop (see §4 "Performance rules").
+- **Two-strokes:** steepening through the expansion chamber, oil-fouled silencer packing, a dilution ignition limit (four-stroking), and no car body around a motorcycle engine. Order-profile error against the CRM250 and MZ recordings 14–19 → 10–13 dB.
+- **Engine view** in the app (`EngineView.tsx`), typed slider values, displacement to 60 L, redline from 1500 rpm.
+- **Crank inertia** scales with stroke² above car proportions.
+
 ## 4. Conventions and gotchas
+
+- **Performance rules for the audio loop** (each one was measured; breaking them brings back hundreds of MB/s of garbage):
+  - Give every numeric class field an initial number (`c = 0`, never a bare `c: number;`). A field first created as `undefined` is stored as a generic value and every later fractional store allocates.
+  - Do not pass fractions to, or return them from, functions on the per-sample path unless the function is tiny. The optimiser boxes them whenever it does not inline the call, and large callers (`tick`, `Cylinder.step`, `solveValve`) run out of inlining budget. Pass them through fields (`cyl.alphaDeg`, `vsD`, `vsG`) or write the code in place.
+  - No `for…of`, closures or object literals per sample.
+  - Check with the allocation sampler, not a timer: `node --cpu-prof` shows "(garbage collector)", and `HeapProfiler.startSampling` with `includeObjectsCollectedByMinorGC` names the allocating function. Timing on the cloud container varies ±10 % between runs, so compare builds with interleaved runs.
 
 - **Typecheck with `npx tsc -b`.** `npx tsc --noEmit -p .` checks nothing, because the root tsconfig only lists project references.
 - **Running scripts:** use `npx vite-node <file> -- args`. Under vite-node the "is this the main module" check fails, so CLI entry points are separate files that import a library (for example `fuzz.ts` and `fuzzConfigs.ts`).
@@ -141,8 +160,8 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
 - **Prefer physical fixes over fudge factors.** Each calibrated constant is listed with its basis in `docs/reference-sources.md` §1, "Calibrated constants". Add new ones there.
 - **Git:**
   - Develop on the session's designated branch and merge to `main` through a PR (the owner has given standing permission).
-  - Do not open a PR unless the owner asks.
-  - Commit trailers: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and `Claude-Session: <session link>`.
+  - Open a draft PR for the session's branch once it is pushed; the owner merges.
+  - Commit trailers: the `Co-Authored-By` line the session is given, and `Claude-Session: <session link>`.
   - Never put model identifiers in repository content.
 - **Network:** the cloud environment used so far blocked most outbound hosts. Reference audio was fetched by a helper session in a "Full Access" environment the owner created on claude.ai. Use that environment for downloads.
 
@@ -156,7 +175,8 @@ Ordered by priority. Each item says what "done" looks like.
 
 ### B. Realism against real audio (the main open goal)
 Done in October 2026: 14 open recordings added and compared (`scripts/compareCorpus.py`, results in `docs/reference-sources.md` §4). Still open:
-3. **Two-strokes are too dull.** At every listener perspective their 2–8 kHz energy is 14 dB or more short of the CRM250 and MZ recordings. Soloed stems show weak outlet-jet and port-blowdown sources. Done when the tilt matches within a few dB without breaking the RD350LC's power.
+3. **Two-strokes: half done.** The 2–8 kHz deficit is now 12–17 dB on light free revs (was 24–30) and near zero at full throttle without a silencer. What remains is probably engine-side: the structure-borne level at high speed is 10–15 dB under Anderton's empirical law for petrol engines (≈ 50·log N; the model follows ≈ 30·log N), and air-cooled fins, piston rattle and reed noise are not modelled. A two-stroke recording with a known microphone position would settle how much is the recording chain. Chamber-shell radiation was estimated and rejected (reference doc §4).
+3a. **Structure-borne level vs speed (all engines).** LS3 at 5000 rpm full load reads about 83 dB(A) at 1 m; Anderton's petrol law gives 102 (1970s engines; modern ones about 5 dB less). The low-speed level was fitted to HL-CEAD. Raising the speed exponent needs a level-calibrated engine-bay recording at speed, or measured data, to anchor it.
 4. **More off-firing energy in real engines.** Diesels and the FA20 carry 2–8 dB more energy between the firing orders than the renders. Candidates: log-manifold geometry (unequal pulse paths), more cylinder-to-cylinder spread. An end-collector manifold overshoots.
 5. **No open Wankel recording.** Keep looking (Freesound, Commons, Archive); the one Sampling+ clip is local-only.
 6. **Cabin perspective.** Open interior clips exist (four committed), but none names its engine or speed, so the boom gain stays unverified. An identified interior recording with known rpm would calibrate it.
@@ -171,11 +191,16 @@ Done: variable-geometry turbines for common-rail diesels; Drive mode for every f
 12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
 13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
 
-### E. X-engine layout (the owner's goal; plan awaiting approval)
-The plan with computed firing and exhaust-order maps for eight candidate X engines is at https://claude.ai/artifact/5qFs4DJC53PjnWmfA4WHxP. Phases: P1 geometry + throw-by-throw firing solver + layout panel; P2 articulated rods (X and radial); P3 four-bank exhaust/intake; P4 structure, balance, listener presets; P5 CPU (X24 ≈ 1.38 cores at full rate) and validation. The owner still has to say which X they mean (one crank with four banks, or other), bank angles, rods, cycle and application.
+### E. X-engine layout: built (November 2026)
+The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan. Open questions for the owner:
+- **Cycle and fuel.** The study is kinematic; its 16.8 : 1 compression (from a 12 mm head clearance) suggests diesel. The presets are gasoline with one turbo-diesel.
+- **Exhaust and intake arrangement.** Modelled as one collector per side (upper and lower bank merging first on multi-module engines), dual pipes to the rear, one plenum. Side exits, stacks or per-bank pipes would sound different.
+- **Which cylinder of each opposed pair fires first.** Both choices are equally even; the solver picks one, and the Advanced firing-order field overrides it.
+- **Application** (vehicle, boat, aircraft, stand): sets gearing, inertia and the listener positions.
+Not done: a classic shared-pin X (Vulture, DB 604) with master-and-link rods; `rods.ts` already has the kinematics it would need.
 
 ### D. Performance and housekeeping
-14. CPU: no safe micro-optimisation left (valve tolerance tried and reverted; see §4 of the reference doc). The rate tiers hold real time (W16 at 32 kHz in Chromium). Next steps would be structural: sub-rate thermodynamics, or threads, which need cross-origin isolation that GitHub Pages can't provide.
+14. CPU: the November pass removed allocation (15–38 % less). What is left is spread evenly: duct reads 14 %, the per-sample engine loop 14 %, cylinder step 13 %, valve residuals and solver 20 %, junction solves 8 %. Tabulating slider-crank motion (as link-rod cylinders already do) is worth about 3 %. Beyond that the steps are structural: sub-rate thermodynamics, or threads, which need cross-origin isolation that GitHub Pages can't provide.
 15. Export: exercised in the browser for diesel, two-stroke, rotary and turbo engines; it renders in a Web Worker.
 
 ## 6. Quick start for the next session
@@ -183,8 +208,9 @@ The plan with computed firing and exhaust-order maps for eight candidate X engin
 ```bash
 git fetch origin main && git checkout main
 npm ci
-npx tsc -b && npx vitest run            # 166 tests
-npx vite-node scripts/fuzzConfigs.ts -- 20 1
+npx tsc -b && npx vitest run            # 195 tests
+npx vite-node scripts/fuzzConfigs.ts -- 40 1
 npx vite-node scripts/verifyForcedInduction.ts
 npx vite-node scripts/renderForCompare.ts -- mazda-13b-fc exterior-rear sweep 1500 7500 6 /tmp/13b
+npx vite-node scripts/renderPreset.ts -- saber-sb8 sweep 12 /tmp/sb8.wav
 ```

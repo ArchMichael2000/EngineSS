@@ -38,7 +38,11 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Wankel chamber | V = V_min + (V_d/2)(1 − cos(2θ/3)), V_d = 3√3·e·R·b; torque p·dV/dθ on the e-shaft; 1080° face cycle, faces 360° apart, rotors 360/n apart | Yamamoto, *Rotary Engine* (Toyo Kogyo/Mazda, 1981); Ansdale, *The Wankel RC Engine* (1968) | `cylinder.ts` `chamber`, `geometry.ts` `rotarySchedule` |
 | Wankel ports | Apex-seal-swept port areas with raised-cosine ramps (peripheral ≈ 30°, side ≈ 100°); 13B-REW timing (intake 32° ATDC–50° ABDC, exhaust 75° BBDC–48° ATDC) with street, bridge and peripheral porting presets; faces share each rotor's runner and exhaust port | Mazda 13B service data; porting practice | `cylinder.ts` `rotaryPort`, `intake.ts` |
 | Wankel heat transfer | Wall area 2V/b + 2√3·R·b (side housings, rotor flank, trochoid housing over the apex chord); Woschni velocity from the rotor apex speed R·ω/3 | Geometry; Woschni (1967) | `cylinder.ts` |
-| Radiation to listener | Monopole `p = ρQ̇/(4πr)`, ground reflection, shielding filters | Kinsler et al., *Fundamentals of Acoustics* | `observer.ts` |
+| Radiation to listener | Monopole `p = ρQ̇/(4πr)`, ground reflection, shielding filters; an engine in the open (motorcycle) is unshielded and sits 1.3 m ahead of its outlet | Kinsler et al., *Fundamentals of Acoustics* | `observer.ts` |
+| Firing schedule | Each cylinder fires on its TDC or one revolution later; exact dynamic programme over cylinders sorted by TDC minimising Σ(interval − 720/n)², then adjacent-throw firings | Derived (replaces an exhaustive search; identical results) | `geometry.ts` `optimalSchedule`, `realiseOrder` |
+| Cross-Four X layout | Modules of four cylinders on four pins 90° apart; axes 180° ± t and ± t; opposed pairs in phase, pairs 90° + 2t apart; rod planes 1·3·2·4; module offsets searched in 1° steps for even pulses or least rocking couple | The owner's Saber SB4–SB16 kinematic study (ported function for function) | `geometry.ts` `xEvenFiringOffsets`, `xLowCoupleOffsets`, `xRockingCouple` |
+| Master-and-link rods | Master rod on the crank pin; link rods on knuckle pins spaced like the cylinders round its big end; exact planar kinematics tabulated every 0.25° per cylinder | Derived (exact planar kinematics of the master-rod arrangement every radial row uses); no numeric source for the proportions, see the calibrated constants | `rods.ts` |
+| Dilution ignition limit | No ignition above ≈ 2/3 burned gas by mass, certain below 1/2, linear probability between | Heywood §9.4 (partial burning and misfire with dilution); Blair (1996) on irregular light-load combustion ("four-stroking") in two-strokes. The 1/2 and 2/3 limits are estimates, not fitted values | `cylinder.ts` `ignite` |
 
 ### Calibrated constants and their basis
 
@@ -65,6 +69,11 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Accessory drag | (2.6 + 0.00035·rpm) · L | About 16 N·m on a 6 L V8 at idle, about 3 N·m on a 1 L motorcycle engine. |
 | Structure excitation | Combustion F = A·p; piston slap J = m·√(2Fc/m) with 30 µm clearance; valve seating J = 0.05 kg × 0.25 m/s·(rpm/6000); timing drive 60 N noise + 36 N mesh tone (order 21) × (rpm/1000)^1.5 on four-strokes; two-strokes (no camshaft drive, no valvetrain) keep half the noise and no tooth tone; Wankels 0.6 × with the stationary-gear mesh at ≈ 34 per e-shaft revolution | Physical impulse magnitudes. The order-21 tone on two-strokes was a bug found by the CRM250 recording (§4). Contact durations 100 µs (seat), 0.3 ms (slap), 150 µs (chain). |
 | Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
+| Knuckle-pin circle | 0.22 × master rod length; link rod = master rod − knuckle radius; equal clearance volume on every cylinder | **Estimated** from Wasp-family proportions; no drawing with dimensions was reachable. Gives TDC shifts up to 3.7° and strokes up to 0.45 % long on a nine-cylinder row. Makers trimmed knuckle positions to equalise compression, which is why the clearance volume is held equal. |
+| Radial rod length | 2.1 × stroke | The cylinders of a nine-cylinder row need (rod − crank radius)·sin 20° ≥ half a bore to clear each other; Wasp Junior and Wasp master rods are about twice the stroke. |
+| Crank inertia vs stroke | Base (0.06 + 0.022·L) kg·m² × (stroke / 90 mm)², limited to 1–6 × | Rotating inertia goes with mass × throw². Leaves car engines (stroke ≈ 90 mm) unchanged; a 190 mm-stroke 11 L engine gets 1.8 kg·m² (heavy-duty 11–13 L diesels with flywheel: 2–3). Without it two turbo X engines free-revved 380–500 rpm through their limiters in the fuzz sweep. |
+| Two-stroke silencer packing | 0.45 stock, 0.25 sport, 0.12 race (four-stroke scale: 0.9 / 0.55 / 0.3) | **Calibrated** with chamber steepening against the CRM250 and MZ ETZ250 recordings' 2–8 kHz content; rationale: oil-fouled packing absorbs far less than dry glass fibre. |
+| Exposed-engine listener | No shielding outside; "cabin" becomes a helmet, −6 dB above 2 kHz; no body boom | Geometry. The helmet figure is **unverified** (no rider's-ear recording). |
 | Cabin boom gain | 0.00175 Pa per N·m of 25–180 Hz torque ripple | **Unverified.** No open interior recordings; set so WOT boom sits a few dB above the airborne exhaust. |
 | Afterfire | Continuous afterburning (τ ≈ 3 ms when hot with O₂) while firing; discrete pops need fuel cut, limiter cut or misfires | Matches observed behaviour: crackle on lift-off and the limiter, flame without pops under load. |
 | Variable-geometry turbine | Full-open nozzle sized like a large housing (0.55 × redline in the area rule), closed vanes 30 % of it; vanes on the wastegate's PI with the same anticipation, opened by shaft overspeed; no wastegate. Default for boosted diesels with pilot injection (common rail), set per engine otherwise | PSA 1.5 BlueHDi torque at 1750 rpm: −27.5 % with a wastegate, −8.5 % with the VGT (`docs/figures/diesel-vgt.png`). |
@@ -275,7 +284,8 @@ What it shows:
 * **Diesels match at 5.7–9 dB from the engine bay**, the position consistent with phone clips made next to the vehicle: Cummins idle 7.0, PSA idle 6.4 and revs 5.9, Octavia idle 5.9, Beetle idle 9.0 and revs 5.7 (the 2JZ dyno pull is 4.9). The recorded tilt (−7 to −18 dB) falls between the simulated exterior-side and rear values, so the microphones were probably a few metres away; whether the simulated clatter is too bright at the engine bay cannot be told from these clips.
 * **An identified four-stroke under load:** the supercharged FA20 dyno pull matches at 7.9 dB (engine bay; the recording mixes three microphones). As with the diesels, the real engine carries more energy between the firing orders (−4.4 dB against −6.6 to −12.7).
 * **The 190 D does not match (15.5 dB, off-firing share 15 dB low).** The real OM601 is a prechamber engine with a much softer, rougher burn, and the car may be the five-cylinder 2.5; the model injects directly.
-* **Two-strokes are too dull at every perspective.** The recordings' tilt is about −1 dB; the renders are −14 to −30 dB, and the error is 12–14 dB. Soloing the stems on the CRM250 at 7000 rpm WOT (engine bay) gives intake −29 dB (tilt −16), exhaust −34 dB (tilt −9), structure −42 dB (tilt 0) and outlet jet −78 dB: the high-velocity stinger jet and the sharp port blowdown that make a two-stroke rasp are far too weak. This is the main open two-stroke sound gap.
+* **Two-strokes, November 2026.** Three changes (below, "Two-stroke: shock waves, four-stroking") cut the order-profile error from 18.5 / 16.7 / 13.7 to 13.1 / 12.3 / 13.3 dB on the CRM250 and from 14.4 / 14.7 / 12.7 to 10.5 / 10.0 / 12.0 dB on the MZ (rear / side / engine bay), and the tilt deficit from 24–30 dB to 12–17 dB. The table above keeps the October figures.
+* **Two-strokes were too dull at every perspective (October).** The recordings' tilt is about −1 dB; the renders are −14 to −30 dB, and the error is 12–14 dB. Soloing the stems on the CRM250 at 7000 rpm WOT (engine bay) gives intake −29 dB (tilt −16), exhaust −34 dB (tilt −9), structure −42 dB (tilt 0) and outlet jet −78 dB: the high-velocity stinger jet and the sharp port blowdown that make a two-stroke rasp are far too weak. This is the main open two-stroke sound gap.
 * **Bug found: four-stroke timing-chain whine on two-strokes.** The structure model's order-21 timing-drive tone ran on every engine, and stood 15 dB above the CRM250 recording at order 21. Two-strokes now have no tooth tone and half the friction excitation (the engine-bay error rises from 11.2 to 13.7 dB, because the false tone had been filling the missing high orders).
 * **Off-firing energy.** Measured from behind and before the high-pass was added, the Cummins idle had 11 dB more energy between the firing orders than the render (−8.2 against −19.2 dB). Adding the measured-scale injector spread (0.5 mg) moves it 0.6 dB; an end-collector log manifold overshoots (−1.7 dB against −8.2 dB). Real log-manifold geometry is the likely remaining cause and is not modelled.
 
@@ -330,6 +340,48 @@ The 13B fires every 180° of e-shaft (six chambers, two firings per revolution).
 
 Side-by-side render of the four families (idle, full-throttle rev, lift-off; exterior rear): `docs/figures/engine-families.png`.
 
+### Two-stroke: shock waves, four-stroking (November 2026)
+
+The October comparison left two-strokes 24–30 dB short in 2–8 kHz. Soloing the sources at 6000 rpm full throttle showed the exhaust outlet carrying everything, with a smooth waveform. Three physical changes, each measured against the CRM250 recording:
+
+1. **Steepening through the expansion chamber.** Only the header steepened finite-amplitude waves; the cones, belly and stinger were linear, so the blowdown pulse never became a shock. With steepening throughout, the outlet's 2–8 kHz band rises 9 dB at full throttle (tilt −22 → −13 dB) and torque is unchanged (23.8 → 23.7 N·m). A shock radiates as an impulse, which has a flat spectrum: with the silencer removed the tilt is −4 dB, against the recordings' −1.
+2. **Silencer packing.** The remaining gap is the silencer's absorption (21 dB at 4 kHz with four-stroke packing). Two-stroke packing is oil-fouled; the defaults are now about half as absorptive (calibrated constant, §1).
+3. **Dilution ignition limit.** At idle the charge is 75 % burned gas and the model burned it weakly every revolution. With the limit, the CRM250 misfires 23 of 52 revolutions at idle and 46 of 114 on a light free rev (four-stroking), holds its idle speed, and is unchanged at full throttle. The MZ's off-firing-order share moves from −14.2 to −10.7 dB (recording −5.6).
+
+An ideal breathing-mode calculation of chamber-shell radiation (hoop stiffness E·h/R², 1 mm steel) from the simulated internal pressures gives 34 dB SPL at 7.5 m in 2–8 kHz, 30 dB below the outlet, so shell "ring" was not added: it would need a fitted gain with nothing to fit it to.
+
+Still open: 12–17 dB of tilt on light free revs. The recordings were made on phones close to the engine (low-frequency roll-off, possible overload), and the model's structure-borne level at high speed is 10–15 dB under Anderton's empirical law for petrol engines (50·log N); both point the same way.
+
+### Cross-Four X engines (November 2026)
+
+The module phasing was checked against the functions in the owner's study for tilts 0, 5, 10.5, 15, 22.5, 30, 37.5 and 45° and one to four modules: 64 of 64 comparisons give the same crank offsets, and the rocking couple agrees to 1e-6 (`shared/ess/geometry.test.ts` pins the 15° cases). Every cylinder's firing TDC is a crank angle of maximum piston travel in the study's own `solve()`.
+
+| Engine | Module offsets | Firing intervals | Idle | Full load at 2000 rpm |
+|---|---|---|---|---|
+| SB4, 5.5 L, 15° | 0° | 240 / 120 / 240 / 120° | 650 rpm | 467 N·m (10.7 bar BMEP) |
+| SB8, 11 L, 15° | 0 · 180° | 60 / 120° | 650 rpm | 965 N·m (11.0 bar) |
+| SB12, 16.5 L, 15° | 0 · 160 · 80° | 40 / 80 / 80 / 80 / 40 / 40° | 650 rpm | — |
+| SB16, 22 L, 15° | 0 · 90 · 180 · 270° | 30 / 60° | 650 rpm | 1938 N·m (11.1 bar) |
+| SB16, 22 L, 45° | 0 · 45 · 135 · 270° | even 45° | 650 rpm | — |
+| SB8 turbo-diesel, 16.8 : 1, 124 kPa | 0 · 180° | 60 / 120° | 730 rpm | 1850 N·m (21 bar), 200 bar peak |
+
+![Saber Cross-Four spectrograms](figures/saber-cross-four.png)
+
+Full-throttle dyno pulls to 3000 rpm, then a lift. The dominant orders follow the firing pattern: orders 1 and 3 on the SB4 (the 120° / 240° pattern repeats once a revolution), 2 and 4 on the SB8, 4 and 8 on the SB16, and order 8 alone on the square X, which fires evenly.
+
+There is no real engine to compare these against. What is checked is the geometry (against the study), numerical health (unit tests, 120 fuzz seeds with nine X engines) and real-time playback in Chromium (all seven presets; the SB16 runs at the 2/3 rate tier in headless Chromium on this container).
+
+### Radial with master-and-link rods (November 2026)
+
+| Wasp Junior (R-985) | Plain rods | Master-and-link |
+|---|---|---|
+| Firing order | 1-3-5-7-9-2-4-6-8 | 1-3-5-7-9-2-4-6-8 |
+| Firing intervals | 80° × 9 | 82.6 / 79.2 / 74.6 / 83.3 / 80.9 / 83.3 / 74.6 / 79.2 / 82.6° |
+| TDC offset by cylinder | 0 | 0, −0.46, −2.55, −3.73, −1.72, +1.72, +3.73, +2.55, +0.46° |
+| Torque at 2000 rpm | 1257 N·m | 1230 N·m |
+
+The open radial recording (`radial-biplane-archive.mp3`) has no stated engine or speed, so the lope is not compared against it.
+
 ### Random configurations and real-time cost
 
 `scripts/fuzzConfigs.ts` (library `shared/ess/fuzz.ts`) draws configurations across layouts,
@@ -352,6 +404,10 @@ Measured cost per engine, as a real-time factor at 48 kHz on a single vCPU of th
 **October 2026 re-measure** (`scripts/cpuBench.ts`, one thread of a 4-vCPU container, 1 s idle, 1 s free rev, then dyno at 0.8 × limiter): W16 1.24–1.35 (run-to-run spread), F140 0.89, LS3 0.67, EA288 0.49–0.55, 13B 0.47–0.48, RD350LC 0.39–0.41, K20A 0.38–0.40. The cost estimate is within 10 % except the two-stroke (0.32 estimated against 0.39–0.41 measured). In Chromium the same engines run with their worklet-measured load at 25–81 % of the audio thread, and the W16 at its 32 kHz tier (`docs/browser-verification.md`).
 
 Profile of the W16 (Node `--cpu-prof`): duct sample reads 14 %, the per-sample engine loop 11 %, cylinder step 10 %, valve residuals and solver 16 %, junction solves 6 %, compressor 3 %. The valve solver averages 3.8 residual evaluations per solve (11.7 solves per sample on the W16) with its warm start, linear predictor and Newton first step. Stopping at 1e-4 of the flow instead of 1e-6 cut that to 3.2 but gave no measurable wall-clock gain, and it was reverted. Changes like this also cannot be checked sample by sample: the combustion variability makes the trajectory diverge after the first perturbed cycle (idle stays within −14 to −77 dB of the reference, then the signals decorrelate) while dyno torque moves less than 0.1 %. `scripts/nullTest.ts` and `scripts/nullCompare.py` report both. The remaining options are structural: thermodynamics at a sub-rate, or splitting the engine across threads. Threads need SharedArrayBuffer, which needs cross-origin isolation headers that GitHub Pages does not send.
+
+**November 2026: allocation removed from the audio loop.** The loop allocated about 740 MB a second (Node heap sampling with collected objects included). Causes: fields declared without an initial value are created as `undefined`, which makes V8 keep them as generic values and box every fractional store (duct `c`, `rho`, `Y`, `delaySamples`; the random generator's state above 2³¹; crank speed); and fractions passed to or returned from calls the optimiser does not inline are boxed (piston kinematics returned arrays, the valve residual, valve area, junction solves, delay-line reads). After moving those to initialised fields and in-place code, with duct gas-state glides stopping once settled: SB16 28 % less CPU, LS3 22 %, 13B 38 %, RD350LC 23 %, EA288 15 %, W16 18 % (interleaved before/after runs, best of three; the container's timing varies ±10 % run to run). Output is bit-identical except for three items: the steepening amplitude probe is a two-point read, glides stop at 1e-10 of target, and runner gas state refreshes on change. Third-octave spectra over seven engines move by at most 0.16 dB on average. `scripts/cpuBench.ts` now reads W16 0.91, F140 0.53, LS3 0.44, EA288 0.38, 13B 0.26, RD350LC 0.30, K20A 0.22, R-985 0.35; Saber SB4 0.23, SB8 0.32, SB16 0.48. Cost estimate refitted: 0.086 + 0.039·cylinders + 0.0031·ducts + 0.057·turbos.
+
+**Fuzz, November 2026:** the generator also draws Cross-Four X engines; **120 of 120 seeds pass** (seeds 1–120, nine of them X engines), after crank inertia was scaled with stroke (§1).
 
 ### Wave physics (from the core build)
 

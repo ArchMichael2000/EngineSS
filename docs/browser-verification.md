@@ -48,6 +48,22 @@ Each engine is selected from the preset menu, then idles for 2 s, runs 2.5 s at 
 
 "Idle rpm" is the median over 0.8–2.0 s after the preset switch, so engines that are still settling read low here. "Worklet load" is the worklet's own measurement of its share of the audio thread. On an idle page it matches a burst benchmark of the same engine on the audio thread to within 3 %. During this test it also includes contention from the page and from Playwright.
 
+### November 2026: Saber Cross-Four presets
+
+Same procedure and criteria, Chromium 141 headless on the 4 vCPU container, Pages build of PR #4. Every reference engine, every control and the exports passed again (55 checks, no console errors, no rate step-downs under the load test).
+
+| Engine | Internal rate | Idle rpm | WOT max rpm | Idle dBFS | WOT dBFS | Peak | Longest gap | Audio clock | Worklet load |
+|---|---|---|---|---|---|---|---|---|---|
+| saber-sb4 | 48 kHz | 653 | 3105 | -36.0 | -10.2 | 0.83 | 0.1 ms | 100.1 % | 42 % |
+| saber-sb8 | 48 kHz | 645 | 3072 | -28.7 | -9.9 | 0.83 | 0.0 ms | 99.9 % | 59 % |
+| saber-sb12 | 48 kHz | 648 | 3075 | -29.6 | -11.0 | 0.83 | 0.0 ms | 99.8 % | 77 % |
+| saber-sb16 | 32 kHz | 652 | 3067 | -29.4 | -10.2 | 0.83 | 0.0 ms | 100.5 % | 60 % |
+| saber-sb16-square | 32 kHz | 652 | 3087 | -30.0 | -11.1 | 0.83 | 0.0 ms | 100.1 % | 65 % |
+| saber-sb12-low-couple | 48 kHz | 646 | 3068 | -28.1 | -9.5 | 0.83 | 0.0 ms | 100.1 % | 66 % |
+| saber-sb8-diesel | 48 kHz | 730 | 2963 | -40.8 | -14.1 | 0.83 | 0.0 ms | 100.6 % | 68 % |
+
+![Engine cross-section view](figures/engine-view.png)
+
 ## Controls
 
 | Control | Result |
