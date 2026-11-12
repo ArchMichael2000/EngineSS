@@ -812,6 +812,11 @@ export class EngineSimulator {
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
     if (this.spec.diesel) this.dieselGovernor(rpm, pedal, idleErr, rpmRate, blockSec);
 
+    // A moving listener perspective follows the road speed in Drive mode (the vehicle stays where it
+    // is on the track while it stands); otherwise the pass runs at the perspective's own speed.
+    const motion = this.observer.def.motion;
+    if (motion) this.observer.setTravelSpeed(this.controls.mode === "vehicle" && motion.altitudeM === 0 ? this.drivetrain.speed : motion.speed);
+
     // Housekeeping at block rate.
     this.intake.updateBlock();
     this.plenumGasMass = (Math.max(0.3, this.spec.intake.plenumVolumeL) / 1000) * (this.intake.mapPa / (287.05 * this.intake.airTempK));

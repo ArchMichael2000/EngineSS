@@ -7,6 +7,7 @@ import { REFERENCE_ENGINES } from "./reference/engines";
 import { DEFAULT_ENGINE_CONFIG, SABER_PRESETS } from "../engineTypes";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
+import { Observer } from "./observer";
 
 const FS = 48000;
 
@@ -382,6 +383,67 @@ describe("Cross-Four X engines", () => {
       expect(bmepBar).toBeLessThan(key.endsWith("diesel") ? 26 : 13.5);
     }, 60_000);
   }
+});
+
+describe("moving listener perspectives", () => {
+  it("a pass-by shifts the pitch down by the Doppler ratio and swells as the vehicle passes", () => {
+    // A pure 400 Hz monopole on the pass-by track at 27.8 m/s (the observer alone, no engine).
+    const obs = new Observer(FS, "pass-by", [{ kind: "exhaust", position: { x: 0, y: 0, z: 0.4 } }]);
+    const q = new Float64Array(1);
+    const ear = new Float64Array(2);
+    const seconds = 5;
+    const out = new Float64Array(seconds * FS);
+    const pos = new Float64Array(seconds * FS);
+    for (let i = 0; i < out.length; i++) {
+      q[0] = Math.sin((2 * Math.PI * 400 * i) / FS);
+      obs.process(q, 0, ear);
+      out[i] = ear[0];
+      pos[i] = obs.trackPosition;
+    }
+    // Zero-crossing frequency over a quarter second.
+    const freq = (from: number) => {
+      let crossings = 0;
+      for (let i = from + 1; i < from + FS / 4; i++) if (out[i - 1] < 0 && out[i] >= 0) crossings++;
+      return crossings * 4;
+    };
+    const rms = (from: number) => {
+      let sum = 0;
+      for (let i = from; i < from + FS / 10; i++) sum += out[i] * out[i];
+      return Math.sqrt(sum / (FS / 10));
+    };
+    // Starts 42 m before the listener: approaching for the first 1.2 s, well past by 3.5 s.
+    const abeam = pos.findIndex((p, i) => i > 0 && pos[i - 1] < 0 && p >= 0);
+    expect(abeam / FS).toBeGreaterThan(1.3);
+    expect(abeam / FS).toBeLessThan(1.7);
+    const approaching = freq(abeam - FS);
+    const receding = freq(abeam + FS);
+    // v/c = 27.8/346: +8.6 % approaching and −7.4 % receding, less a little for the 7.5 m offset.
+    expect(approaching).toBeGreaterThan(424);
+    expect(approaching).toBeLessThan(436);
+    expect(receding).toBeGreaterThan(368);
+    expect(receding).toBeLessThan(378);
+    expect(rms(abeam)).toBeGreaterThan(2.5 * rms(abeam - FS));
+    // No jumps: the largest sample-to-sample change stays that of a ≈ 430 Hz tone at the peak level.
+    let peak = 0;
+    let step = 0;
+    for (let i = 1; i < out.length; i++) {
+      peak = Math.max(peak, Math.abs(out[i]));
+      step = Math.max(step, Math.abs(out[i] - out[i - 1]));
+    }
+    expect(step).toBeLessThan(peak * 2 * Math.PI * (440 / FS) * 1.1);
+  });
+
+  it("a fly-over runs an engine without a discontinuity at the end of the track", () => {
+    const sim = new EngineSimulator(specOf("pw-r985"), 24000, { perspective: "fly-over" });
+    sim.prewarm(1);
+    const L = new Float32Array(24000 * 16);
+    const R = new Float32Array(L.length);
+    sim.process(L, R);
+    expect(L.every(Number.isFinite)).toBe(true);
+    // The track restarts about 13.3 s in (0.6 + 1 of a half-track at 62 m/s); the fade makes it silent there.
+    const window = (t: number) => Math.max(...Array.from(L.subarray(Math.round(t * 24000), Math.round((t + 0.2) * 24000)), Math.abs));
+    expect(window(10.75)).toBeLessThan(0.05 * window(5));
+  }, 60_000);
 });
 
 describe("exhaust arrangements and cylinder counts", () => {

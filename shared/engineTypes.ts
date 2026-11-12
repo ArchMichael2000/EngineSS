@@ -161,7 +161,7 @@ export type CollectorType = 'bank' | 'each-bank' | 'firing-alternate' | 'pairs-t
 export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
 export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'glasspack' | 'none';
 export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
-export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe';
+export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe' | 'pass-by' | 'fly-over';
 
 /**
  * Detailed physical overrides for the v16 core. Every field is optional; anything
