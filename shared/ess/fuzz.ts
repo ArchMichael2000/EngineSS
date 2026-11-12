@@ -17,6 +17,8 @@ export interface FuzzOptions {
   twoStroke?: boolean;
   /** Allow the rotary variant draw (default true). */
   rotary?: boolean;
+  /** Allow the Cross-Four X variant draw (default true). */
+  x?: boolean;
 }
 
 export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfiguration {
@@ -116,6 +118,21 @@ export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfig
     delete ph.cetaneNumber;
     if (rnd() < 0.3) ph.rotaryExhaustPort = pick(["peripheral", "side"] as const);
   }
+  // Cross-Four X variants (drawn last): 1–4 modules, any tilt and phasing, long-stroke proportions
+  // at piston speeds up to about 22 m/s; any fuel, aspiration or cycle already drawn except rotary.
+  if (opts.x !== false && config.quick.cycle !== "rotary" && rnd() < 0.1) {
+    const modules = 1 + Math.floor(rnd() * 4);
+    const perX = 0.25 + rnd() * 1.4;
+    config.quick.layout = "x";
+    config.quick.cylinderCount = 4 * modules;
+    config.quick.displacement = Math.round(4 * modules * (config.quick.cycle === "two-stroke" ? Math.min(perX, 0.5) : perX) * 100) / 100;
+    // Stroke at the Saber proportions is ≈ 168 mm × (litres per cylinder)^(1/3).
+    const strokeM = 0.168 * Math.cbrt(config.quick.displacement / (4 * modules));
+    const cap = Math.round(((12 + rnd() * 10) * 30) / strokeM / 100) * 100;
+    config.quick.redline = Math.max(1800, Math.min(config.quick.redline, cap));
+    ph.xTiltDeg = Math.round(rnd() * 90) / 2;
+    ph.xPhasing = pick(["even-firing", "even-firing", "low-couple"] as const);
+  }
   config.physical = ph as EngineConfiguration["physical"];
   return config;
 }
@@ -134,7 +151,7 @@ export function runConfig(seed: number, fs = 48000, opts: FuzzOptions = {}): Fuz
   const problems: string[] = [];
   const config = randomConfig(seed, opts);
   const q = config.quick;
-  const summary = `${q.cylinderCount}-cyl ${q.layout} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""}${q.cycle === "two-stroke" ? " two-stroke" : q.cycle === "rotary" ? " rotary" : ""} redline ${q.redline}`;
+  const summary = `${q.cylinderCount}-cyl ${q.layout}${q.layout === "x" ? ` tilt ${config.physical?.xTiltDeg}° ${config.physical?.xPhasing}` : ""} ${q.displacement} L ${q.crankshaft} ${config.forcedInduction.type}${q.fuel === "diesel" ? " diesel" : ""}${q.cycle === "two-stroke" ? " two-stroke" : q.cycle === "rotary" ? " rotary" : ""} redline ${q.redline}`;
   let idleRpm = 0;
   let wotRpm = 0;
   let cpu = 0;

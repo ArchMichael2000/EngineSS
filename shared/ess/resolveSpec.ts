@@ -306,8 +306,12 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       }
     : null;
 
+  // A crank's inertia goes with its mass times the square of its throw: long-stroke engines carry
+  // far more per litre than the car engines the base figure describes (stroke ≈ 90 mm). Without
+  // this a 190 mm-stroke engine free-revs through its limiter within one cycle.
+  const strokeInertia = clamp((stroke / 90) * (stroke / 90), 1, 6);
   // Small two-strokes are motorcycle/kart/outboard engines with light flywheels whatever their redline.
-  const inertia = ph.inertiaKgM2 ?? (rotaryEngine ? 0.07 + 0.035 * rotors : twoStroke && displacement <= 1.6 ? 0.008 + 0.03 * displacement : motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1));
+  const inertia = ph.inertiaKgM2 ?? (rotaryEngine ? 0.07 + 0.035 * rotors : twoStroke && displacement <= 1.6 ? 0.008 + 0.03 * displacement : motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1) * strokeInertia);
 
   return {
     name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : crossFour ? `SB${n} Cross-Four ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,

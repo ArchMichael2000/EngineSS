@@ -4,7 +4,7 @@ import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
 import { cycleDegrees } from "./spec";
 import { REFERENCE_ENGINES } from "./reference/engines";
-import { DEFAULT_ENGINE_CONFIG } from "../engineTypes";
+import { DEFAULT_ENGINE_CONFIG, SABER_PRESETS } from "../engineTypes";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
 
@@ -363,13 +363,34 @@ describe("valve wave solve", () => {
   }, 60_000);
 });
 
+describe("Cross-Four X engines", () => {
+  for (const key of ["saber-sb4", "saber-sb16", "saber-sb8-diesel"]) {
+    it(`${key} idles steadily and pulls on the dyno`, () => {
+      const spec = resolveEngineSpec({ ...SABER_PRESETS[key].config, seed: 1 });
+      const sim = new EngineSimulator(spec, FS);
+      const L = new Float32Array(4800);
+      const R = new Float32Array(4800);
+      sim.prewarm(3);
+      sim.process(L, R);
+      expect(L.every(Number.isFinite)).toBe(true);
+      expect(Math.abs(sim.telemetry.rpm - spec.calibration.idleRpm)).toBeLessThan(0.25 * spec.calibration.idleRpm);
+      sim.setControls({ mode: "dyno", targetRpm: 2000, throttle: 1 });
+      sim.prewarm(2.5);
+      // A long-stroke engine at 2000 rpm: at least 8 bar BMEP unboosted (torque = BMEP·V/4π).
+      const bmepBar = (sim.telemetry.brakeTorqueNm * 4 * Math.PI) / (sim.displacementL / 1000) / 1e5;
+      expect(bmepBar).toBeGreaterThan(key.endsWith("diesel") ? 9 : 8);
+      expect(bmepBar).toBeLessThan(key.endsWith("diesel") ? 26 : 13.5);
+    }, 60_000);
+  }
+});
+
 describe("random configurations", () => {
   // A few seeds from the robustness sweep (scripts/fuzzConfigs.ts runs the full set): seed 34 as the
   // 10 L turbo inline-8 that once overran its soft limiter (its gasoline draw), seed 29 a diesel.
   const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
   for (const [seed, diesel] of cases) {
     it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false });
+      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false, x: false });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }
