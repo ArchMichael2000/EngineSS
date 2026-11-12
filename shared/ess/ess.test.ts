@@ -4,7 +4,7 @@ import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
 import { cycleDegrees } from "./spec";
 import { REFERENCE_ENGINES } from "./reference/engines";
-import { DEFAULT_ENGINE_CONFIG, SABER_PRESETS } from "../engineTypes";
+import { DEFAULT_ENGINE_CONFIG, FACTORY_PRESETS, SABER_PRESETS } from "../engineTypes";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
 import { Observer } from "./observer";
@@ -325,6 +325,29 @@ describe("forced induction", () => {
 });
 
 describe("numerical health", () => {
+  // Regression: a dilution misfire limit applied to four-strokes dropped the long-overlap presets
+  // (V10, flat-six) to cranking speed every few seconds. Half-second mean speed, eight seconds.
+  for (const [key, preset] of Object.entries({ ...FACTORY_PRESETS, ...SABER_PRESETS })) {
+    it(`preset ${key} holds its idle without stall cycles`, () => {
+      const spec = resolveEngineSpec(preset.config);
+      const sim = new EngineSimulator(spec, 32000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(3);
+      let lowest = Infinity;
+      let highest = 0;
+      for (let w = 0; w < 16; w++) {
+        let sum = 0;
+        for (let k = 0; k < 10; k++) {
+          sim.prewarm(0.05);
+          sum += sim.rpm;
+        }
+        lowest = Math.min(lowest, sum / 10);
+        highest = Math.max(highest, sum / 10);
+      }
+      expect(lowest, key).toBeGreaterThan(0.6 * spec.calibration.idleRpm);
+      expect(highest, key).toBeLessThan(1.6 * spec.calibration.idleRpm);
+    }, 60_000);
+  }
   for (const key of Object.keys(REFERENCE_ENGINES)) {
     it(`${key} idles with finite output near its target`, () => {
       const out = new Float32Array(4800);
@@ -349,19 +372,36 @@ describe("valve wave solve", () => {
     const sim = new EngineSimulator(resolveEngineSpec(config), FS);
     sim.setControls({ mode: "dyno", targetRpm: 7400, throttle: 1, load: 0.41 });
     sim.prewarm(1);
+    // A spurious root shows as a spike: a jump of > 40 kPa taken back within two samples. A jump
+    // that stays is a neighbour's blow-down shock reflecting off the closed valve (the send of a
+    // closed valve is the arriving wave), which this engine also produces, at 40–42 kPa.
     const cylinders = (sim as unknown as { cylinders: { exhaustSend: number }[] }).cylinders;
     const prev = cylinders.map((c) => c.exhaustSend);
+    const jump = cylinders.map(() => ({ size: 0, age: 9 }));
     const l = new Float32Array(1);
     const r = new Float32Array(1);
-    let steps = 0;
+    let spikes = 0;
+    let largest = 0;
     for (let i = 0; i < FS; i++) {
       sim.process(l, r, 1);
       cylinders.forEach((c, k) => {
-        if (Math.abs(c.exhaustSend - prev[k]) > 40_000) steps++;
+        const d = c.exhaustSend - prev[k];
         prev[k] = c.exhaustSend;
+        largest = Math.max(largest, Math.abs(d));
+        const j = jump[k];
+        j.age++;
+        if (j.age <= 2 && d * j.size < 0 && Math.abs(d) > 0.5 * Math.abs(j.size)) {
+          spikes++;
+          j.age = 9;
+        }
+        if (Math.abs(d) > 40_000) {
+          j.size = d;
+          j.age = 0;
+        }
       });
     }
-    expect(steps).toBe(0);
+    expect(spikes).toBe(0);
+    expect(largest).toBeLessThan(60_000);
   }, 60_000);
 });
 

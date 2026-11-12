@@ -85,6 +85,9 @@ export interface CamSpec {
   /** Cam phaser authority, crank degrees: intake advance and exhaust retard from the base centrelines (0 = fixed cam). */
   intakePhaserDeg: number;
   exhaustPhaserDeg: number;
+  /** Part of each phaser's travel taken up between the parked (idle) position and the running range, crank degrees. */
+  intakeParkDeg?: number;
+  exhaustParkDeg?: number;
   /** Two-step lift switching (VTEC, VarioCam Plus, MIVEC): high-cam lobes engaged above `switchRpm` under load. */
   liftSwitch: LiftSwitchSpec | null;
 }

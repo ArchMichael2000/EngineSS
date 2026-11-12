@@ -123,6 +123,7 @@ export class EngineSimulator {
   private readonly sourceDefs: SourceDef[];
   private readonly ear = new Float64Array(2);
   private readonly exposed: boolean;
+  private structureSpeedGain = 1;
 
   // Mechanical state
   private crankDeg = 0;
@@ -146,7 +147,7 @@ export class EngineSimulator {
   private plenumBurned = 0;
   private plenumGasMass = 0.004;
   /** Idle-speed control gains (air PI + speed damping, spark P + D). */
-  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.04, spark: 40, sparkD: 0 };
+  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.04, spark: 70, sparkD: 0 };
   private ecuRpm = 800;
   private lastPedal = 0;
   private bypass = 0.3;
@@ -317,7 +318,7 @@ export class EngineSimulator {
     // Burned-gas capacity of each runner: its gas mass at idle manifold density.
     const runnerVolume = (Math.PI / 4) * Math.pow(spec.intake.runnerDiameterMm / 1000, 2) * (spec.intake.runnerLengthMm / 1000);
     for (const cyl of this.cylinders) cyl.runnerResidualCapacity = runnerVolume * (this.idleMapTarget / (287.05 * 320));
-    if (spec.twoStroke) {
+    if (!spec.rotary) {
       this.cylinders.forEach((cyl, i) => {
         const header = this.exhaust.primaries[i];
         cyl.headerCapacity = header.area * header.lengthM * (P_AMBIENT / (287.05 * 700));
@@ -516,7 +517,7 @@ export class EngineSimulator {
     for (let i = 0; i < ducts.length; i++) ducts[i].commit();
 
     this.structure.starterRevPerSec = this.cranking ? this.omega / TWO_PI : 0;
-    this.structure.step(this.pressureRates, 0.9, rpm);
+    this.structure.step(this.pressureRates, 0.9 * this.structureSpeedGain, rpm);
     if (!render) return;
 
     // ---- Radiation to the listener
@@ -607,9 +608,15 @@ export class EngineSimulator {
     // valvetrain or reciprocating mass, but apex, side and corner seals rubbing at rotor tip speed
     // (≈ the four-stroke figure at equal airflow).
     const cycleFactor = this.spec.twoStroke ? 0.65 : this.spec.rotary ? 0.65 : 1;
-    // Driven accessories (alternator, water/oil/fuel pumps, steering, A/C idle load) scale with the
-    // engine they serve: ~16 N·m on a 6 L V8 at idle, ~3 N·m on a 1 L motorcycle engine.
-    const accessory = (2.6 + 0.00035 * rpm) * this.displacementL;
+    // Driven accessories scale with the engine they serve, in two parts. Electrical, steering and
+    // climate loads: 2.05 N·m per litre up to 1500 rpm, constant power (322 W per litre) above,
+    // so their torque falls with speed instead of growing. Water, oil and fuel pumps follow the
+    // auxiliary term of Patton, Nitschke & Heywood (SAE 890836): amep = 6.23 + 5.22e-3·N −
+    // 1.79e-7·N² kPa. Together ≈ 16 N·m on a 6 L V8 at idle, as before; at 6000 rpm about 60 % of
+    // the former straight line in rpm. (The load is flat, not constant-power, through the idle
+    // range: a load that grows as the speed dips turns an idle wobble into a stall.)
+    const n = Math.min(rpm, 10_000);
+    const accessory = (Math.min(2.05, 322 / Math.max(1, (rpm / 60) * TWO_PI)) + 0.0796 * (6.23 + 5.22e-3 * n - 1.79e-7 * n * n)) * this.displacementL;
     return (cycleFactor * fmep * vd) / (4 * Math.PI) + accessory;
   }
 
@@ -631,8 +638,12 @@ export class EngineSimulator {
     const rpmN = rpm / cal.redlineRpm;
     const full = clamp((load - 0.6) / 0.3, 0, 1);
     const wotIntake = clamp(1 - (rpmN - 0.2) / 0.6, 0.15, 1);
-    const intakeTarget = idle || this.fuelCut ? 0 : cam.intakePhaserDeg * (0.75 * (1 - full) + wotIntake * full);
-    const exhaustTarget = idle || this.fuelCut ? 0 : cam.exhaustPhaserDeg * (0.8 * (1 - full) + 0.4 * full);
+    // Off idle the phasers first take up the park offset (a long cam parks on wider centrelines, see
+    // resolveSpec), then work over the travel that is left.
+    const pi = cam.intakeParkDeg ?? 0;
+    const pe = cam.exhaustParkDeg ?? 0;
+    const intakeTarget = idle || this.fuelCut ? 0 : pi + (cam.intakePhaserDeg - pi) * (0.75 * (1 - full) + wotIntake * full);
+    const exhaustTarget = idle || this.fuelCut ? 0 : pe + (cam.exhaustPhaserDeg - pe) * (0.8 * (1 - full) + 0.4 * full);
     const slew = 300 * blockSec;
     this.intakeCamAdvance += clamp(intakeTarget - this.intakeCamAdvance, -slew, slew);
     this.exhaustCamRetard += clamp(exhaustTarget - this.exhaustCamRetard, -slew, slew);
@@ -808,7 +819,9 @@ export class EngineSimulator {
     // Idle: retarded base spark holds a torque reserve; spark moves fast to regulate speed.
     // Applies at every speed with the pedal closed, so coasting down onto idle is continuous
     // (no jump from retarded idle spark to MBT at some speed threshold).
-    if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, Math.min(advance, 28));
+    // The feedback runs up to MBT when the speed sags (0.09 °/rpm at a 750 rpm idle): the air valve
+    // answers through the manifold's filling lag, so only spark can catch a dip inside one cycle.
+    if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, advance);
     if (this.cranking) advance = 5; // cranking spark: fixed near TDC
     this.sparkAdvance = clamp(advance, -5, 48);
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
@@ -818,6 +831,14 @@ export class EngineSimulator {
     // is on the track while it stands); otherwise the pass runs at the perspective's own speed.
     const motion = this.observer.def.motion;
     if (motion) this.observer.setTravelSpeed(this.controls.mode === "vehicle" && motion.altitudeM === 0 ? this.drivetrain.speed : motion.speed);
+
+    // Structure-borne level against speed. The modelled impacts grow about 30 dB per decade of
+    // speed. Measured spark-ignition engines grow about 50 (Anderton and co-workers' surveys of
+    // engine noise at 1 m: petrol ≈ 50·log N, naturally aspirated DI diesel ≈ 30·log N), because
+    // impacts also shorten and move energy up into the radiating band, which fixed contact times
+    // do not reproduce. Above 2000 rpm, where the level was fitted, spark engines get the missing
+    // 20 dB per decade, limited to 12 dB.
+    this.structureSpeedGain = this.spec.diesel ? 1 : clamp(rpm / 2000, 1, 4);
 
     // Housekeeping at block rate.
     this.intake.updateBlock();

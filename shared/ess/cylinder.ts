@@ -272,7 +272,7 @@ export class Cylinder {
   lastDeliveryRatio = 0;
   lastTrappingEfficiency = 0;
   private cycleInducted = 0;
-  /** Two-stroke header slug: composition of the gas just outside the exhaust port (kg). */
+  /** Header slug: composition of the gas just outside the exhaust port (kg). */
   private headerAir = 0;
   private headerFuel = 0;
   private headerBurned = 0;
@@ -742,13 +742,18 @@ export class Cylinder {
       this.misfired = true;
       return;
     }
-    // Dilution limit: a flame kernel does not survive in a charge that is mostly burned gas. Ignition
-    // is certain up to half burned gas by mass and impossible past about two thirds (four-stroke EGR
-    // tolerance ends near 40–50 %; a two-stroke's fresh charge is stratified toward the plug, which
-    // stretches it). A misfire leaves its charge in the cylinder, the next scavenge dilutes the
-    // burned gas further, and the engine fires again once it is under the limit: a lightly loaded
-    // two-stroke fires every second, third or fourth revolution ("four-stroking").
-    if (this.rng.next() < clamp((residualFraction - 0.5) / 0.18, 0, 1)) {
+    // Dilution limit (two-strokes): a flame kernel does not survive in a charge that is mostly burned
+    // gas. Ignition is certain up to half burned gas by mass and impossible past about two thirds
+    // (the fresh charge is stratified toward the plug, which stretches the limit). A misfire leaves
+    // its charge in the cylinder, the next scavenge dilutes the burned gas further, and the engine
+    // fires again once it is under the limit: a lightly loaded two-stroke fires every second, third
+    // or fourth revolution ("four-stroking").
+    // Four-strokes take their dilution through burn duration, cycle-to-cycle variation and burn
+    // efficiency below instead. The well-mixed cylinder counts all overlap back-flow as burned gas
+    // at the plug, which puts a long-overlap cam's idle at 0.5–0.65 here; a hard limit at those
+    // figures stalls engines that idle in service (the V10 preset fell to cranking speed every few
+    // seconds).
+    if (this.params.twoStroke && this.rng.next() < clamp((residualFraction - 0.5) / 0.18, 0, 1)) {
       this.misfired = true;
       this.burning = false;
       return;
@@ -758,14 +763,18 @@ export class Cylinder {
     const baseDuration = wiebeDuration(this.params.boreM, rpm, density, residualFraction, lambda);
     this.lastBurnDuration = baseDuration;
     const lowDensity = clamp((4.5 - density) / 4.5, 0, 1);
-    // Cycle-to-cycle variation: COV grows with dilution and low density (idle with large overlap → lope).
-    const cov = clamp(0.012 + dilutionCovGain * (1.6 * Math.max(0, residualFraction - 0.08) + 0.05 * lowDensity * lowDensity), 0.012, 0.5);
+    // Cycle-to-cycle variation grows with dilution and low charge density (Heywood §9.4): the burn
+    // duration is log-normal about its mean, and once dilution is heavy some cycles burn only in
+    // part. Set so the indicated work of one cylinder at idle varies by about 7 % (COV of IMEP) on
+    // a mild cam, 15–20 % with 20 % burned gas, and 40–50 % on a long-overlap cam, the measured
+    // range from a smooth idle to a loping one.
+    const cov = clamp(0.012 + dilutionCovGain * (1.0 * Math.max(0, residualFraction - 0.08) + 0.05 * lowDensity * lowDensity), 0.012, 0.45);
     const z = this.rng.gaussian();
-    const durationFactor = Math.exp(cov * 1.8 * z);
+    const durationFactor = Math.exp(cov * 0.9 * z);
     this.burnDurationDeg = clamp(baseDuration * durationFactor * this.burnScale, 25, 160);
     this.burnEfficiency = clamp(0.97 - 0.25 * Math.max(0, residualFraction - 0.2) - 0.4 * Math.max(0, lambda - 1.25), 0.4, 0.98);
-    // Partial burn / misfire probability rises steeply once dilution is heavy.
-    if (this.rng.next() < clamp(cov - 0.12, 0, 0.6) * 0.5) {
+    // Partial burns start near 27 % burned gas and reach one cycle in eight.
+    if (this.rng.next() < clamp(cov - 0.2, 0, 0.6) * 0.5) {
       this.burnEfficiency *= 0.25 + 0.5 * this.rng.next();
     }
     const burnableFuel = Math.min(this.massFuel, this.massAir / this.params.stoichAfr);
@@ -1199,9 +1208,11 @@ export class Cylinder {
       if (isExhaust) {
         this.unburnedFuelOut = lostFuel;
         this.exhaustGasTemp = outTemp;
-        if (this.params.twoStroke) {
-          // Header slug: what just left stays near the port (well-mixed, header-sized), so a returning
-          // pressure wave pushes back the charge that short-circuited, the tuned pipe's plugging action.
+        if (this.headerCapacity > 0) {
+          // Header slug: what just left stays near the port (well-mixed, header-sized). In a two-stroke
+          // a returning pressure wave pushes back the charge that short-circuited, the tuned pipe's
+          // plugging action. In a four-stroke it is what valve overlap draws back: burned gas after a
+          // good cycle, unburned mixture after a weak one or a misfire.
           this.headerAir += lostAir;
           this.headerFuel += lostFuel;
           this.headerBurned += lostBurned;
@@ -1226,7 +1237,7 @@ export class Cylinder {
       const gain = -dm;
       this.mass += gain;
       this.energy += CP_GAS * Tduct * gain;
-      if (isExhaust && this.params.twoStroke) {
+      if (isExhaust && this.headerCapacity > 0) {
         const total = this.headerAir + this.headerFuel + this.headerBurned;
         const fromSlug = Math.min(total, gain);
         const f = total > 0 ? fromSlug / total : 0;

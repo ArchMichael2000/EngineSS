@@ -126,16 +126,28 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   // Diesel cams: short, low-overlap timing (piston-to-valve clearance at CR 16–20 allows little overlap).
   const camPreset = diesel ? { intake: 198, exhaust: 204, icl: 112, ecl: 114 } : CAMS[q.idleCharacter];
   const highRev = diesel ? 0 : clamp((q.redline - 6500) / 3000, 0, 1);
+  const intakePhaser = clamp(ph.intakePhaserDeg ?? 0, 0, 80);
+  const exhaustPhaser = clamp(ph.exhaustPhaserDeg ?? 0, 0, 80);
+  const intakeDuration = ph.intakeDurationDeg ?? camPreset.intake + highRev * 18;
+  const exhaustDuration = ph.exhaustDurationDeg ?? camPreset.exhaust + highRev * 18;
+  // A cam on a phaser is timed for its parked position (intake fully retarded, exhaust fully
+  // advanced), where the lock pin holds it at idle with the least overlap. A cam longer than the
+  // family's therefore parks on wider centrelines, by half its extra duration, so its idle overlap
+  // stays the family's; at most half the phaser's travel goes into that.
+  const intakePark = ph.intakeCenterlineDeg === undefined ? clamp((intakeDuration - camPreset.intake - highRev * 18) / 2, 0, 0.5 * intakePhaser) : 0;
+  const exhaustPark = ph.exhaustCenterlineDeg === undefined ? clamp((exhaustDuration - camPreset.exhaust - highRev * 18) / 2, 0, 0.5 * exhaustPhaser) : 0;
   const cam: CamSpec = {
-    intakeDurationDeg: ph.intakeDurationDeg ?? camPreset.intake + highRev * 18,
-    exhaustDurationDeg: ph.exhaustDurationDeg ?? camPreset.exhaust + highRev * 18,
-    intakeCenterlineDeg: ph.intakeCenterlineDeg ?? camPreset.icl,
-    exhaustCenterlineDeg: ph.exhaustCenterlineDeg ?? camPreset.ecl,
+    intakeDurationDeg: intakeDuration,
+    exhaustDurationDeg: exhaustDuration,
+    intakeCenterlineDeg: (ph.intakeCenterlineDeg ?? camPreset.icl) + intakePark,
+    exhaustCenterlineDeg: (ph.exhaustCenterlineDeg ?? camPreset.ecl) + exhaustPark,
     intakeLiftMm: ph.intakeLiftMm ?? inD * (inCount === 1 ? 0.27 : 0.29) * (1 + 0.1 * highRev),
     exhaustLiftMm: ph.exhaustLiftMm ?? exD * (exCount === 1 ? 0.3 : 0.31) * (1 + 0.1 * highRev),
     gamma: ph.camLobeGamma ?? 0.8,
-    intakePhaserDeg: clamp(ph.intakePhaserDeg ?? 0, 0, 80),
-    exhaustPhaserDeg: clamp(ph.exhaustPhaserDeg ?? 0, 0, 80),
+    intakePhaserDeg: intakePhaser,
+    exhaustPhaserDeg: exhaustPhaser,
+    intakeParkDeg: intakePark,
+    exhaustParkDeg: exhaustPark,
     liftSwitch: null,
   };
   if (ph.liftSwitchRpm) {
