@@ -271,6 +271,8 @@ export interface PhysicalOverrides {
   exhaustExit: 'rear' | 'side';
   /** Cross-Four: which cylinder of each opposed pair leads (see XLayoutSpec.firing). An explicit firing order overrides it. */
   xFiring: 'default' | 'even-sides' | 'bunched-sides';
+  /** X layout crank: four pins per module (Cross-Four, default) or one shared pin per row with master-and-link rods. */
+  xPins: 'four' | 'shared';
   xTiltDeg: number;
   xPhasing: 'even-firing' | 'low-couple' | 'custom';
   xModuleOffsetsDeg: number[];

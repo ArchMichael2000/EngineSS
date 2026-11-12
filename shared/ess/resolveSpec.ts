@@ -43,9 +43,11 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   // Rotaries: three working chambers per rotor.
   // Cross-Four X: whole modules of four cylinders (SB4 … SB24).
   const crossFour = q.layout === "x" && !rotaryEngine;
+  // The classic X: one crank pin per row with master-and-link rods (Vulture, DB 604).
+  const sharedX = crossFour && ph.xPins === "shared";
   const n = rotaryEngine ? rotors * 3 : crossFour ? clamp(Math.round(q.cylinderCount / 4), 1, 6) * 4 : clamp(Math.round(q.cylinderCount), 1, 24);
   const layout = (n === 1 || rotaryEngine) && !crossFour ? "inline" : q.layout;
-  const displacement = clamp(q.displacement, 0.05, 30);
+  const displacement = clamp(q.displacement, 0.05, 60);
   const perCyl = rotaryEngine ? displacement / rotors : displacement / n;
   const motorcycleLike = q.redline >= 10_000 && displacement <= 1.6 && !rotaryEngine;
   const aircraftLike = !rotaryEngine && (layout === "radial" || (q.redline <= 3200 && perCyl > 1.5));
@@ -55,7 +57,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   // ---- Bore / stroke
   // Diesels are undersquare (stroke ≈ 1.1–1.2 × bore) for combustion-chamber shape and torque.
   // Cross-Four: the Saber study's long-stroke proportions (96 × 190 mm, 400 mm rod) unless overridden.
-  const defaultRatio = crossFour ? 96 / 190 : twoStroke ? 1.0 : diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
+  const defaultRatio = sharedX ? 127 / 139.7 : crossFour ? 96 / 190 : twoStroke ? 1.0 : diesel ? 0.87 : layout === "flat" ? 1.28 : layout === "radial" ? 1.0 : motorcycleLike ? 1.45 : layout === "v" && n >= 8 ? 1.1 : n <= 4 ? 0.98 : 1.04;
   let bore: number;
   let stroke: number;
   if (adv.bore && adv.stroke) {
@@ -105,11 +107,11 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     stroke = ((Math.PI * r) / 3) * 1000;
   }
   // Radials need long rods for the cylinders to clear each other around the crankcase (≈ 2.1 × stroke on the Wasp family).
-  const rod = ph.rodLengthMm ?? stroke * (crossFour ? 400 / 190 : layout === "radial" ? 2.1 : twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
+  const rod = ph.rodLengthMm ?? stroke * (sharedX ? 2.0 : crossFour ? 400 / 190 : layout === "radial" ? 2.1 : twoStroke ? 2.0 : rotaryEngine ? 2.0 : motorcycleLike ? 1.75 : 1.62);
 
   // ---- Crank
   const crankType: EssCrankType = ph.crankType ?? mapCrank(q.crankshaft, layout);
-  const xTilt = clamp(ph.xTiltDeg ?? 15, 0, 45);
+  const xTilt = clamp(ph.xTiltDeg ?? (sharedX ? 45 : 15), sharedX ? 20 : 0, sharedX ? 70 : 45);
   // Cross-Four: the angle between the upper and lower cylinder on each side is twice the tilt.
   const bankAngle = crossFour ? 2 * xTilt : adv.bankAngle ?? defaultBankAngle(layout, n);
   const xPlanePitch = ph.xPlanePitchMm ?? bore * (46 / 96);
@@ -179,7 +181,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   // Header primary plus the exhaust port in the head (~1.0 × bore).
   const portMm = bore * 1.0;
   const primaryLengths = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : primaryLengthsFor(layout, n, bankAngle, xTilt, basePrimary, adv.headerGeometry ?? (layout === "flat" && n === 4 && character !== "race" ? "unequal-length" : "equal-length"), bore).map((l) => l + portMm);
-  const groups = collector === "each-bank" ? Math.max(1, new Set(Array.from({ length: n }, (_, i) => bankLayout(layout as never, n, bankAngle, ph.vrAngleDeg ?? 15, xTilt).bankOf(i + 1))).size) : collector === "all" ? 1 : routing === "dual" || layout !== "inline" ? Math.max(1, Math.min(2, layout === "inline" ? (n >= 6 ? 2 : 1) : 2)) : n >= 6 ? 2 : 1;
+  const groups = collector === "each-bank" ? Math.max(1, new Set(Array.from({ length: n }, (_, i) => bankLayout(layout as never, n, bankAngle, ph.vrAngleDeg ?? 15, xTilt, sharedX).bankOf(i + 1))).size) : collector === "all" ? 1 : routing === "dual" || layout !== "inline" ? Math.max(1, Math.min(2, layout === "inline" ? (n >= 6 ? 2 : 1) : 2)) : n >= 6 ? 2 : 1;
   const perGroup = Math.max(1, n / groups);
   const pipeD = ph.pipeDiameterMm ?? clamp(34 + 17 * Math.sqrt(displacement / (routing === "dual" ? 2 : 1)), 38, 110);
   const muffler = resolveMuffler(character, crossPlaneV8, pipeD, adv.mufflerVolumeL, ph.muffler, ph.mufflerPacking);
@@ -325,7 +327,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   const inertia = ph.inertiaKgM2 ?? (rotaryEngine ? 0.07 + 0.035 * rotors : twoStroke && displacement <= 1.6 ? 0.008 + 0.03 * displacement : motorcycleLike ? 0.012 + 0.012 * displacement : aircraftLike ? 0.6 + 0.08 * displacement : (0.06 + 0.022 * displacement) * (diesel ? 1.35 : 1) * strokeInertia);
 
   return {
-    name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : crossFour ? `SB${n} Cross-Four ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
+    name: rotaryEngine ? `${rotors}-rotor ${displacement.toFixed(1)} L rotary` : sharedX ? `X-${n} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}` : crossFour ? `SB${n} Cross-Four ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}` : `${n}-cyl ${layout} ${displacement.toFixed(1)} L${twoStroke ? " two-stroke" : ""}${diesel ? " diesel" : ""}`,
     cycle: rotaryEngine ? "rotary" : twoStroke ? "two-stroke" : "four-stroke",
     twoStroke: twoStrokeSpec,
     rotary: rotarySpec,
@@ -341,10 +343,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     bankAngleDeg: bankAngle,
     vrAngleDeg: ph.vrAngleDeg ?? 15,
     linkRods:
-      layout === "radial" && crankType === "single-pin" && !twoStroke && (ph.articulatedRods ?? true)
+      ((layout === "radial" && crankType === "single-pin") || sharedX) && !twoStroke && (ph.articulatedRods ?? true)
         ? { knuckleRadiusMm: rod * clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4), lengthMm: rod * (1 - clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4)) }
         : null,
-    x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch, firing: ph.xFiring ?? "default" } : null,
+    x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch, firing: ph.xFiring ?? "default", pins: sharedX ? "shared" : "four" } : null,
     crank: {
       type: ph.fireAnglesDeg?.length === n ? "custom" : crankType,
       pinAnglesDeg: ph.crankPinAnglesDeg,
@@ -368,7 +370,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       calibration.revLimiterRpm,
     ),
     inertiaKgM2: inertia,
-    borePitchMm: crossFour ? xPlanePitch : bore * 1.12 + 9,
+    borePitchMm: crossFour && !sharedX ? xPlanePitch : bore * 1.12 + 9,
     fuelLhvMjKg: diesel ? 42.8 : 43,
     fuelStoichAfr: diesel ? 14.5 : 14.7,
     seed: config.seed ?? 42,
@@ -435,6 +437,9 @@ function resolveMuffler(character: string, crossPlaneV8: boolean, pipeD: number,
   };
 }
 
+/** Head coefficient of the centrifugal sizing rule, (PR^0.286 − 1)/U² in s²/m²; see resolveForcedInduction. */
+const CENTRIFUGAL_TIP_HEAD = 0.95e-6;
+
 function resolveForcedInduction(config: EngineConfiguration, displacement: number, redline: number): ForcedInductionSpec {
   const fi = config.forcedInduction;
   const ph = config.physical ?? {};
@@ -482,18 +487,27 @@ function resolveForcedInduction(config: EngineConfiguration, displacement: numbe
     const scDisp = ph.superchargerDisplacementL ?? displacement * (type === "twin-screw" ? 0.36 : 0.38);
     // Rotor speed needed to deliver PR × the engine's swept flow at ~85% volumetric efficiency.
     const driveRatio = ph.superchargerDriveRatio ?? (type === "centrifugal" ? 2.6 : clamp((pr * displacement * 0.5 * 0.95) / (scDisp * 0.82), 1.4, 3.6));
+    // Centrifugal: the impeller's tip speed at redline is what the rated boost needs
+    // (PR^0.286 − 1 = TIP_HEAD·U², fitted to this compressor model), and its diameter puts the
+    // redline airflow at flow coefficient φ = ṁ/(ρ·U·D²) ≈ 0.07, left of the stage's best point so
+    // the boost keeps rising to the redline. With these two constants the Vulture (+6 psi), the
+    // Merlin (+12) and the Vortech FA20 (+7) all land within 10 % of their rated boost.
+    // Sizing by displacement alone ran small high-revving engines near choke and gave slow, large
+    // ones a blower too small to reach their boost.
+    const tipSpeed = clamp(Math.sqrt((Math.pow(pr, 0.2857) - 1) / CENTRIFUGAL_TIP_HEAD), 220, 520);
+    const redlineFlow = (0.95 * (((101.3 + boostKpa) * 1000) / (287 * 330)) * (displacement / 1000) * redline) / 120;
+    const impellerMm = clamp(1000 * Math.sqrt(redlineFlow / (1.18 * tipSpeed * 0.07)), 55, 400);
     return {
       kind: "supercharger",
       type,
       displacementL: scDisp,
       driveRatio,
-      // Centrifugal: step-up sized for ~380 m/s impeller tip speed at redline.
-      stepUpRatio: type === "centrifugal" ? clamp(((400 / (Math.PI * clamp(90 * Math.sqrt(displacement / 3), 60, 140) / 1000)) * 60) / (redline * driveRatio), 2, 9) : 1,
+      stepUpRatio: type === "centrifugal" ? clamp(((tipSpeed / (Math.PI * impellerMm / 1000)) * 60) / (redline * driveRatio), 1.2, 12) : 1,
       lobes: type === "twin-screw" ? 4 : 4,
       helixTwistDeg: type === "roots" ? 160 : 300,
       timingGearTeeth: type === "centrifugal" ? 38 : 40,
       impellerBlades: 8,
-      impellerDiameterMm: clamp(90 * Math.sqrt(displacement / 3), 60, 140),
+      impellerDiameterMm: type === "centrifugal" ? impellerMm : clamp(90 * Math.sqrt(displacement / 3), 60, 140),
       bypassValve: true,
       targetBoostKpa: boostKpa,
       whineIntensity: fi.whineIntensity ?? 0.6,

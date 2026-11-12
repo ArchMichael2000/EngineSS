@@ -24,7 +24,7 @@ export function FiringOrderEditor({ config, onChange }: FiringOrderEditorProps) 
   const schedule = useMemo(() => solveFiringSchedule(spec), [spec]);
   const n = spec.cylinders;
   const custom = config.advanced?.firingOrder?.length === n;
-  const crossFour = spec.layout === 'x' && !!spec.x && spec.cycle === 'four-stroke';
+  const crossFour = spec.layout === 'x' && !!spec.x && spec.x.pins !== 'shared' && spec.cycle === 'four-stroke';
   if (spec.cycle === 'rotary') return null;
 
   const setOrder = (order: number[] | null) => {

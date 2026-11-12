@@ -243,7 +243,7 @@ export default function Simulator() {
                   {config.quick.cycle === 'rotary'
                     ? `${config.quick.cylinderCount}-Rotor Wankel`
                     : config.quick.layout === 'x'
-                      ? `SB${firingOrder.length} Cross-Four X`
+                      ? config.physical?.xPins === 'shared' ? `X-${firingOrder.length}` : `SB${firingOrder.length} Cross-Four X`
                       : `${config.quick.cylinderCount}-Cylinder ${config.quick.layout.toUpperCase()}`}
                 </h2>
                 <p className="text-xs font-[Rajdhani] text-muted-foreground">

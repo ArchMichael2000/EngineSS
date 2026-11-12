@@ -660,8 +660,10 @@ export class EngineSimulator {
       // Absorber holds the set-point (it can also motor the engine, like an AC dyno).
       const err = this.omega - (c.targetRpm / 60) * TWO_PI;
       const J = this.spec.inertiaKgM2;
-      this.absorberIntegral = clamp(this.absorberIntegral + err * J * 160 / this.sampleRate, -1500, 3000);
-      return clamp(err * J * 60 + this.absorberIntegral, -600, 4000);
+      // The absorber is sized to the engine: 4000 N·m covers cars, large aero and marine engines need more.
+      const capacity = Math.max(4000, 400 * this.displacementL);
+      this.absorberIntegral = clamp(this.absorberIntegral + err * J * 160 / this.sampleRate, -1500, 0.75 * capacity);
+      return clamp(err * J * 60 + this.absorberIntegral, -600, capacity);
     }
     // Free running: road-load style torque that rises with speed, scaled by the load control.
     const ratedTorque = this.displacementL * 120 * (this.spec.forcedInduction.kind === "na" ? 1 : 1.6);

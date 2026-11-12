@@ -106,6 +106,7 @@ describe("reference engines against published figures", () => {
     ["yamaha-rd350lc", "power"],
     ["mazda-13b-fc", "torque"],
     ["mazda-13b-fc", "power"],
+    ["rr-vulture", "power"],
   ];
   for (const [key, kind] of points) {
     it(`${key} peak ${kind}`, () => {

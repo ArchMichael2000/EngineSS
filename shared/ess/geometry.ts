@@ -50,8 +50,10 @@ export interface FiringSchedule {
   groupByBank?: boolean;
   /** Cross-Four: crank offset of each module, degrees. */
   moduleOffsetsDeg?: number[];
-  /** Master-and-link rod rows (radials), lengths in mm. */
+  /** Master-and-link rod rows (radials, shared-pin X), lengths in mm. */
   linkRows?: ArticulatedRow[];
+  /** X layout: which crank arrangement this schedule was solved for. */
+  xPins?: "four" | "shared";
 }
 
 const mod = (x: number, m: number) => ((x % m) + m) % m;
@@ -61,7 +63,7 @@ export const X_PLANE_ORDER = [0, 2, 1, 3] as const;
 /** Crank pin of cylinders 1–4 within a Cross-Four module, front view, degrees clockwise from "right". */
 const X_PINS = [45, 135, 225, 315] as const;
 
-export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: number, vrAngleDeg: number, xTilt = 15): {
+export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: number, vrAngleDeg: number, xTilt = 15, xShared = false): {
   bankAxesDeg: number[];
   bankOf: (cyl: number) => number;
   throwOf: (cyl: number) => number;
@@ -87,7 +89,8 @@ export function bankLayout(layout: EssLayout, cylinders: number, bankAngleDeg: n
     return {
       bankAxesDeg: [90 - t, 90 + t, -90 - t, -90 + t],
       bankOf: (c) => (c - 1) % 4,
-      throwOf: (c) => Math.floor((c - 1) / 4) * 4 + X_PLANE_ORDER[(c - 1) % 4],
+      // Shared-pin X: the four cylinders of a row are on one throw, in one plane.
+      throwOf: (c) => (xShared ? Math.floor((c - 1) / 4) : Math.floor((c - 1) / 4) * 4 + X_PLANE_ORDER[(c - 1) % 4]),
     };
   }
   if (layout === "radial") {
@@ -571,19 +574,24 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
   const n = Math.max(1, Math.floor(spec.cylinders));
   const notes: string[] = [];
   const cross = spec.layout === "x" && n % 4 === 0 && spec.cycle !== "rotary" ? spec.x ?? { tiltDeg: 15, phasing: "even-firing" as const, planePitchMm: 46 } : null;
-  const { bankAxesDeg, bankOf, throwOf } = bankLayout(cross ? "x" : spec.layout === "x" ? "inline" : spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg, cross?.tiltDeg);
+  const sharedX = cross?.pins === "shared";
+  const { bankAxesDeg, bankOf, throwOf } = bankLayout(cross ? "x" : spec.layout === "x" ? "inline" : spec.layout, n, spec.bankAngleDeg, spec.vrAngleDeg, cross?.tiltDeg, sharedX);
   // Cross-Four: every cylinder on its own pin, the module's four pins 90° apart, each module clocked by its offset.
+  // Shared-pin X: one pin per row, the rows on an even inline crank.
   let crossPins: number[] | null = null;
   let moduleOffsets: number[] | undefined;
-  if (cross) {
+  if (cross && sharedX) {
+    const rows = inlineCrankThrows(n / 4);
+    crossPins = Array.from({ length: n }, (_, i) => rows[Math.floor(i / 4)]);
+  } else if (cross) {
     const stroke = spec.strokeMm ?? 190;
     moduleOffsets = xModuleOffsets(cross, n / 4, stroke / 2, spec.rodLengthMm ?? stroke * 2.105);
     crossPins = Array.from({ length: n }, (_, i) => mod(-(X_PINS[i % 4] + 90 + moduleOffsets![Math.floor(i / 4)]), 360));
   }
-  const pitch = (cross ? cross.planePitchMm : spec.borePitchMm || 100) / 1000;
+  const pitch = (cross && !sharedX ? cross.planePitchMm : spec.borePitchMm || 100) / 1000;
   if (spec.cycle === "two-stroke") {
     const tdc = crossPins ? crossPins.map((p, i) => mod(p - bankAxesDeg[bankOf(i + 1)], 360)) : null;
-    return { ...twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf, pitch, tdc), moduleOffsetsDeg: moduleOffsets };
+    return { ...twoStrokeSchedule(spec, n, bankAxesDeg, bankOf, throwOf, pitch, tdc), moduleOffsetsDeg: moduleOffsets, xPins: cross ? (sharedX ? "shared" : "four") : undefined };
   }
   if (spec.cycle === "rotary") return rotarySchedule(spec, n);
   const crank: CrankSpec = spec.crank;
@@ -635,7 +643,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
         }
       }
     }
-    if (cross && cross.firing && cross.firing !== "default" && !validOrder(spec.firingOrder, n)) {
+    if (cross && !sharedX && cross.firing && cross.firing !== "default" && !validOrder(spec.firingOrder, n)) {
       optimal = xPairLeads(optimal, bankAxesDeg, bankOf, cross.firing);
     }
     if (validOrder(spec.firingOrder, n)) {
@@ -665,7 +673,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
   let linkRows: ArticulatedRow[] | undefined;
   const link = spec.linkRods;
   const explicit = crank.type === "custom" && crank.fireAnglesDeg?.length === n;
-  if (link && spec.layout === "radial" && !explicit && spec.strokeMm && spec.rodLengthMm) {
+  if (link && (spec.layout === "radial" || sharedX) && !explicit && spec.strokeMm && spec.rodLengthMm) {
     linkRows = [];
     for (let row = 0; row < throwCount; row++) {
       const members = cylindersGeom.filter((c) => c.throwIndex === row);
@@ -706,6 +714,7 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
     notes,
     moduleOffsetsDeg: moduleOffsets,
     linkRows,
+    xPins: cross ? (sharedX ? "shared" : "four") : undefined,
   };
 }
 
@@ -873,8 +882,8 @@ export function exhaustGroups(schedule: FiringSchedule, strategy: CollectorStrat
       const right: number[] = [];
       for (const c of cyls) (Math.sin((schedule.bankAxesDeg[c.bank] * Math.PI) / 180) < -1e-9 ? left : right).push(c.number);
       const sides = [{ cylinders: left, bank: 0 }, { cylinders: right, bank: 1 }].filter((g) => g.cylinders.length);
-      if (!schedule.moduleOffsetsDeg) return sides;
-      // Cross-Four with several modules: each bank (upper, lower) merges first, then the two join on its side.
+      if (!schedule.xPins) return sides;
+      // X with several modules or rows: each bank (upper, lower) merges first, then the two join on its side.
       return sides.map((g) => {
         const banks = new Map<number, number[]>();
         for (const c of g.cylinders) banks.set(cyls[c - 1].bank, [...(banks.get(cyls[c - 1].bank) ?? []), c]);

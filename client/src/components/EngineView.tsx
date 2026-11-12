@@ -175,15 +175,15 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
         ctx.stroke();
         if (row && c.linkIndex === 0) {
           // The master rod's big end carries the knuckle pins: a disc of their radius about the crank pin.
-          ctx.fillStyle = alpha(METAL, 0.95);
-          ctx.strokeStyle = alpha(TEXT, 0.7);
+          ctx.fillStyle = alpha(METAL, 0.95 * ghost);
+          ctx.strokeStyle = alpha(TEXT, 0.7 * ghost);
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.arc(cx + px * scale, cy + py * scale, row.knuckleRadius * 1.12 * scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else if (row) {
-          ctx.fillStyle = alpha(TEXT, 0.9);
+          ctx.fillStyle = alpha(TEXT, 0.9 * ghost);
           ctx.beginPath();
           ctx.arc(cx + rodX * scale, cy + rodY * scale, Math.max(1.5, bore * 0.05 * scale), 0, Math.PI * 2);
           ctx.fill();

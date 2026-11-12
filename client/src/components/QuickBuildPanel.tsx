@@ -17,6 +17,7 @@ interface QuickBuildPanelProps {
 const TOOLTIPS = {
   layout: 'Engine layout determines how cylinders are arranged. V-engines have two banks at an angle, inline engines have all cylinders in a row, flat engines have opposing banks at 180°. X (Cross-Four) stacks modules of four cylinders, each on its own crank pin, the pins 90° apart.',
   xTilt: 'How far each cylinder leans off horizontal. At 0° the module is a flat four on four pins; at 45° it is a square X. The two opposed pairs of a module fire 90° + 2 × tilt apart, so the tilt sets the rhythm: 15° gives 120° / 240°, 45° gives an even 180°.',
+  xPins: 'Cross-Four: every cylinder has its own crank pin, four pins 90° apart in each module, and opposed cylinders move together. Shared pin: the classic X of the Rolls-Royce Vulture, where the four cylinders of a row share one pin through a master rod and three link rods, and the rows sit on an even inline crank.',
   xCycle: 'Four-stroke: each cylinder fires every second revolution, so the two cylinders of an opposed pair take turns. Two-stroke: every cylinder fires every revolution through piston-controlled ports, so each opposed pair fires together.',
   xExhaust: 'How the exhaust is gathered and where it ends. Twin pipes collect each side of the engine. Four pipes keep the upper and lower cylinders of each side apart. Stacks give every cylinder its own short open pipe. Tuned pipes (two-stroke) give every cylinder an expansion chamber.',
   xPhasing: 'How each further module is turned on the crankshaft. Even firing spreads the power pulses as evenly as the tilt allows. Low couple minimises the end-to-end rocking of the whole engine, at the cost of bunched pulses. Custom takes your own crank offsets.',
@@ -82,7 +83,8 @@ function ValueField({ value, onCommit, digits, unit, min, max, className = 'text
 export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
   const isX = config.quick.layout === 'x' && config.quick.cycle !== 'rotary';
   const modules = Math.min(6, Math.max(1, Math.round(config.quick.cylinderCount / 4)));
-  const xTilt = config.physical?.xTiltDeg ?? 15;
+  const sharedX = isX && config.physical?.xPins === 'shared';
+  const xTilt = config.physical?.xTiltDeg ?? (sharedX ? 45 : 15);
   const xPhasing = config.physical?.xPhasing ?? 'even-firing';
   const xInfo = useMemo(() => {
     if (!isX) return null;
@@ -213,8 +215,8 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
       {isX ? (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Modules</label>
-            <span className="text-xs font-[Orbitron] text-neon-cyan">SB{4 * modules} · {4 * modules} cyl</span>
+            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{sharedX ? 'Rows of four' : 'Modules'}</label>
+            <span className="text-xs font-[Orbitron] text-neon-cyan">{sharedX ? 'X-' : 'SB'}{4 * modules} · {4 * modules} cyl</span>
           </div>
           <div className="grid grid-cols-6 gap-1">
             {[1, 2, 3, 4, 5, 6].map((m) => (
@@ -255,6 +257,31 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
         <div className="space-y-3 rounded border border-neon-cyan/25 bg-neon-cyan/[0.03] p-3">
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Crank pins</label>
+              <InfoTooltip text={TOOLTIPS.xPins} />
+            </div>
+            <Select
+              value={sharedX ? 'shared' : 'four'}
+              onValueChange={(v) => {
+                // Each arrangement has its own natural tilt and has no use for the other's firing choices.
+                const { xModuleOffsetsDeg: _o, xFiring: _f, xPhasing: _p, ...physical } = config.physical ?? {};
+                void _o; void _f; void _p;
+                const { firingOrder: _fo, ...advanced } = config.advanced ?? {};
+                void _fo;
+                onChange({ ...config, advanced, physical: { ...physical, xPins: v as 'four' | 'shared', xTiltDeg: v === 'shared' ? 45 : 15 } });
+              }}
+            >
+              <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-dark-elevated border-hud-line">
+                <SelectItem value="four">Four pins per module (Cross-Four)</SelectItem>
+                <SelectItem value="shared">One shared pin per row (master and link rods)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cycle</label>
               <InfoTooltip text={TOOLTIPS.xCycle} />
             </div>
@@ -278,11 +305,11 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
                 <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cylinder tilt</label>
                 <InfoTooltip text={TOOLTIPS.xTilt} />
               </div>
-              <ValueField value={xTilt} digits={1} unit="°" min={0} max={45} onCommit={(v) => setPhysical({ xTiltDeg: v })} />
+              <ValueField value={xTilt} digits={1} unit="°" min={sharedX ? 20 : 0} max={sharedX ? 70 : 45} onCommit={(v) => setPhysical({ xTiltDeg: v })} />
             </div>
-            <Slider value={[xTilt]} onValueChange={([v]) => setPhysical({ xTiltDeg: v })} min={0} max={45} step={0.5} tone="cyan" />
+            <Slider value={[xTilt]} onValueChange={([v]) => setPhysical({ xTiltDeg: v })} min={sharedX ? 20 : 0} max={sharedX ? 70 : 45} step={0.5} tone="cyan" />
           </div>
-          <div className="space-y-1.5">
+          <div className={`space-y-1.5 ${sharedX ? 'hidden' : ''}`}>
             <div className="flex items-center gap-1.5">
               <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Phase modules for</label>
               <InfoTooltip text={TOOLTIPS.xPhasing} />
@@ -336,14 +363,28 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           </div>
           {!twoStroke && <FiringOrderEditor config={config} onChange={onChange} />}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-[Rajdhani]">
-            <dt className="text-muted-foreground">Pair phase offset</dt>
-            <dd className="text-right font-[Orbitron] text-foreground/90">{(90 + 2 * xTilt).toFixed(1)}°</dd>
-            <dt className="text-muted-foreground">Module crank offsets</dt>
-            <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.offsets.map((d) => `${Math.round(d)}°`).join(' · ')}</dd>
+            {!sharedX && (
+              <>
+                <dt className="text-muted-foreground">Pair phase offset</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{(90 + 2 * xTilt).toFixed(1)}°</dd>
+                <dt className="text-muted-foreground">Module crank offsets</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.offsets.map((d) => `${Math.round(d)}°`).join(' · ')}</dd>
+              </>
+            )}
+            {sharedX && (
+              <>
+                <dt className="text-muted-foreground">Bank angles</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{(180 - 2 * xTilt).toFixed(0)}° / {(2 * xTilt).toFixed(0)}°</dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Bore × stroke</dt>
             <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.bore.toFixed(0)} × {xInfo.stroke.toFixed(0)} mm</dd>
-            <dt className="text-muted-foreground">Rocking couple at redline</dt>
-            <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.couple >= 1000 ? `${(xInfo.couple / 1000).toFixed(1)} kN·m` : `${xInfo.couple.toFixed(0)} N·m`}</dd>
+            {!sharedX && (
+              <>
+                <dt className="text-muted-foreground">Rocking couple at redline</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.couple >= 1000 ? `${(xInfo.couple / 1000).toFixed(1)} kN·m` : `${xInfo.couple.toFixed(0)} N·m`}</dd>
+              </>
+            )}
           </dl>
         </div>
       )}

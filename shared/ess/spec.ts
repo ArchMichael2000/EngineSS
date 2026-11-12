@@ -34,6 +34,13 @@ export interface XLayoutSpec {
   /** Rod plane to rod plane spacing along the crank, mm. */
   planePitchMm: number;
   /**
+   * Crank arrangement. `four` (default): the Cross-Four above. `shared`: the classic X of the
+   * Rolls-Royce Vulture and Daimler-Benz DB 604 — the four cylinders of a row share one crank pin
+   * through a master rod and three link rods (EngineSpec.linkRods), the rows on an even inline
+   * crank; module phasing and pair-lead presets do not apply.
+   */
+  pins?: "four" | "shared";
+  /**
    * Which cylinder of each opposed pair fires first (the two reach TDC together and fire a
    * revolution apart, so either can lead with the same overall evenness). `default`: the solver's
    * choice (fewest consecutive firings on neighbouring throws). `even-sides`: the choice that

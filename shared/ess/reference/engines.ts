@@ -265,6 +265,19 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 12, whineIntensity: 0.5 },
     },
   },
+  "rr-vulture": {
+    name: "Rolls-Royce Vulture X-24",
+    description: "Four banks of six at 90° on one six-throw crank, master and link rods, ejector stacks",
+    provenance: { geometry: "published", exhaust: "estimated", boost: "published" },
+    published: { peakPowerKw: [1327, 2850] },
+    config: {
+      ...v16,
+      quick: { layout: "x", cylinderCount: 24, displacement: 42.47, crankshaft: "even-fire", aspiration: "supercharged", exhaustCharacter: "straight-pipe", idleCharacter: "smooth", redline: 3200 },
+      advanced: { bore: 127, stroke: 139.7, exhaustRouting: "open-headers", primaryTubeLengthCm: 25 },
+      physical: { xPins: "shared", xTiltDeg: 45, compressionRatio: 6.0, collector: "none", idleRpm: 600, valvesPerCylinder: 4, fuelOctane: 100 },
+      forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 6, whineIntensity: 0.5 },
+    },
+  },
   "bugatti-w16": {
     name: "Bugatti W16 8.0 quad-turbo",
     description: "Two narrow-angle VR8 banks at 90°, four turbochargers",

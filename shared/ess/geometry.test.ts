@@ -160,6 +160,26 @@ describe("Cross-Four X layout", () => {
     expect(swapped.firingOrder).toEqual([3, 2, 1, 4]);
   });
 
+  it("the shared-pin X (Vulture) fires 24 cylinders 30° apart, and its link rods shift them", () => {
+    const base = { layout: "x" as const, cylinders: 24, bankAngleDeg: 90, vrAngleDeg: 15, crank: { type: "even-fire" as const }, firingOrder: [], borePitchMm: 150, strokeMm: 139.7, rodLengthMm: 279.4, x: { tiltDeg: 45, phasing: "even-firing" as const, planePitchMm: 60, pins: "shared" as const } };
+    const plain = solveFiringSchedule(base);
+    for (const d of plain.intervalsDeg) expect(d).toBeCloseTo(30, 6);
+    // One throw per row of four, all four in one plane.
+    expect(plain.cylinders.slice(0, 8).map((c) => c.throwIndex)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);
+    expect(plain.cylinders[3].positionM).toBeCloseTo(plain.cylinders[0].positionM, 9);
+    expect(plain.xPins).toBe("shared");
+    const linked = solveFiringSchedule({ ...base, linkRods: { knuckleRadiusMm: 0.22 * 279.4, lengthMm: 0.78 * 279.4 } });
+    expect(linked.linkRows).toHaveLength(6);
+    // Master on the first bank; the cylinders 90° either side of it shift by equal and opposite amounts, the opposite one not at all.
+    const off = linked.cylinders.slice(0, 4).map((c) => c.motion!.tdcOffsetDeg);
+    expect(off[0]).toBe(0);
+    expect(Math.abs(off[1])).toBeGreaterThan(2);
+    expect(off[1]).toBeCloseTo(-off[3], 3);
+    expect(Math.abs(off[2])).toBeLessThan(0.01);
+    expect(Math.max(...linked.intervalsDeg) - Math.min(...linked.intervalsDeg)).toBeGreaterThan(3);
+    expect(linked.intervalsDeg.reduce((a, b) => a + b, 0)).toBeCloseTo(720, 6);
+  });
+
   it("two-strokes fire each opposed pair together", () => {
     const s = schedule(4, 15, { cycle: "two-stroke" });
     expect(s.intervalsDeg.reduce((a, b) => a + b, 0)).toBeCloseTo(360, 6);
