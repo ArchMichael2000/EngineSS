@@ -19,6 +19,8 @@ export interface FuzzOptions {
   rotary?: boolean;
   /** Allow the Cross-Four X variant draw (default true). */
   x?: boolean;
+  /** Allow the 17–24 cylinder variant draw (default true). */
+  large?: boolean;
 }
 
 export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfiguration {
@@ -132,6 +134,20 @@ export function randomConfig(seed: number, opts: FuzzOptions = {}): EngineConfig
     config.quick.redline = Math.max(1800, Math.min(config.quick.redline, cap));
     ph.xTiltDeg = Math.round(rnd() * 90) / 2;
     ph.xPhasing = pick(["even-firing", "even-firing", "low-couple"] as const);
+  }
+  // Large-count variants (drawn last): 17–24 cylinders on any piston layout, and for X engines a
+  // random exhaust arrangement and pair-lead preset.
+  if (opts.large !== false && config.quick.cycle !== "rotary" && config.quick.layout !== "x" && rnd() < 0.08) {
+    const big = 17 + Math.floor(rnd() * 8);
+    config.quick.displacement = Math.round((config.quick.displacement / config.quick.cylinderCount) * big * 100) / 100;
+    config.quick.cylinderCount = big;
+  }
+  if (config.quick.layout === "x") {
+    const arrangement = pick([["dual", "bank", "rear"], ["dual", "bank", "side"], ["separate", "each-bank", "rear"], ["single", "bank", "rear"], ["open-headers", "none", "rear"]] as const);
+    config.advanced = { ...config.advanced, exhaustRouting: arrangement[0] };
+    ph.collector = arrangement[1];
+    ph.exhaustExit = arrangement[2];
+    ph.xFiring = pick(["default", "even-sides", "bunched-sides"] as const);
   }
   config.physical = ph as EngineConfiguration["physical"];
   return config;

@@ -14,7 +14,7 @@ export type TurboSize = 'small' | 'balanced' | 'large' | 'custom';
 export type SuperchargerType = 'roots' | 'twin-screw' | 'centrifugal';
 
 /** Exhaust routing types */
-export type ExhaustRouting = 'single' | 'dual' | 'open-headers';
+export type ExhaustRouting = 'single' | 'dual' | 'separate' | 'open-headers';
 
 /** Header geometry types */
 export type HeaderGeometry = 'equal-length' | 'unequal-length';
@@ -157,7 +157,7 @@ export interface AdvancedConfig {
 
 /** Crank strategies understood by the physical core (superset of the Quick Build choices). */
 export type PhysicalCrankType = 'even-fire' | 'cross-plane' | 'flat-plane' | 'common-pin' | 'single-pin' | 'custom';
-export type CollectorType = 'bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
+export type CollectorType = 'bank' | 'each-bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
 export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
 export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'glasspack' | 'none';
 export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
@@ -267,6 +267,10 @@ export interface PhysicalOverrides {
   articulatedRods: boolean;
   /** Knuckle-pin circle radius as a fraction of the master rod length (default 0.22). */
   knuckleRadiusRatio: number;
+  /** Where the exhaust ends: the rear of the vehicle (default) or side pipes just behind the engine. */
+  exhaustExit: 'rear' | 'side';
+  /** Cross-Four: which cylinder of each opposed pair leads (see XLayoutSpec.firing). An explicit firing order overrides it. */
+  xFiring: 'default' | 'even-sides' | 'bunched-sides';
   xTiltDeg: number;
   xPhasing: 'even-firing' | 'low-couple' | 'custom';
   xModuleOffsetsDeg: number[];
@@ -571,6 +575,8 @@ export const SABER_PRESETS: Record<string, { name: string; description: string; 
   'saber-sb16': saberPreset(4, 'Four modules a quarter turn apart, 22 L: 30° / 60° firing.'),
   'saber-sb16-square': saberPreset(4, 'SB16 with the cylinders at 45°: a square X firing evenly every 45°.', { physical: { xTiltDeg: 45, xPhasing: 'even-firing' } }),
   'saber-sb12-low-couple': saberPreset(3, 'SB12 clocked 0° / 120° / 240°: the rocking couple cancels, firing 120° / 0° / 120° in pairs.', { physical: { xTiltDeg: 15, xPhasing: 'low-couple' } }),
+  'saber-sb4-two-stroke': saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke' }),
+  'saber-sb8-two-stroke': saberPreset(2, 'SB8 as a two-stroke on side collectors: four paired firings a revolution.', {}, { cycle: 'two-stroke' }),
   'saber-sb8-diesel': saberPreset(2, 'SB8 as a turbo-diesel at the study\'s 16.8 : 1 compression, on twin 100 mm exhausts.', { forcedInduction: { type: 'turbo', turboSize: 'balanced', maxBoost: 18, bovEnabled: false, wastegateEnabled: true }, physical: { xTiltDeg: 15, xPhasing: 'even-firing', compressionRatio: 16.8, pipeDiameterMm: 100, tailpipeDiameterMm: 110 } }, { fuel: 'diesel', aspiration: 'turbo' }),
 };
 

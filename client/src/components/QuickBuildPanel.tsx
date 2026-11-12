@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SABER_CYLINDER_LITRES } from '../../../shared/engineTypes';
 import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
 import { solveFiringSchedule, xRockingCouple } from '../../../shared/ess/geometry';
+import { FiringOrderEditor } from '@/components/FiringOrderEditor';
 import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, EngineCycleType, FuelType } from '../../../shared/engineTypes';
 
 interface QuickBuildPanelProps {
@@ -16,6 +17,8 @@ interface QuickBuildPanelProps {
 const TOOLTIPS = {
   layout: 'Engine layout determines how cylinders are arranged. V-engines have two banks at an angle, inline engines have all cylinders in a row, flat engines have opposing banks at 180°. X (Cross-Four) stacks modules of four cylinders, each on its own crank pin, the pins 90° apart.',
   xTilt: 'How far each cylinder leans off horizontal. At 0° the module is a flat four on four pins; at 45° it is a square X. The two opposed pairs of a module fire 90° + 2 × tilt apart, so the tilt sets the rhythm: 15° gives 120° / 240°, 45° gives an even 180°.',
+  xCycle: 'Four-stroke: each cylinder fires every second revolution, so the two cylinders of an opposed pair take turns. Two-stroke: every cylinder fires every revolution through piston-controlled ports, so each opposed pair fires together.',
+  xExhaust: 'How the exhaust is gathered and where it ends. Twin pipes collect each side of the engine. Four pipes keep the upper and lower cylinders of each side apart. Stacks give every cylinder its own short open pipe. Tuned pipes (two-stroke) give every cylinder an expansion chamber.',
   xPhasing: 'How each further module is turned on the crankshaft. Even firing spreads the power pulses as evenly as the tilt allows. Low couple minimises the end-to-end rocking of the whole engine, at the cost of bunched pulses. Custom takes your own crank offsets.',
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
@@ -93,6 +96,50 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
     return { offsets, couple, bore: spec.boreMm, stroke: spec.strokeMm, intervals: schedule.intervalsDeg };
   }, [config, isX]);
   const setPhysical = (patch: Record<string, unknown>) => onChange({ ...config, physical: { ...config.physical, ...patch } });
+  const twoStroke = config.quick.cycle === 'two-stroke';
+  // Exhaust arrangement of an X engine: a named combination of collector, routing and exit.
+  const X_EXHAUSTS: Record<string, { label: string; routing: 'single' | 'dual' | 'separate' | 'open-headers'; collector: 'bank' | 'each-bank' | 'none'; exit: 'rear' | 'side'; tuned?: boolean }> = {
+    'twin-rear': { label: 'Twin pipes to the rear (one per side)', routing: 'dual', collector: 'bank', exit: 'rear' },
+    'twin-side': { label: 'Side pipes (one per side)', routing: 'dual', collector: 'bank', exit: 'side' },
+    'four-rear': { label: 'Four pipes to the rear (one per bank)', routing: 'separate', collector: 'each-bank', exit: 'rear' },
+    'four-side': { label: 'Four side pipes (one per bank)', routing: 'separate', collector: 'each-bank', exit: 'side' },
+    single: { label: 'Single pipe', routing: 'single', collector: 'bank', exit: 'rear' },
+    stacks: { label: 'Open stacks (one per cylinder)', routing: 'open-headers', collector: 'none', exit: 'rear' },
+    tuned: { label: 'Tuned pipes (expansion chamber per cylinder)', routing: 'dual', collector: 'none', exit: 'rear', tuned: true },
+  };
+  const xExhaust = (() => {
+    const routing = config.advanced?.exhaustRouting ?? 'dual';
+    const collector = config.physical?.collector ?? 'bank';
+    const exit = config.physical?.exhaustExit ?? 'rear';
+    if (twoStroke && (config.physical?.expansionChamber ?? modules === 1)) return 'tuned';
+    if (collector === 'none' || routing === 'open-headers') return 'stacks';
+    if (routing === 'single') return 'single';
+    if (routing === 'separate' || collector === 'each-bank') return exit === 'side' ? 'four-side' : 'four-rear';
+    return exit === 'side' ? 'twin-side' : 'twin-rear';
+  })();
+  const setXExhaust = (key: string) => {
+    const e = X_EXHAUSTS[key];
+    if (!e) return;
+    onChange({
+      ...config,
+      advanced: { ...config.advanced, exhaustRouting: e.routing },
+      physical: { ...config.physical, collector: e.collector, exhaustExit: e.exit, ...(twoStroke ? { expansionChamber: !!e.tuned } : {}) },
+    });
+  };
+  const setXCycle = (cycle: 'four-stroke' | 'two-stroke') => {
+    // The exhaust arrangement and compression belong to the cycle: back to that cycle's defaults.
+    const { compressionRatio: _cr, expansionChamber: _ec, collector: _co, ...physical } = config.physical ?? {};
+    void _cr; void _ec; void _co;
+    const { exhaustRouting: _er, firingOrder: _fo, ...advanced } = config.advanced ?? {};
+    void _er; void _fo;
+    onChange({
+      ...config,
+      advanced,
+      physical,
+      quick: { ...config.quick, cycle, ...(cycle === 'two-stroke' ? { fuel: 'gasoline' as FuelType, aspiration: 'na' as AspirationType } : {}) },
+      ...(cycle === 'two-stroke' ? { forcedInduction: { type: 'na' as AspirationType } } : {}),
+    });
+  };
   const [offsetText, setOffsetText] = useState<string | null>(null);
 
   const updateQuick = (key: string, value: any) => {
@@ -196,7 +243,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             value={[config.quick.cylinderCount]}
             onValueChange={([v]) => updateQuick('cylinderCount', v)}
             min={1}
-            max={config.quick.cycle === 'rotary' ? 4 : config.quick.layout === 'radial' ? 18 : 16}
+            max={config.quick.cycle === 'rotary' ? 4 : 24}
             step={1}
             tone="cyan"
           />
@@ -206,6 +253,25 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
       {/* X layout: tilt and module phasing */}
       {isX && xInfo && (
         <div className="space-y-3 rounded border border-neon-cyan/25 bg-neon-cyan/[0.03] p-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cycle</label>
+              <InfoTooltip text={TOOLTIPS.xCycle} />
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {(['four-stroke', 'two-stroke'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={(config.quick.cycle ?? 'four-stroke') === c}
+                  onClick={() => setXCycle(c)}
+                  className={`h-8 rounded border text-[11px] font-[Orbitron] uppercase tracking-wide transition-colors ${(config.quick.cycle ?? 'four-stroke') === c ? 'border-neon-cyan bg-neon-cyan/15 text-neon-cyan' : 'border-hud-line text-muted-foreground hover:text-foreground'}`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
@@ -250,6 +316,25 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
               />
             )}
           </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Exhaust arrangement</label>
+              <InfoTooltip text={TOOLTIPS.xExhaust} />
+            </div>
+            <Select value={xExhaust} onValueChange={setXExhaust}>
+              <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-dark-elevated border-hud-line">
+                {Object.entries(X_EXHAUSTS)
+                  .filter(([, e]) => twoStroke || !e.tuned)
+                  .map(([key, e]) => (
+                    <SelectItem key={key} value={key}>{e.label}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!twoStroke && <FiringOrderEditor config={config} onChange={onChange} />}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-[Rajdhani]">
             <dt className="text-muted-foreground">Pair phase offset</dt>
             <dd className="text-right font-[Orbitron] text-foreground/90">{(90 + 2 * xTilt).toFixed(1)}°</dd>

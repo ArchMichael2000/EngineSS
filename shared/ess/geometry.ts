@@ -482,6 +482,56 @@ export function xLowCoupleOffsets(modules: number, tiltDeg: number, crankRadiusM
   return best!.off;
 }
 
+/**
+ * Cross-Four: choose which cylinder of each opposed pair fires first. The two share a TDC and fire
+ * 360° apart, so swapping them leaves the engine's overall firing intervals unchanged and changes
+ * only which side of the engine each pulse comes from. `even-sides` spaces each side's pulses as
+ * evenly as possible, `bunched-sides` as unevenly as possible; ties keep the solver's choice.
+ */
+export function xPairLeads(fire: number[], bankAxesDeg: number[], bankOf: (cyl: number) => number, mode: "even-sides" | "bunched-sides"): number[] {
+  const n = fire.length;
+  const pairs: Array<[number, number]> = [];
+  for (let m = 0; m < n / 4; m++) pairs.push([4 * m, 4 * m + 2], [4 * m + 1, 4 * m + 3]);
+  const side = Array.from({ length: n }, (_, i) => (Math.sin((bankAxesDeg[bankOf(i + 1)] * Math.PI) / 180) < 0 ? 0 : 1));
+  const cost = (f: number[]) => {
+    let total = 0;
+    for (let sd = 0; sd < 2; sd++) {
+      const a = f.filter((_, i) => side[i] === sd).sort((x, y) => x - y);
+      const ideal = 720 / a.length;
+      for (let k = 0; k < a.length; k++) {
+        const gap = k + 1 < a.length ? a[k + 1] - a[k] : 720 - a[k] + a[0];
+        total += (gap - ideal) * (gap - ideal);
+      }
+    }
+    return total;
+  };
+  let best = fire.slice();
+  let bestCost = cost(fire);
+  let bestFlips = 0;
+  const sign = mode === "even-sides" ? 1 : -1;
+  const trial = fire.slice();
+  for (let mask = 1; mask < 1 << pairs.length; mask++) {
+    let flips = 0;
+    for (let k = 0; k < pairs.length; k++) {
+      const [a, b] = pairs[k];
+      const flip = (mask >> k) & 1;
+      flips += flip;
+      trial[a] = flip ? fire[b] : fire[a];
+      trial[b] = flip ? fire[a] : fire[b];
+    }
+    const cst = cost(trial);
+    const better = sign * (bestCost - cst);
+    if (better > 1e-6 || (Math.abs(better) <= 1e-6 && flips < bestFlips)) {
+      bestCost = cst;
+      bestFlips = flips;
+      best = trial.slice();
+    }
+  }
+  // Keep cylinder 1 at the start of the cycle.
+  const zero = best[0];
+  return best.map((a) => mod(a - zero, 720));
+}
+
 const xOffsetCache = new Map<string, number[]>();
 
 /** The module offsets a Cross-Four spec asks for (searches are cached: they run on every edit in the app). */
@@ -584,6 +634,9 @@ export function solveFiringSchedule(spec: Pick<EngineSpec, "layout" | "cylinders
           c = trialC;
         }
       }
+    }
+    if (cross && cross.firing && cross.firing !== "default" && !validOrder(spec.firingOrder, n)) {
+      optimal = xPairLeads(optimal, bankAxesDeg, bankOf, cross.firing);
     }
     if (validOrder(spec.firingOrder, n)) {
       fire = realiseOrder(spec.firingOrder, c);
@@ -793,6 +846,10 @@ export function exhaustGroups(schedule: FiringSchedule, strategy: CollectorStrat
         }
         return { ...group, pairs };
       });
+    }
+    case "each-bank": {
+      const banks = [...new Set(cyls.map((c) => c.bank))].sort((a, b) => a - b);
+      return banks.map((bank) => ({ cylinders: byBank(bank), bank }));
     }
     case "bank":
     default:

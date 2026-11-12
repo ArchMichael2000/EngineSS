@@ -33,6 +33,13 @@ export interface XLayoutSpec {
   moduleOffsetsDeg?: number[];
   /** Rod plane to rod plane spacing along the crank, mm. */
   planePitchMm: number;
+  /**
+   * Which cylinder of each opposed pair fires first (the two reach TDC together and fire a
+   * revolution apart, so either can lead with the same overall evenness). `default`: the solver's
+   * choice (fewest consecutive firings on neighbouring throws). `even-sides`: the choice that
+   * spaces each side's exhaust pulses most evenly. `bunched-sides`: the one that groups them most.
+   */
+  firing?: "default" | "even-sides" | "bunched-sides";
 }
 
 /**
@@ -111,10 +118,12 @@ export interface IntakeSpec {
   resonatorVolumeL: number;
 }
 
-export type CollectorStrategy = "bank" | "firing-alternate" | "pairs-then-bank" | "all" | "none";
+/** `each-bank`: one collector per cylinder bank (two on a V, four on a W or X), however the banks sit. */
+export type CollectorStrategy = "bank" | "each-bank" | "firing-alternate" | "pairs-then-bank" | "all" | "none";
 export type CrossoverType = "none" | "x-pipe" | "h-pipe";
 export type MufflerType = "chambered" | "turbo" | "straight-through" | "glasspack" | "none";
-export type ExhaustRoutingType = "single" | "dual" | "open-headers";
+/** `separate`: every collector keeps its own pipe, silencer and outlet (four pipes on an X or W). */
+export type ExhaustRoutingType = "single" | "dual" | "separate" | "open-headers";
 
 export interface MufflerSpec {
   type: MufflerType;
@@ -143,6 +152,8 @@ export interface ExhaustSpec {
   tailpipeDiameterMm: number;
   /** Lateral spacing between outlets, m (dual routing). */
   outletSpacingM: number;
+  /** Where the pipes end: at the rear of the vehicle, or just behind the engine on each side (side pipes). */
+  exit?: "rear" | "side";
   /** Closed-end quarter-wave side branches ("J-pipe" drone killers) ahead of the muffler, tuned frequency Hz. */
   quarterWaveTubesHz: number[];
   /** Helmholtz resonators ahead of the muffler: tuned frequency Hz and cavity volume L. */

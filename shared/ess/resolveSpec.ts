@@ -179,7 +179,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
   // Header primary plus the exhaust port in the head (~1.0 × bore).
   const portMm = bore * 1.0;
   const primaryLengths = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : primaryLengthsFor(layout, n, bankAngle, xTilt, basePrimary, adv.headerGeometry ?? (layout === "flat" && n === 4 && character !== "race" ? "unequal-length" : "equal-length"), bore).map((l) => l + portMm);
-  const groups = collector === "all" ? 1 : routing === "dual" || layout !== "inline" ? Math.max(1, Math.min(2, layout === "inline" ? (n >= 6 ? 2 : 1) : 2)) : n >= 6 ? 2 : 1;
+  const groups = collector === "each-bank" ? Math.max(1, new Set(Array.from({ length: n }, (_, i) => bankLayout(layout as never, n, bankAngle, ph.vrAngleDeg ?? 15, xTilt).bankOf(i + 1))).size) : collector === "all" ? 1 : routing === "dual" || layout !== "inline" ? Math.max(1, Math.min(2, layout === "inline" ? (n >= 6 ? 2 : 1) : 2)) : n >= 6 ? 2 : 1;
   const perGroup = Math.max(1, n / groups);
   const pipeD = ph.pipeDiameterMm ?? clamp(34 + 17 * Math.sqrt(displacement / (routing === "dual" ? 2 : 1)), 38, 110);
   const muffler = resolveMuffler(character, crossPlaneV8, pipeD, adv.mufflerVolumeL, ph.muffler, ph.mufflerPacking);
@@ -200,6 +200,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     tailpipeLengthMm: clamp(totalLen - fixed, 150, 2500),
     tailpipeDiameterMm: ph.tailpipeDiameterMm ?? pipeD * (character === "stock" ? 0.95 : 1.05),
     outletSpacingM: ph.outletSpacingM ?? (motorcycleLike ? 0.25 : 0.95),
+    exit: ph.exhaustExit ?? "rear",
     quarterWaveTubesHz: ph.droneTubeHz ? [ph.droneTubeHz] : [],
     helmholtz: ph.helmholtzHz ? [{ tuneHz: ph.helmholtzHz, volumeL: ph.helmholtzVolumeL ?? 2 }] : [],
     valve: ph.exhaustValveMode && ph.exhaustValveMode !== "none" ? { openRpm: ph.exhaustValveOpenRpm ?? Math.round(q.redline * 0.45), mode: ph.exhaustValveMode } : null,
@@ -216,6 +217,10 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     const epo = ph.exhaustPortOpenDeg ?? 97 - 17 * perf;
     const tpo = ph.transferPortOpenDeg ?? 119 - 7 * perf;
     const tuned = ph.expansionChamberTunedRpm ?? Math.round(q.redline * 0.9);
+    // One tuned pipe per cylinder suits a single, twin or four. A Cross-Four of two or more modules
+    // collects each side instead unless tuned pipes are asked for (sixteen expansion chambers are
+    // neither practical nor playable in real time).
+    const tunedPipes = ph.expansionChamber ?? !(crossFour && n > 4);
     twoStrokeSpec = {
       exhaustPortOpenDeg: epo,
       transferPortOpenDeg: Math.max(tpo, epo + 8),
@@ -225,7 +230,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       intake: ph.twoStrokeIntake ?? "reed",
       intakePortOpenBtdcDeg: 75,
       scavengeQuality: ph.scavengeQuality ?? 1.8,
-      expansionChamber: ph.expansionChamber ?? true,
+      expansionChamber: tunedPipes,
       tunedRpm: tuned,
     };
     // Header from the exhaust port's area (port width × its height down to BDC), Blair's 1.05–1.1×.
@@ -242,13 +247,19 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
     // The header is ≈ 30 % of L_t.
     const tunedLengthMm = ((500 * (360 - 2 * epo - 40)) / (12 * tuned)) * 1000;
     exhaust.primaryDiameterMm = headerD;
-    exhaust.primaryLengthsMm = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : new Array(n).fill(0.3 * tunedLengthMm);
-    exhaust.collector = "none";
     exhaust.catalyst = ph.catalyst ?? false;
     exhaust.resonator = false;
-    exhaust.pipeDiameterMm = headerD * 0.62;
-    exhaust.tailpipeDiameterMm = ph.tailpipeDiameterMm ?? headerD * 0.7;
-    exhaust.tailpipeLengthMm = 150;
+    if (tunedPipes || !crossFour) {
+      exhaust.primaryLengthsMm = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : new Array(n).fill(0.3 * tunedLengthMm);
+      exhaust.collector = "none";
+      exhaust.pipeDiameterMm = headerD * 0.62;
+      exhaust.tailpipeDiameterMm = ph.tailpipeDiameterMm ?? headerD * 0.7;
+      exhaust.tailpipeLengthMm = 150;
+    } else {
+      // Collected two-stroke: short headers into the chosen collectors and the ordinary pipework.
+      exhaust.primaryLengthsMm = ph.primaryLengthsMm?.length === n ? ph.primaryLengthsMm : new Array(n).fill(Math.min(basePrimary, 0.3 * tunedLengthMm));
+      exhaust.collectorDiameterMm = ph.collectorDiameterMm ?? clamp(headerD * Math.sqrt(perGroup) * 0.78, headerD * 1.1, 160);
+    }
     // Silencer packing in a two-stroke soaks up oil mist and carbon and absorbs far less than dry
     // glass fibre does: about half as effective when stock, less on sport and race cans (estimated;
     // set with the chamber's shock waves against the CRM250 and MZ recordings' 2–8 kHz content).
@@ -273,7 +284,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
 
   // ---- Calibration
   const boosted = forcedInduction.kind !== "na";
-  const idleRpm = ph.idleRpm ?? (diesel ? 760 : twoStroke ? 1300 : rotaryEngine ? IDLE_RPM[q.idleCharacter] + 50 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
+  const idleRpm = ph.idleRpm ?? (diesel ? 760 : twoStroke ? (crossFour ? 800 : 1300) : rotaryEngine ? IDLE_RPM[q.idleCharacter] + 50 : IDLE_RPM[q.idleCharacter] + (motorcycleLike ? 350 : 0) - (aircraftLike ? 200 : 0));
   const limiterRpm = adv.revLimiterRpm ?? q.redline;
   const afterfireByCharacter = { stock: 0.04, sport: 0.22, race: 0.5, "straight-pipe": 0.75 } as const;
   const calibration: EngineSpec["calibration"] = {
@@ -333,7 +344,7 @@ export function resolveEngineSpec(config: EngineConfiguration): EngineSpec {
       layout === "radial" && crankType === "single-pin" && !twoStroke && (ph.articulatedRods ?? true)
         ? { knuckleRadiusMm: rod * clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4), lengthMm: rod * (1 - clamp(ph.knuckleRadiusRatio ?? KNUCKLE_RADIUS_RATIO, 0.1, 0.4)) }
         : null,
-    x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch } : null,
+    x: crossFour ? { tiltDeg: xTilt, phasing: ph.xPhasing ?? "even-firing", moduleOffsetsDeg: ph.xModuleOffsetsDeg, planePitchMm: xPlanePitch, firing: ph.xFiring ?? "default" } : null,
     crank: {
       type: ph.fireAnglesDeg?.length === n ? "custom" : crankType,
       pinAnglesDeg: ph.crankPinAnglesDeg,

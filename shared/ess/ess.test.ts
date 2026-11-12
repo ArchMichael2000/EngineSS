@@ -384,13 +384,53 @@ describe("Cross-Four X engines", () => {
   }
 });
 
+describe("exhaust arrangements and cylinder counts", () => {
+  const sb8 = (patch: Partial<EngineConfiguration>, quick: Partial<EngineConfiguration["quick"]> = {}) => {
+    const base = SABER_PRESETS["saber-sb8"].config;
+    return new EngineSimulator(resolveEngineSpec({ ...base, ...patch, quick: { ...base.quick, ...quick }, physical: { ...base.physical, ...patch.physical }, seed: 1 }), FS);
+  };
+  const outlets = (sim: EngineSimulator) => (sim as unknown as { exhaust: { outlets: Array<{ position: { x: number; y: number } }> } }).exhaust.outlets;
+
+  it("an X engine can run twin, four, single, side and stack exhausts", () => {
+    expect(outlets(sb8({}))).toHaveLength(2);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "separate" }, physical: { collector: "each-bank" } }))).toHaveLength(4);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "single" } }))).toHaveLength(1);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "open-headers" }, physical: { collector: "none" } }))).toHaveLength(8);
+    const side = outlets(sb8({ physical: { exhaustExit: "side" } }));
+    // Side pipes end beside the engine, one each side; rear pipes end behind the vehicle.
+    expect(side.map((o) => Math.sign(o.position.x))).toEqual([-1, 1]);
+    expect(side.every((o) => o.position.y > 0)).toBe(true);
+    expect(outlets(sb8({})).every((o) => o.position.y < -2)).toBe(true);
+  });
+
+  it("a two-stroke X collects each side, or gives every cylinder a tuned pipe when asked", () => {
+    const collected = sb8({}, { cycle: "two-stroke" });
+    expect(outlets(collected)).toHaveLength(2);
+    const tuned = sb8({ physical: { expansionChamber: true } }, { cycle: "two-stroke" });
+    expect(outlets(tuned)).toHaveLength(8);
+    collected.setControls({ mode: "dyno", targetRpm: 2000, throttle: 1 });
+    collected.prewarm(3);
+    expect(collected.telemetry.brakeTorqueNm).toBeGreaterThan(500);
+  }, 60_000);
+
+  it("every piston layout builds and idles with 24 cylinders", () => {
+    for (const layout of ["inline", "v", "flat", "w", "radial", "x"] as const) {
+      const spec = resolveEngineSpec({ quick: { layout, cylinderCount: 24, displacement: 12, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: layout === "radial" || layout === "x" ? 3000 : 6500 }, forcedInduction: { type: "na" }, seed: 1 });
+      expect(spec.cylinders).toBe(24);
+      const sim = new EngineSimulator(spec, 24000);
+      sim.prewarm(2.5);
+      expect(Math.abs(sim.telemetry.rpm - spec.calibration.idleRpm), layout).toBeLessThan(0.25 * spec.calibration.idleRpm);
+    }
+  }, 120_000);
+});
+
 describe("random configurations", () => {
   // A few seeds from the robustness sweep (scripts/fuzzConfigs.ts runs the full set): seed 34 as the
   // 10 L turbo inline-8 that once overran its soft limiter (its gasoline draw), seed 29 a diesel.
   const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
   for (const [seed, diesel] of cases) {
     it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false, x: false });
+      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false, x: false, large: false });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }

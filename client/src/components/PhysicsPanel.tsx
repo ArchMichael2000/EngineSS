@@ -164,7 +164,7 @@ export function PhysicsPanel({ config, onChange }: PhysicsPanelProps) {
 
       {section('Exhaust')}
       {select('collector', 'Collector', spec.exhaust.collector, [
-        ['bank', 'Per bank (4-1 / 3-1)'], ['firing-alternate', '180° (firing-alternate)'], ['pairs-then-bank', 'Tri-Y / 4-2-1'], ['all', 'All into one'], ['none', 'None (open primaries)'],
+        ['bank', 'Per bank (4-1 / 3-1)'], ['each-bank', 'One per bank (four on a W or X)'], ['firing-alternate', '180° (firing-alternate)'], ['pairs-then-bank', 'Tri-Y / 4-2-1'], ['all', 'All into one'], ['none', 'None (open primaries)'],
       ])}
       {slider('primaryDiameterMm', 'Primary diameter', spec.exhaust.primaryDiameterMm, 25, 75, 0.5, ' mm', 1)}
       {slider('pipeDiameterMm', 'System pipe diameter', spec.exhaust.pipeDiameterMm, 35, 120, 0.5, ' mm', 1)}

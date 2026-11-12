@@ -104,7 +104,8 @@ export class ExhaustNetwork {
     const pipeD = ex.pipeDiameterMm / 1000;
 
     // ---- Two-stroke: one pipe per cylinder (tuned expansion chamber or a plain pipe) to its silencer.
-    if (spec.twoStroke) {
+    // A two-stroke without tuned pipes that names a collector uses the ordinary pipework below.
+    if (spec.twoStroke && (spec.twoStroke.expansionChamber || strategy === "none")) {
       this.primaries.forEach((header, i) => {
         let port: Port = { duct: header, end: "b" };
         let d = header.lengthM;
@@ -225,8 +226,10 @@ export class ExhaustNetwork {
       chainHeads = heads;
     }
 
+    // "separate": every collector keeps its own pipe to its own outlet.
+    const separate = ex.routing === "separate" && chainHeads.length >= 2;
     const dual = ex.routing === "dual" && chainHeads.length >= 2;
-    if (!dual && chainHeads.length > 1) {
+    if (!dual && !separate && chainHeads.length > 1) {
       const y = this.addDuct({ lengthM: Math.max(0.2, ex.midPipeLengthMm / 1000), diameterM: pipeD * 1.15, name: "y-pipe" }, 1.6, 0);
       this.addJunction([...chainHeads, { duct: y, end: "a" }]);
       chainHeads = [{ duct: y, end: "b" }];
@@ -305,8 +308,16 @@ export class ExhaustNetwork {
         d += ex.muffler.bodyLengthMm / 1000;
       }
       const tail = this.extend(port, { lengthM: Math.max(0.1, ex.tailpipeLengthMm / 1000), diameterM: ex.tailpipeDiameterMm / 1000, name: `tail${k}` }, d + 0.2, k);
-      const lateral = chainHeads.length === 1 ? 0.35 : (k === 0 ? -1 : 1) * ex.outletSpacingM / 2;
-      this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: lateral, y: -2.25, z: 0.3 });
+      const count = chainHeads.length;
+      // Outlets spread across the tail: one offset to the right, two at the spacing, more evenly between.
+      const lateral = count === 1 ? 0.35 : (k / (count - 1) - 0.5) * ex.outletSpacingM * (count > 2 ? 1.3 : 1);
+      if (ex.exit === "side") {
+        // Side pipes: outlets under the sills just behind the engine, left chains to the left.
+        const sideOf = count === 1 ? 1 : k < count / 2 ? -1 : 1;
+        this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: sideOf * 0.95, y: 0.35 - 0.12 * (k % Math.max(1, Math.ceil(count / 2))), z: 0.25 });
+      } else {
+        this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: lateral, y: -2.25, z: 0.3 });
+      }
     });
   }
 

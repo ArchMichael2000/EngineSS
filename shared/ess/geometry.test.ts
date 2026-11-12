@@ -138,6 +138,28 @@ describe("Cross-Four X layout", () => {
     expect(resolveEngineSpec({ ...config, quick: { ...config.quick, cylinderCount: 10 } }).cylinders).toBe(12);
   });
 
+  it("pair-lead presets change each side's rhythm and leave the engine's intervals alone", () => {
+    const sideGaps = (firing: "default" | "even-sides" | "bunched-sides", cylinders: number) => {
+      const s = solveFiringSchedule({ layout: "x", cylinders, bankAngleDeg: 30, vrAngleDeg: 15, crank: { type: "even-fire" }, firingOrder: [], borePitchMm: 46, strokeMm: 190, rodLengthMm: 400, x: { tiltDeg: 15, phasing: "even-firing", planePitchMm: 46, firing } });
+      const right = s.cylinders.filter((c) => (c.number - 1) % 4 < 2).map((c) => c.fireAngleDeg).sort((a, b) => a - b);
+      return { all: s.intervalsDeg.map((d) => Math.round(d)).sort((a, b) => a - b), right: right.map((v, i) => Math.round((i + 1 < right.length ? right[i + 1] : right[0] + 720) - v)).sort((a, b) => a - b), order: s.firingOrder };
+    };
+    // SB4: the two cylinders of a side fire 240° / 480° apart, or 120° / 600° when bunched.
+    expect(sideGaps("even-sides", 4).right).toEqual([240, 480]);
+    expect(sideGaps("bunched-sides", 4).right).toEqual([120, 600]);
+    for (const n of [4, 8, 16]) {
+      expect(sideGaps("even-sides", n).all).toEqual(sideGaps("default", n).all);
+      expect(sideGaps("bunched-sides", n).all).toEqual(sideGaps("default", n).all);
+    }
+    // SB16: even sides come within 30° of a perfectly even 90°; bunched leaves one gap over 400°.
+    expect(Math.max(...sideGaps("even-sides", 16).right)).toBeLessThanOrEqual(120);
+    expect(Math.max(...sideGaps("bunched-sides", 16).right)).toBeGreaterThan(400);
+    // A typed order still wins, and swapping a cylinder with its opposite is always achievable.
+    const swapped = solveFiringSchedule({ layout: "x", cylinders: 4, bankAngleDeg: 30, vrAngleDeg: 15, crank: { type: "even-fire" }, firingOrder: [3, 2, 1, 4], borePitchMm: 46, strokeMm: 190, rodLengthMm: 400, x: { tiltDeg: 15, phasing: "even-firing", planePitchMm: 46, firing: "bunched-sides" } });
+    expect(swapped.requestedOrderHonoured).toBe(true);
+    expect(swapped.firingOrder).toEqual([3, 2, 1, 4]);
+  });
+
   it("two-strokes fire each opposed pair together", () => {
     const s = schedule(4, 15, { cycle: "two-stroke" });
     expect(s.intervalsDeg.reduce((a, b) => a + b, 0)).toBeCloseTo(360, 6);

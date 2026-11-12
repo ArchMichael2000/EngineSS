@@ -52,7 +52,9 @@ export const PERSPECTIVES: Record<Perspective, PerspectiveDef> = {
     ears: [{ x: -0.09, y: -5.3, z: 1.2 }, { x: 0.09, y: -5.3, z: 1.2 }],
     fullScaleDbSpl: 118,
     groundReflection: 0.85,
-    shielding: (kind, src) => (src.y > 0 ? { cutoffHz: 700, gainDb: -9 } : kind === "exhaust" ? { cutoffHz: 0, gainDb: 0 } : { cutoffHz: 1500, gainDb: -3 }),
+    // An exhaust outlet is outside the body wherever it is (side pipes, stacks): only the engine and
+    // intake under the bonnet are shielded from behind.
+    shielding: (kind, src) => (kind === "exhaust" ? { cutoffHz: 0, gainDb: 0 } : src.y > 0 ? { cutoffHz: 700, gainDb: -9 } : { cutoffHz: 1500, gainDb: -3 }),
   },
   "exterior-side": {
     label: "Exterior — side, 7.5 m (pass-by line)",
