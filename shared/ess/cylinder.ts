@@ -766,8 +766,9 @@ export class Cylinder {
     // Cycle-to-cycle variation grows with dilution and low charge density (Heywood §9.4): the burn
     // duration is log-normal about its mean, and once dilution is heavy some cycles burn only in
     // part. Set so the indicated work of one cylinder at idle varies by about 7 % (COV of IMEP) on
-    // a mild cam, 15–20 % with 20 % burned gas, and 40–50 % on a long-overlap cam, the measured
-    // range from a smooth idle to a loping one.
+    // a mild cam, under the ≈ 10 % where Heywood puts the onset of driveability complaints, by
+    // 15–20 % at 20 % burned gas and by 40–50 % on a long-overlap cam (estimates for a loping
+    // idle; see docs/reference-sources.md §4 "Idle").
     const cov = clamp(0.012 + dilutionCovGain * (1.0 * Math.max(0, residualFraction - 0.08) + 0.05 * lowDensity * lowDensity), 0.012, 0.45);
     const z = this.rng.gaussian();
     const durationFactor = Math.exp(cov * 0.9 * z);

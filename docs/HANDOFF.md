@@ -7,13 +7,13 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | | |
 |---|---|
 | Repository | `ArchMichael2000/EngineSS` |
-| Working branch | `claude/elegant-albattani-7t1qgq` (PR #4, November 2026): X layout, link rods, faster core, two-stroke work, engine view. Earlier work is merged to `main`. |
+| Working branch | `claude/elegant-albattani-7t1qgq` (PR #4, November 2026): X layouts (Cross-Four and shared-pin), link rods, faster core, two-stroke work, engine view, moving listeners, steady idle. Earlier work is merged to `main`. |
 | `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
 | Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
-| Tests | `npx vitest run`: 195 tests pass (≈ 100 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
+| Tests | `npx vitest run`: 221 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
 | Browser | `npm run test:browser -- --url <app>/simulator --stress`: every reference engine, every control and export in Chromium. Results: `docs/browser-verification.md`. |
 | Typecheck and build | `npm run build` (runs `tsc -b`, then `vite build`) |
-| Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 40 1`: 120/120 random configurations pass across seeds 1–120 (X engines included) |
+| Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 40 1`: 120/120 random configurations pass across seeds 1–120 (X engines, 17–24 cylinders, X exhaust arrangements and firing presets included) |
 
 **Goal (from the owner):** take over EngineSS and rebuild the core sound engine for quality and realism across all configurations, including ones that don't exist but could. Also rebuild the reference and data sources, researching the internet and public repositories.
 
@@ -112,17 +112,19 @@ The full table is in `docs/reference-sources.md` §4. The tests require ±12 % f
 
 | Engine | Torque | Power |
 |---|---|---|
-| GM LS3 | +5 % | −6 % |
-| Ferrari F140 | +1 % | −2 % |
-| Porsche 9A1 | −3 % | −1 % |
-| Nissan VR38 | −1 % | +9 % |
-| Bugatti W16 | +5 % | +14 % |
-| VW EA288 (diesel) | −3 % | 0 % |
-| Cummins 6BT (diesel) | +7 % | +1 % |
-| Yamaha RD350LC (two-stroke) | −3 % | −5.5 % |
-| Mazda 13B (rotary) | −3 % | +11 % |
+| GM LS3 | +7 % | −3 % |
+| Ferrari F136 | −5 % | −6 % |
+| Ferrari F140 | +4 % | 0 % |
+| Porsche 9A1 | +2 % | 0 % |
+| Nissan VR38 | +5 % | +6 % |
+| Bugatti W16 | +11 % | +9 % |
+| Rolls-Royce Vulture (shared-pin X-24) | | −0.1 % |
+| VW EA288 (diesel) | −3 % | +7 % |
+| Cummins 6BT (diesel) | +8 % | +3 % |
+| Yamaha RD350LC (two-stroke) | −1 % | −3 % |
+| Mazda 13B (rotary) | +7 % | +3 % |
 
-High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see the note in the docs.
+High-revving NA engines now read 6–7 % low at peak power (F136, S54, K20A; 12–13 % before the November accessory and cam work). The Honda CRM250 two-stroke is the outlier at −24 % / −26 %; see §5 item 9.
 
 ### Live-site feedback round (October 2026)
 - **Drone above ~6000 rpm.** The core no longer clips per sample. `shared/ess/leveler.ts` (slow auto level + 5 ms look-ahead limiter at −2 dBFS) runs in the worklet and in `render.ts`; `listener.autoLevel` switches Auto/Physical level. The browser compressor is now only a safety net.
@@ -139,6 +141,17 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
 - **Two-strokes:** steepening through the expansion chamber, oil-fouled silencer packing, a dilution ignition limit (four-stroking), and no car body around a motorcycle engine. Order-profile error against the CRM250 and MZ recordings 14–19 → 10–13 dB.
 - **Engine view** in the app (`EngineView.tsx`), typed slider values, displacement to 60 L, redline from 1500 rpm.
 - **Crank inertia** scales with stroke² above car proportions.
+
+### November 2026, second round: owner decisions, moving listeners, steady idle (PR #4)
+- **Owner decisions built.** Two- and four-stroke on every X engine (toggle in the X panel). Exhaust arrangements as options: side collectors, one collector per bank, separate pipes, tuned pipes on two-strokes, rear or side exit. Firing order from presets (default, even sides, bunched sides), by tapping opposed cylinders to swap them, or typed and checked against the solver (`FiringOrderEditor.tsx`). Up to 24 cylinders on every piston layout.
+- **Shared-pin X** (`physical.xPins: "shared"`): four banks on one pin per row with master-and-link rods, Rolls-Royce Vulture reference at −0.1 % of its published power.
+- **Pass-by and fly-over listeners** with Doppler (`observer.ts`, re-aimed every 16 samples). In Drive mode the pass-by follows road speed.
+- **Half-rate tier** in the worklet (`RATE_TIERS = [1, 5/6, 2/3, 1/2]`) for 20–24 cylinders on slow machines.
+- **Centrifugal blowers** sized from redline airflow and the tip speed their rated boost needs: Merlin 84 kPa of 83, FA20 Vortech 44–52 of 48, Vulture 38–40 of 41.
+- **Idle.** The largest audible change of the round; numbers in `docs/reference-sources.md` §4 "Idle". Half-second idle speed now holds 1–3 % on the reference engines (it was 6–7 % on stock engines, and the flat-six preset and the long-cam F136 swung between a quarter and twice their target). Four changes: cycle-to-cycle variation recalibrated (COV of IMEP 7 % on a mild cam instead of 19 %); idle spark feedback 70°/unit error up to MBT; phased cams park on wider centrelines when they are longer than the family cam; overlap back-flow carries what the cylinder last expelled. The two-stroke dilution misfire no longer applies to four-strokes (it stalled the V10 preset every few seconds).
+- **Accessory drag** is flat to 1500 rpm then constant power, plus the Patton–Nitschke–Heywood auxiliary term. **Structure-borne level** follows Anderton's 50·log N on spark engines above 2000 rpm.
+- **Reference data:** F136 and S54 cam durations, 13B runner length and intake closing, CRM250 scavenging. The rotary's +11 % at 7000 rpm is now +3 %.
+- **Lesson kept as a rule:** run the whole suite before every push. Two pushes went out with a stale test (the worklet's rate tiers) and failed CI.
 
 ## 4. Conventions and gotchas
 
@@ -157,6 +170,8 @@ High-revving NA engines read 10–13 % low at peak power (F136, S54, K20A); see 
   - Rotary: 1080° of e-shaft per face.
   - For rotaries, `spec.cylinders` is the number of faces (3 × rotors), `quick.cylinderCount` is rotors, and `quick.displacement` follows Mazda's convention (rotors × one chamber). `displacementLitres(spec)` counts every face.
 - **Fuzz seeds:** variant draws (diesel, two-stroke, rotary) happen last, so a seed's base configuration doesn't change when a variant is added. A seed can still become a variant, so tests pin variants off where a specific engine matters (seed 34 is the gasoline 10 L turbo I8 limiter case).
+- **Judge idle on statistics, not on one instant.** Speed at a single moment after start is chaotic: any change to the model moves it by hundreds of rpm on a loping engine, and a 2 s check passed by luck for months while the V10 preset stalled every few seconds. Use half-second means over 8 s or more (the preset test in `ess.test.ts` does; so does the survey in `docs/reference-sources.md` §4 "Idle").
+- **Run the whole suite before every push**, and the fuzz sweep after any change to combustion, friction or idle control.
 - **Prefer physical fixes over fudge factors.** Each calibrated constant is listed with its basis in `docs/reference-sources.md` §1, "Calibrated constants". Add new ones there.
 - **Git:**
   - Develop on the session's designated branch and merge to `main` through a PR (the owner has given standing permission).
@@ -176,7 +191,7 @@ Ordered by priority. Each item says what "done" looks like.
 ### B. Realism against real audio (the main open goal)
 Done in October 2026: 14 open recordings added and compared (`scripts/compareCorpus.py`, results in `docs/reference-sources.md` §4). Still open:
 3. **Two-strokes: half done.** The 2–8 kHz deficit is now 12–17 dB on light free revs (was 24–30) and near zero at full throttle without a silencer. What remains is probably engine-side: the structure-borne level at high speed is 10–15 dB under Anderton's empirical law for petrol engines (≈ 50·log N; the model follows ≈ 30·log N), and air-cooled fins, piston rattle and reed noise are not modelled. A two-stroke recording with a known microphone position would settle how much is the recording chain. Chamber-shell radiation was estimated and rejected (reference doc §4).
-3a. **Structure-borne level vs speed (all engines).** LS3 at 5000 rpm full load reads about 83 dB(A) at 1 m; Anderton's petrol law gives 102 (1970s engines; modern ones about 5 dB less). The low-speed level was fitted to HL-CEAD. Raising the speed exponent needs a level-calibrated engine-bay recording at speed, or measured data, to anchor it.
+3a. **Structure-borne level vs speed.** Spark engines now gain the missing 20 dB per decade above 2000 rpm (limited to 12 dB), which follows Anderton's 50·log N slope. The absolute level at speed is still unanchored: a level-calibrated engine-bay recording at 4000–6000 rpm would settle it.
 4. **More off-firing energy in real engines.** Diesels and the FA20 carry 2–8 dB more energy between the firing orders than the renders. Candidates: log-manifold geometry (unequal pulse paths), more cylinder-to-cylinder spread. An end-collector manifold overshoots.
 5. **No open Wankel recording.** Keep looking (Freesound, Commons, Archive); the one Sampling+ clip is local-only.
 6. **Cabin perspective.** Open interior clips exist (four committed), but none names its engine or speed, so the boom gain stays unverified. An identified interior recording with known rpm would calibrate it.
@@ -184,20 +199,19 @@ Done in October 2026: 14 open recordings added and compared (`scripts/compareCor
 
 ### C. Known model gaps (each documented with numbers in `docs/reference-sources.md`)
 Done: variable-geometry turbines for common-rail diesels; Drive mode for every family (limiter-aware shifts, power-based gearing); the rotary stationary-gear mesh; no more four-stroke chain whine on two-strokes or rotaries. Still open:
-8. **Rotary +11 % at 7000 rpm.** Volumetric efficiency rises with speed (79 → 88 %). Auxiliary ports would make it worse, not better; intake tuning is the suspect. No Renesis or 13B-REW reference yet; apex-seal noise relies on the port-closing impulses.
-9. **Two-stroke torque curve.** Within 5 % of peak from 4000 to 8500 rpm. Trapping efficiency (≈ 0.55) doesn't respond to pipe tuning. Fix that before adding a power valve (YPVS / RC), which would otherwise only flatten the curve further. The CRM250 reads −30 % (118 hp/L).
+8. **Rotary:** +7 % torque, +3 % power after giving the NA six-port engine its 40 cm runners and 40° ABDC intake closing (it was +11 % at 7000 rpm). No Renesis or 13B-REW reference yet; apex-seal noise relies on the port-closing impulses.
+9. **Two-stroke torque curve: measured, not fixed.** The CRM250 reads −24 % / −26 % and its torque stays within 10 % from 4000 to 9000 rpm. Charging efficiency sits at 0.49–0.53 whatever the pipe length, which is the cylinder volume left at port closing filled at about 1.1 bar: nothing raises the trapped pressure. The plugging pulse is missing at the port. Driven alone, the chamber returns 70 % of a pulse 2.8 ms later when the port end is closed and almost nothing when it is a pressure release; in the engine the port behaves like the second case while the transfers are open (it answers a −17 kPa suction with +10 kPa of outflow). The blow-down pulse is 33–43 kPa, weak for an engine on the pipe, and the header rule gives 53 mm where a real 250 is nearer 44 (estimate). Measurements and the scripts' method are in `docs/reference-sources.md` §4 "Two-stroke: where the plugging pulse goes". Start there, with a measured port-pressure trace (Blair 1996 compares measured and computed ones) as the target, before adding a power valve.
 10. **Turbo deep surge** stays the mild type at 96 % of Helmholtz (measured 63–82 %). It needs a measured negative-flow compressor characteristic. Sensitivities are in §1.
-11. **High-revving NA engines** read 9–15 % low above about 21 m/s mean piston speed (the S54's −31 % is limiter interference on the dyno test). Candidates are the speed-squared friction and accessory-drag terms; don't change them without friction data.
+11. **High-revving NA engines** read 6–7 % low at peak power (F136, S54, K20A), after the accessory law and realistic cam durations. The S54's torque peak is 10 % low. What is left is probably intake and head detail the family defaults do not carry.
+11a. **Long-overlap idle.** The well-mixed cylinder puts a long-overlap cam's idle at 0.4–0.7 burned gas (the V10 preset reads 0.71 at 77 kPa manifold pressure), about 1.5 times what such engines measure. The idle is steady now, but the residual scale itself is unverified; a two-zone treatment of overlap back-flow is the candidate. The MZ ETZ 250 idles at 1700 rpm against its 1300 target.
+11b. **Leveler and impulsive idles.** The auto level reads sparse peaks low (0.4 s attack) and lifts a popping idle toward the limiter, so the two-stroke SB8's idle comes out within 2 dB of its full-throttle level. A 5 ms peak detector restores the swing but lowers every engine's full-throttle level by 3–4 dB; left as it was.
 12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
 13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
 
-### E. X-engine layout: built (November 2026)
-The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan. Open questions for the owner:
-- **Cycle and fuel.** The study is kinematic; its 16.8 : 1 compression (from a 12 mm head clearance) suggests diesel. The presets are gasoline with one turbo-diesel.
-- **Exhaust and intake arrangement.** Modelled as one collector per side (upper and lower bank merging first on multi-module engines), dual pipes to the rear, one plenum. Side exits, stacks or per-bank pipes would sound different.
-- **Which cylinder of each opposed pair fires first.** Both choices are equally even; the solver picks one, and the Advanced firing-order field overrides it.
-- **Application** (vehicle, boat, aircraft, stand): sets gearing, inertia and the listener positions.
-Not done: a classic shared-pin X (Vulture, DB 604) with master-and-link rods; `rods.ts` already has the kinematics it would need.
+### E. X-engine layouts: built (November 2026)
+The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan, and the classic shared-pin X (Vulture) followed with master-and-link rods. The owner's answers are built in: both cycles, exhaust arrangements as options, firing order by preset or by hand, 24 cylinders everywhere. Still open:
+- **Application** (vehicle, boat, aircraft, stand): sets gearing, inertia and the listener positions. The presets run in the default car.
+- **Intake arrangement** is one plenum for every arrangement of exhaust.
 
 ### D. Performance and housekeeping
 14. CPU: the November pass removed allocation (15–38 % less). What is left is spread evenly: duct reads 14 %, the per-sample engine loop 14 %, cylinder step 13 %, valve residuals and solver 20 %, junction solves 8 %. Tabulating slider-crank motion (as link-rod cylinders already do) is worth about 3 %. Beyond that the steps are structural: sub-rate thermodynamics, or threads, which need cross-origin isolation that GitHub Pages can't provide.
@@ -208,7 +222,7 @@ Not done: a classic shared-pin X (Vulture, DB 604) with master-and-link rods; `r
 ```bash
 git fetch origin main && git checkout main
 npm ci
-npx tsc -b && npx vitest run            # 195 tests
+npx tsc -b && npx vitest run            # 221 tests
 npx vite-node scripts/fuzzConfigs.ts -- 40 1
 npx vite-node scripts/verifyForcedInduction.ts
 npx vite-node scripts/renderForCompare.ts -- mazda-13b-fc exterior-rear sweep 1500 7500 6 /tmp/13b

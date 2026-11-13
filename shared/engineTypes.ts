@@ -577,8 +577,9 @@ export const SABER_PRESETS: Record<string, { name: string; description: string; 
   'saber-sb16': saberPreset(4, 'Four modules a quarter turn apart, 22 L: 30° / 60° firing.'),
   'saber-sb16-square': saberPreset(4, 'SB16 with the cylinders at 45°: a square X firing evenly every 45°.', { physical: { xTiltDeg: 45, xPhasing: 'even-firing' } }),
   'saber-sb12-low-couple': saberPreset(3, 'SB12 clocked 0° / 120° / 240°: the rocking couple cancels, firing 120° / 0° / 120° in pairs.', { physical: { xTiltDeg: 15, xPhasing: 'low-couple' } }),
-  'saber-sb4-two-stroke': saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke' }),
-  'saber-sb8-two-stroke': saberPreset(2, 'SB8 as a two-stroke on side collectors: four paired firings a revolution.', {}, { cycle: 'two-stroke' }),
+  // Two-strokes carry the long, densely packed silencers: on the sport exhaust the eight's idle alone reaches full scale.
+  'saber-sb4-two-stroke': saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
+  'saber-sb8-two-stroke': saberPreset(2, 'SB8 as a two-stroke on side collectors and long silencers: four paired firings a revolution.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
   'saber-sb8-diesel': saberPreset(2, 'SB8 as a turbo-diesel at the study\'s 16.8 : 1 compression, on twin 100 mm exhausts.', { forcedInduction: { type: 'turbo', turboSize: 'balanced', maxBoost: 18, bovEnabled: false, wastegateEnabled: true }, physical: { xTiltDeg: 15, xPhasing: 'even-firing', compressionRatio: 16.8, pipeDiameterMm: 100, tailpipeDiameterMm: 110 } }, { fuel: 'diesel', aspiration: 'turbo' }),
 };
 

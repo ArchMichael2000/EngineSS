@@ -12,7 +12,7 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Valve–duct coupling | Implicit: `p_port = 2p_in + Z·ṁ/ρ`, secant + Illinois fallback | Characteristic (Riemann-variable) boundary of 1-D acoustics | `cylinder.ts` `solveValve` |
 | Heat release | Wiebe a=5, m=2; duration from bore, speed, density, dilution, λ | Heywood §9.2; Ghojel, *Int. J. Engine Res.* 11 (2010) | `cylinder.ts` `wiebeDuration` |
 | Spark phasing | Closed-loop MBT: 50 % burn ≈ 9° ATDC | Heywood §9.3 (MBT ↔ CA50 ≈ 8–10°) | `cylinder.ts` `mbtAdvance` |
-| Cycle-to-cycle variation | Burn-duration COV from dilution and charge density | Heywood §9.4; Duan et al., *Energy Sci. Eng.* (2024), doi:10.1002/ese3.1879 | `cylinder.ts` `ignite` |
+| Cycle-to-cycle variation | Log-normal burn duration, σ = 0.9·(0.012 + (x_b − 0.08) + 0.05·(low-density term)²) capped at 0.45; partial burns from x_b ≈ 0.27, up to one cycle in eight | Heywood §9.4 (trend with dilution, ≈ 10 % COV of IMEP as the driveability limit); Duan et al., *Energy Sci. Eng.* (2024), doi:10.1002/ese3.1879. Coefficients set to the idle COV targets in §4 "Idle" | `cylinder.ts` `ignite` |
 | Wall heat transfer | Woschni (1967) | Woschni, SAE 670931 | `cylinder.ts` |
 | Knock | Livengood–Wu integral, Douaud–Eyzat delay `τ = 17.68(ON/100)^3.402 p^−1.7 e^(3800/Tu)` ms, isentropic end gas | Livengood & Wu (1955); Douaud & Eyzat, SAE 780080 | `cylinder.ts` `integrateKnock` |
 | Knock acoustics | First circumferential chamber mode `f = 1.84c/(πB)`, Q ≈ 18 | Draper, *Trans. ASME* 60 (1938) | `cylinder.ts` |
@@ -42,7 +42,7 @@ This file says where every model and number in the v16 physical core (`shared/es
 | Firing schedule | Each cylinder fires on its TDC or one revolution later; exact dynamic programme over cylinders sorted by TDC minimising Σ(interval − 720/n)², then adjacent-throw firings | Derived (replaces an exhaustive search; identical results) | `geometry.ts` `optimalSchedule`, `realiseOrder` |
 | Cross-Four X layout | Modules of four cylinders on four pins 90° apart; axes 180° ± t and ± t; opposed pairs in phase, pairs 90° + 2t apart; rod planes 1·3·2·4; module offsets searched in 1° steps for even pulses or least rocking couple | The owner's Saber SB4–SB16 kinematic study (ported function for function) | `geometry.ts` `xEvenFiringOffsets`, `xLowCoupleOffsets`, `xRockingCouple` |
 | Master-and-link rods | Master rod on the crank pin; link rods on knuckle pins spaced like the cylinders round its big end; exact planar kinematics tabulated every 0.25° per cylinder | Derived (exact planar kinematics of the master-rod arrangement every radial row uses); no numeric source for the proportions, see the calibrated constants | `rods.ts` |
-| Dilution ignition limit | No ignition above ≈ 2/3 burned gas by mass, certain below 1/2, linear probability between | Heywood §9.4 (partial burning and misfire with dilution); Blair (1996) on irregular light-load combustion ("four-stroking") in two-strokes. The 1/2 and 2/3 limits are estimates, not fitted values | `cylinder.ts` `ignite` |
+| Dilution ignition limit (two-strokes only) | No ignition above ≈ 2/3 burned gas by mass, certain below 1/2, linear probability between. Four-strokes take dilution through burn duration, variation and efficiency: the well-mixed cylinder overstates their burned fraction at idle, and the hard limit stalled the V10 preset | Heywood §9.4 (partial burning and misfire with dilution); Blair (1996) on irregular light-load combustion ("four-stroking") in two-strokes. The 1/2 and 2/3 limits are estimates, not fitted values | `cylinder.ts` `ignite` |
 
 ### Calibrated constants and their basis
 
@@ -66,7 +66,11 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Compressor map | φ peak 0.04, design 0.09, choke 0.165; ψmax 0.56 | Exducer-based flow coefficient of modern ported-shroud stages. |
 | Compressor wheel | Redline flow at φ 0.12, 470 m/s tip speed | Puts the WOT operating line right of peak efficiency and short of choke. |
 | Idle feed-forward | Energy balance: friction + accessories + pumping at η 0.27/(1 + overlap/30) | Lands within about 10 % of the converged idle-valve opening on all 29 engines. |
-| Accessory drag | (2.6 + 0.00035·rpm) · L | About 16 N·m on a 6 L V8 at idle, about 3 N·m on a 1 L motorcycle engine. |
+| Accessory drag | (min(2.05, 322/ω) + 0.0796·(6.23 + 5.22e-3·N − 1.79e-7·N²)) N·m per litre | Electrical, steering and climate loads: flat torque to 1500 rpm, constant power (322 W/L) above. Pumps: the auxiliary term of Patton, Nitschke & Heywood (SAE 890836), amep in kPa × 0.0796 N·m per kPa·L. Equal to the former (2.6 + 0.00035·rpm)·L at idle (≈ 16 N·m on a 6 L V8), about 60 % of it at 6000 rpm. Took the F136, S54 and K20A from −12/−13 % to −6/−7 % at peak power together with their cam data. |
+| Structure-borne speed gain | clamp(rpm/2000, 1, 4) on spark engines | The modelled impacts grow ≈ 30 dB per decade of speed; Anderton's surveys give ≈ 50·log N for petrol engines and ≈ 30·log N for NA DI diesels. Applied above 2000 rpm, where the level was fitted to HL-CEAD; limited to 12 dB. The slope is sourced, the level at speed is not anchored. |
+| Idle spark feedback | 70° per unit speed error, 2° to MBT | Fitted to the idle survey in §4 (40 left the long-overlap engines hunting; 120 made the two-cylinder Harley hunt). |
+| Phaser park offset | half the extra duration over the family cam, ≤ half the phaser travel | Keeps a phased long cam's idle overlap at the family's. F136: 9.5° intake, 5.5° exhaust. |
+| Centrifugal blower sizing | tip speed from (PR^0.2857 − 1)/0.95e-6, flow coefficient 0.07, impeller from redline airflow | Rated boost reached at the redline: Merlin 84 kPa of 83, FA20 Vortech 44–52 of 48, Vulture 38–40 of 41. |
 | Structure excitation | Combustion F = A·p; piston slap J = m·√(2Fc/m) with 30 µm clearance; valve seating J = 0.05 kg × 0.25 m/s·(rpm/6000); timing drive 60 N noise + 36 N mesh tone (order 21) × (rpm/1000)^1.5 on four-strokes; two-strokes (no camshaft drive, no valvetrain) keep half the noise and no tooth tone; Wankels 0.6 × with the stationary-gear mesh at ≈ 34 per e-shaft revolution | Physical impulse magnitudes. The order-21 tone on two-strokes was a bug found by the CRM250 recording (§4). Contact durations 100 µs (seat), 0.3 ms (slap), 150 µs (chain). |
 | Structure radiation | 22 block modes (450–5200 Hz) and 16 head modes (1.5–6 kHz) scaled by size^−0.28; head/block mobility 0.8; 2nd-order radiation-efficiency high-pass at 2.4 kHz (below coincidence) | Fitted to HL-CEAD engine-bay statistics: 1.6 L i4 at 1500 rpm gives centroid 3.3 kHz (3.30), 2–8 kHz 62–76 % (63), flatness 0.30 (0.35), order-locked 25 % (27), crest 6.5 (5.5). Measured with `scripts/analyzeReferenceCorpus.py`'s own statistics. |
 | Knuckle-pin circle | 0.22 × master rod length; link rod = master rod − knuckle radius; equal clearance volume on every cylinder | **Estimated** from Wasp-family proportions; no drawing with dimensions was reachable. Gives TDC shifts up to 3.7° and strokes up to 0.45 % long on a nine-cylinder row. Makers trimmed knuckle positions to equalise compression, which is why the clearance volume is held equal. |
@@ -164,46 +168,49 @@ Brake output after 2.5–3 s at the stated speed, WOT. Run with `scratchpad`-sty
 
 | Engine | Published | v16 | Error |
 |---|---|---|---|
-| GM LS3 | 575 N·m @ 4600 | 601 | +5 % |
-| GM LS3 | 321 kW @ 5900 | 301 | −6 % |
-| Ferrari F136 | 540 N·m @ 6000 | 499 | −8 % |
-| Ferrari F136 | 425 kW @ 9000 | 369 | −13 % |
-| BMW S54 | 365 N·m @ 4900 | 332 | −9 % |
-| BMW S54 | 252 kW @ 7900 | 222 | −12 % |
-| Honda K20A | 206 N·m @ 7000 | 202 | −2 % |
-| Honda K20A | 162 kW @ 8000 | 142 | −12 % |
-| Porsche 9A1 | 420 N·m @ 4400 | 407 | −3 % |
-| Porsche 9A1 | 283 kW @ 6500 | 280 | −1 % |
-| Lexus 1LR-GUE | 480 N·m @ 6800 | 507 | +6 % |
-| Lexus 1LR-GUE | 412 kW @ 8700 | 399 | −3 % |
-| Ferrari F140 | 690 N·m @ 6000 | 696 | +1 % |
-| Ferrari F140 | 545 kW @ 8250 | 535 | −2 % |
-| Audi EA855 | 480 N·m @ 2000 | 447 (steady, after ~4 s of spool) | −7 % |
-| Audi EA855 | 294 kW @ 6000 | 313 | +6 % |
-| Nissan VR38 | 632 N·m @ 3300 | 629 | −1 % |
-| Nissan VR38 | 419 kW @ 6800 | 455 | +9 % |
-| Bugatti W16 | 1250 N·m @ 2200 | 1307 | +5 % |
-| Bugatti W16 | 736 kW @ 6000 | 842 | +14 % |
-| SRT Hellcat | 881 N·m @ 4000 | 963 | +9 % |
-| SRT Hellcat | 527 kW @ 6000 | 578 | +10 % |
-| Yamaha RD350LC (two-stroke) | 40 N·m @ 8000 | 39 | −3 % |
-| Yamaha RD350LC (two-stroke) | 34.6 kW @ 8500 | 33 | −5.5 % |
-| Mazda 13B (FC S5 NA rotary) | 187 N·m @ 4000 | 181 | −3 % |
-| Mazda 13B (FC S5 NA rotary) | 118 kW @ 7000 | 131 | +11 % |
-| VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 327 | −4 % (VGT) |
-| VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 119 | +8 % (VGT) |
-| Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 580 | +7 % |
-| Cummins 6BT 5.9 12V | 119 kW @ 2500 | 120 | +1 % |
-| PSA DV5 1.5 BlueHDi | 300 N·m @ 1750 | 274 | −8.5 % (VGT; −27.5 % with the former wastegate turbo) |
+| GM LS3 | 575 N·m @ 4600 | 615 | +7 % |
+| GM LS3 | 321 kW @ 5900 | 312 | −3 % |
+| Ferrari F136 | 540 N·m @ 6000 | 511 | −5 % |
+| Ferrari F136 | 425 kW @ 9000 | 399 | −6 % |
+| BMW S54 | 365 N·m @ 4900 | 329 | −10 % |
+| BMW S54 | 252 kW @ 7900 | 234 | −7 % |
+| Honda K20A | 206 N·m @ 7000 | 208 | +1 % |
+| Honda K20A | 162 kW @ 8000 | 151 | −7 % |
+| Porsche 9A1 | 420 N·m @ 4400 | 428 | +2 % |
+| Porsche 9A1 | 283 kW @ 6500 | 283 | 0 % |
+| Lexus 1LR-GUE | 480 N·m @ 6800 | 518 | +8 % |
+| Lexus 1LR-GUE | 412 kW @ 8700 | 410 | −1 % |
+| Ferrari F140 | 690 N·m @ 6000 | 719 | +4 % |
+| Ferrari F140 | 545 kW @ 8250 | 546 | 0 % |
+| Audi EA855 | 480 N·m @ 2000 | 550 (after 4.5 s of spool; 369 at 2.5 s) | +15 % |
+| Audi EA855 | 294 kW @ 6000 | 306 | +4 % |
+| Nissan VR38 | 632 N·m @ 3300 | 666 | +5 % |
+| Nissan VR38 | 419 kW @ 6800 | 442 | +5.5 % |
+| Bugatti W16 | 1250 N·m @ 2200 | 1380 | +10 % |
+| Bugatti W16 | 736 kW @ 6000 | 802 | +9 % |
+| SRT Hellcat | 881 N·m @ 4000 | 962 | +9 % |
+| SRT Hellcat | 527 kW @ 6000 | 572 | +9 % |
+| Rolls-Royce Vulture (X-24) | 1327 kW @ 2850 | 1326 | −0.1 % |
+| Yamaha RD350LC (two-stroke) | 40 N·m @ 8000 | 39.5 | −1 % |
+| Yamaha RD350LC (two-stroke) | 34.6 kW @ 8500 | 33.6 | −3 % |
+| Mazda 13B (FC S5 NA rotary) | 187 N·m @ 4000 | 200 | +7 % |
+| Mazda 13B (FC S5 NA rotary) | 118 kW @ 7000 | 121 | +3 % |
+| VW EA288 2.0 TDI | 340 N·m @ 1750–3000 | 332 | −2 % (VGT) |
+| VW EA288 2.0 TDI | 110 kW @ 3500–4000 | 118.5 | +8 % (VGT) |
+| Cummins 6BT 5.9 12V | 542 N·m @ 1600 | 586 | +8 % |
+| Cummins 6BT 5.9 12V | 119 kW @ 2500 | 122 | +2 % |
+| PSA DV5 1.5 BlueHDi | 300 N·m @ 1750 | 275 | −8 % (VGT) |
 | PSA DV5 1.5 BlueHDi | 96 kW @ 3750 | 101 | +5 % |
-| VW 1.9 TDI ALH | 210 N·m @ 1900 | 207 | −1 % (fuel limit fitted: 34 mg; VNT-15 VGT) |
-| VW 1.9 TDI ALH | 66 kW @ 4000 | 72 | +9 % |
-| Mercedes OM601 2.0 | 123 N·m @ 2800 | 131 | +7 % |
-| Mercedes OM601 2.0 | 53 kW @ 4600 | 50 | −6 % |
-| Honda CRM250 (two-stroke) | 36 N·m @ 7000 | 25 | −30 % |
-| Honda CRM250 (two-stroke) | 29.4 kW @ 8000 | 19 | −35 % |
-| MZ ETZ 250 (two-stroke) | 27.5 N·m @ 5200 | 24 | −12 % |
-| MZ ETZ 250 (two-stroke) | 15.4 kW @ 5500 | 14 | −8 % |
+| VW 1.9 TDI ALH | 210 N·m @ 1900 | 213 | +1.5 % |
+| VW 1.9 TDI ALH | 66 kW @ 4000 | 73 | +10 % |
+| Mercedes OM601 2.0 | 123 N·m @ 2800 | 134 | +9 % |
+| Mercedes OM601 2.0 | 53 kW @ 4600 | 51 | −4 % |
+| Honda CRM250 (two-stroke) | 36 N·m @ 7000 | 27.5 | −24 % |
+| Honda CRM250 (two-stroke) | 29.4 kW @ 8000 | 21.8 | −26 % |
+| MZ ETZ 250 (two-stroke) | 27.5 N·m @ 5200 | 24.8 | −10 % |
+| MZ ETZ 250 (two-stroke) | 15.4 kW @ 5500 | 14.3 | −7 % |
+
+Table as of November 2026 (`scripts/dynoCheck.ts`: 4.5 s to settle at each speed, then the mean of 20 readings over 0.5 s; a single reading swings ±10 % on a four-cylinder diesel). The EA855 needs the 4.5 s to spool at 2000 rpm and its steady torque was already 545–555 N·m in October; the 447 tabled then was read mid-spool. Since the October table: accessory drag no longer grows linearly with speed, the F136 and S54 carry cam durations fit for their speed (240°/236° and 234°/232° at 0.050", against the family's 221°/225° and 215°/219°), the 13B has its 40 cm runners and 40° ABDC intake closing, and the CRM250 a better scavenging figure.
 
 EA288 full-load brake efficiency at 2000 rpm is 0.42 (published TDI peak ≈ 0.42, BSFC ≈ 200 g/kWh).
 At idle its ignition delay is 4.1° without pilot (premixed share 0.60) and 1.5° with it (0.24), and
@@ -214,13 +221,53 @@ The five engines added in October 2026 (`scripts/dynoCheck.ts`) are not pinned b
 
 **S54 at 7900 rpm (October 2026).** The code at handoff gives 174 kW (−31 %), not the 222 kW tabled above. The cause is the measurement: the soft limiter starts cutting at 7970 rpm, the dyno absorber's speed swings to 8044 rpm under the cuts, and the cut cycles show in the sampled IMEP. With the limiter moved to 8500 rpm the speed holds within ±25 rpm and the S54 makes 215 kW (−15 %). The deficit pattern holds across the three engines: F136 −12.5 % at 9000 rpm, S54 −15 % at 7900, K20A −8.6 % at 8000, against −2 % for the F140 at 8250 and −6 % for the LS3 at 5900. It appears only above about 21 m/s mean piston speed. Volumetric efficiency there is 87–93 %. The speed-squared terms are the candidates: the Chen–Flynn Q·Sp² friction (0.9 bar at 24 m/s) and the accessory drag, whose rpm-linear torque takes 14.5 kW on the S54 at 7900 rpm and may double-count the oil and water pumps already in a motoring-calibrated friction figure. Neither has been changed without friction data to fit.
 
-The pattern: high-revving NA engines read 10–13 % low at peak power. Their real heads and intakes (ITBs, tuned airboxes, large valves) breathe better at high speed than the family defaults used for the unpublished parts. Boosted engines read 5–14 % high at peak power. Boost there is an estimate, and production engines also cap torque through the ECU, which v16 does not model.
+The pattern in October 2026 (now 6–7 %, see the table note): high-revving NA engines read 10–13 % low at peak power. Their real heads and intakes (ITBs, tuned airboxes, large valves) breathe better at high speed than the family defaults used for the unpublished parts. Boosted engines read 5–14 % high at peak power. Boost there is an estimate, and production engines also cap torque through the ECU, which v16 does not model.
 
 ### Idle
 
-All 29 engines (8 factory presets plus 21 references) settle within about 5 % of target. The 0.5 s mean speed holds a standard deviation of 18–70 rpm on multi-cylinder engines. Two groups swing more:
-* small-inertia motorcycle engines (CP3 about 200 rpm, Ducati about 125 rpm);
-* the race-cam flat-6 (about 120 rpm).
+Measured as the mean speed of each half second over 20–40 s after a 3 s settle, so one cycle's swing does not count (November 2026; before that the check was one reading 2 s after start).
+
+| Engine | Target rpm | Standard deviation | Lowest / highest half second |
+|---|---|---|---|
+| GM LS3 | 700 | 2.2 % | 0.89 / 1.07 |
+| Ferrari F136 | 750 | 2.4 % | 0.94 / 1.06 |
+| Toyota 2JZ-GTE | 750 | 1.7 % | 0.96 / 1.05 |
+| BMW S54 | 750 | 2.2 % | 0.94 / 1.09 |
+| Honda K20A | 750 | 5.3 % | 0.80 / 1.14 |
+| Porsche 9A1, Audi EA855, VR38, VR6, Hellcat | 750–850 | 1.5–2.4 % | 0.93 / 1.09 |
+| Lexus 1LR, Ferrari F140 | 750 | 2.8–2.9 % | 0.92 / 1.07 |
+| Wasp Junior, Merlin, Vulture | 600 | 1.1–1.3 % | 0.95 / 1.02 |
+| Diesels (five) | 750–900 | 0.7–1.6 % | 0.97 / 1.02 |
+| Harley M8 | 850 | 2.8 % | 0.90 / 1.04 |
+| Ducati 1299, Yamaha CP3, CP4 | 1200–1300 | 5.7–7.5 % | 0.67 / 1.27 |
+| Buick 231 odd-fire | 750 | 8.2 % | 0.76 / 1.19 |
+| Mazda 13B | 800 | 2.4 % | 0.92 / 1.05 |
+| CRM250, RD350LC (two-stroke) | 1500, 1200 | 3.6 %, 6.4 % | 0.87 / 1.14 |
+| MZ ETZ 250 (two-stroke) | 1300 | 5.7 % about 1695 rpm | runs 30 % fast |
+| Presets: cross-plane V8, flat-plane V8, inline-6, V12 | 750–850 | 1.5–2.7 % | 0.95 / 1.10 |
+| Presets: supercharged V8, V10 (long overlap) | 950 | 4.8 %, 6.7 % | 0.86 / 1.21 |
+| Preset: flat-6 (lumpy cam, 8000 rpm) | 850 | 11.5 % | 0.72 / 1.25 |
+| Saber SB8, SB8 two-stroke | 750, 800 | 1.1 %, 2.6 % | 0.94 / 1.05 |
+
+**What it was.** The same survey on the October code: 2JZ 6–7 %, cross-plane V8 6 %, F136 with its longer cams 39 % (0.30–2.11 of target), flat-6 preset 25–52 % (0.24–2.03), and the V10 preset dropped to cranking speed every few seconds once the two-stroke dilution misfire reached four-strokes.
+
+**Why.** One cylinder's indicated work at idle varied by 19 % (LS3), 44 % (2JZ), 48 % (cross-plane V8) and over 100 % (flat-6): the burn-duration spread was log-normal with σ up to 0.9 and one cycle in five burned in part. Mean torque then fell steeply as burned-gas fraction rose, the fraction rose as speed fell, and the manifold's filling lag closed the loop: a limit cycle with a 1.5 s period. More idle-air gain made it worse (0.4 and 1.0 against 0.1: both engines swung 0.26–2.2); spark is the only actuator fast enough.
+
+**What changed.**
+
+| Change | Before | After |
+|---|---|---|
+| Burn-duration spread | σ = 1.8·cov, cov = 0.012 + 1.6·(x_b − 0.08) + …, cap 0.5 | σ = 0.9·cov, cov = 0.012 + 1.0·(x_b − 0.08) + …, cap 0.45 |
+| Partial burns | from cov 0.12 (x_b ≈ 0.15) | from cov 0.20 (x_b ≈ 0.27) |
+| COV of IMEP, one cylinder at idle | LS3 19 %, 2JZ 44 %, flat-6 105 % | LS3 8 %, 2JZ 15 %, cross-plane V8 21 %, flat-6 48 % |
+| Idle spark feedback | 40° per unit speed error, ceiling 28° | 70° per unit (0.09°/rpm at 750 rpm), ceiling MBT |
+| Phased cams longer than the family cam | parked on the family centrelines (F136: +8° overlap at 0.050") | parked wider by half the extra duration, at most half the phaser travel (F136: 0.24 burned gas at idle, was 0.40) |
+| Overlap back-flow | counted as burned gas | has the composition of what the cylinder last expelled (after a misfire, mixture) |
+| Dilution misfire (x_b 0.5–0.68) | every engine | two-strokes only |
+
+The 7 % target for a mild cam sits under the ≈ 10 % COV of IMEP at which Heywood (§9.4) places driveability complaints. The figures for long-overlap cams (15–20 % at 0.2 burned gas, 40–50 % on a loping cam) are estimates; no measured idle COV for a race cam was found. A spark rate term (15–40° per unit of speed rate) destabilised every engine, the speed derivative being too noisy at block rate.
+
+**Still off.** The burned-gas fraction itself: 0.13 for a mild cam is plausible, but 0.40 for the lumpy presets and 0.71 for the V10 preset (at 77 kPa manifold pressure) are about 1.5 times what long-overlap engines measure. The cylinder is one well-mixed zone, so overlap back-flow dilutes the whole charge at once.
 
 ### Engine-bay perspective against HL-CEAD
 
@@ -340,6 +387,26 @@ The 13B fires every 180° of e-shaft (six chambers, two firings per revolution).
 
 Side-by-side render of the four families (idle, full-throttle rev, lift-off; exterior rear): `docs/figures/engine-families.png`.
 
+### Two-stroke: where the plugging pulse goes (November 2026, open)
+
+The CRM250 reads −24 % / −26 % and its torque curve is flat. Measured on the dyno at full throttle (cylinder 1, 40 readings):
+
+| rpm | Torque | Delivery ratio | Trapping efficiency | Charging efficiency | Blow-down peak at the port | Port pressure 245–275° (plugging window) |
+|---|---|---|---|---|---|---|
+| 4000 | 25.6 N·m | 0.87 | 0.56 | 0.49 | | |
+| 5000 | 25.9 | 0.89 | 0.57 | 0.50 | 25 kPa | +5 to +8 kPa |
+| 6000 | 26.3 | 0.96 | 0.53 | 0.51 | 27 | −6 |
+| 7500 | 27.7 | 0.99 | 0.54 | 0.53 | 33 | −1 to +2 |
+| 9000 | 24.5 | 0.85 | 0.58 | 0.49 | 27 | −6 |
+
+* **Charging efficiency is pinned near 0.5.** The exhaust port closes 80° before TDC, so the cylinder holds 0.52 of the swept volume plus clearance; filled at 1.1 bar and 340 K that is 0.5 of the reference mass. Burned-gas fraction at ignition is only 0.05, so scavenging is not the limit: trapped pressure is. A pipe on song raises it to 1.5–1.7 bar.
+* **The chamber itself works.** Driven alone with a 30 kPa pulse and a closed port end (800 K), it returns −15 kPa after 1.4 ms (diffuser) and +21 kPa after 2.8 ms (baffle): 70 % of the pulse, on time for the tuned speed. With a pressure-release port end the same pipe returns −15 kPa and then +1 kPa: the suction's own reflection cancels the plugging pulse, and the first positive return comes 4.1 ms after the pulse (right for about 5500 rpm, where the engine does show +5 to +10 kPa and its best trapping).
+* **In the engine the port is the second case.** While the transfers are open it answers the −17 kPa suction with +10 kPa of outflow (crankcase blow-down through the cylinder), which the diffuser turns into more suction over the plugging window.
+* **The blow-down pulse is weak:** 33–43 kPa, where port traces of engines on the pipe are usually drawn at 60 kPa and more (from memory of Blair's figures; not checked against a source in this session), because the cylinder holds half the charge of an engine on the pipe and the header rule gives 53 mm (the port window taken as a full rectangle); a 250 of this bore usually has a header nearer 44 mm (estimate, no drawing found). A 44 mm header alone raised the pulse to 43 kPa and changed nothing else.
+* Pipe length (tuned speed 7800, 9500, 11500 rpm) and wave steepening made no difference to torque.
+
+What to try, in order: a measured port-pressure trace as the target (Blair, *Design and Simulation of Two-Stroke Engines*, 1996, compares measured and computed traces); the transfer-duct and crankcase volumes, which set how open the port looks to a 1.4 ms wave (the time constant is ≈ 0.8 ms now); header diameter from the rounded port window; then whether the on-pipe state is reachable at all (start a run from a supercharged cylinder and see if it stays).
+
 ### Two-stroke: shock waves, four-stroking (November 2026)
 
 The October comparison left two-strokes 24–30 dB short in 2–8 kHz. Soloing the sources at 6000 rpm full throttle showed the exhaust outlet carrying everything, with a smooth waveform. Three physical changes, each measured against the CRM250 recording:
@@ -370,6 +437,32 @@ The module phasing was checked against the functions in the owner's study for ti
 Full-throttle dyno pulls to 3000 rpm, then a lift. The dominant orders follow the firing pattern: orders 1 and 3 on the SB4 (the 120° / 240° pattern repeats once a revolution), 2 and 4 on the SB8, 4 and 8 on the SB16, and order 8 alone on the square X, which fires evenly.
 
 There is no real engine to compare these against. What is checked is the geometry (against the study), numerical health (unit tests, 120 fuzz seeds with nine X engines) and real-time playback in Chromium (all seven presets; the SB16 runs at the 2/3 rate tier in headless Chromium on this container).
+
+### Shared-pin X and the Vulture (November 2026)
+
+`physical.xPins: "shared"` puts the four banks of each row on one crank pin, the classic X (Rolls-Royce Vulture, Daimler-Benz DB 604), with one master rod and three link rods per row (`rods.ts`, the radial kinematics). Defaults follow the Vulture: 127 × 139.7 mm, rods twice the stroke, banks at 90° (tilt 45°, adjustable 20–70°).
+
+* The 24 cylinders fire 30° apart on the nominal schedule; the link rods then move individual top dead centres by a few degrees, as on a radial row (test: "the shared-pin X (Vulture) fires 24 cylinders 30° apart, and its link rods shift them").
+* Reference `rr-vulture`: 42.47 L, 6.0 : 1, 100-octane fuel, single-stage centrifugal blower at 41 kPa (6 psi), ejector stacks. Published 1327 kW (1780 hp) at 2850 rpm; simulated 1326–1327 kW (−0.1 %), pinned by the tests at ±12 %.
+* The dyno absorber's capacity now scales with displacement (400 N·m per litre, at least 4000): the fixed 4000 N·m could not hold a 42 L engine.
+
+### Moving listeners: pass-by and fly-over (November 2026)
+
+Two perspectives move the source past a fixed listener and take the Doppler shift from the changing propagation delay (`observer.ts`; delays and gains re-aimed every 16 samples and ramped in between).
+
+| Perspective | Track | Speed | Closest approach |
+|---|---|---|---|
+| Pass-by | 140 m of road, repeated | 27.8 m/s (100 km/h), or road speed in Drive mode | 7.5 m to the side |
+| Fly-over | 840 m, repeated | 62 m/s (120 kt) | 60 m overhead |
+
+A 400 Hz monopole on the pass-by track reads 424–436 Hz approaching and 368–378 Hz receding (v/c = 27.8/346 gives +8.6 % and −7.4 %, less a little for the side offset), and its level swells more than 2.5 times abeam; the largest sample-to-sample step stays that of a 430 Hz tone (test: "moving listener perspectives"). The fly-over runs a Wasp Junior through the end of the track without a discontinuity.
+
+### Exhaust arrangements, firing presets and 24 cylinders (November 2026)
+
+* X exhaust options: side collectors (default), one collector per bank (`each-bank`), separate pipes (`exhaustRouting: "separate"`), tuned pipes on two-strokes (default up to four cylinders), rear or side exit (`physical.exhaustExit`).
+* X firing presets (`physical.xFiring`): the solver's default, `even-sides` (alternate sides) and `bunched-sides`; all are equally even at the crank and differ in which collector each pulse enters. The app's editor also swaps opposed cylinders by tap and checks a typed order against the solver.
+* Every piston layout builds and idles with 24 cylinders (test: "every piston layout builds and idles with 24 cylinders"); the fuzz draws 17–24 cylinders as a late variant.
+* The worklet's rate tiers are 1, 5/6, 2/3 and 1/2 of the device rate; the half-rate tier keeps 20–24 cylinders in real time on slow machines at 12 kHz of bandwidth (48 kHz device).
 
 ### Radial with master-and-link rods (November 2026)
 

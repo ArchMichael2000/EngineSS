@@ -64,6 +64,29 @@ Same procedure and criteria, Chromium 141 headless on the 4 vCPU container, Page
 
 ![Engine cross-section view](figures/engine-view.png)
 
+### November 2026, second round: two-stroke and shared-pin X, moving listeners
+
+Same procedure on the Pages build after the idle work: 58 checks pass, no console errors, no rate step-downs under the load test (48 kHz held for 20.1 s of load, longest gap 0.0 ms).
+
+| Engine | Internal rate | Idle rpm | WOT max rpm | Idle dBFS | WOT dBFS | Peak | Longest gap | Audio clock | Worklet load |
+|---|---|---|---|---|---|---|---|---|---|
+| saber-sb4 | 48 kHz | 659 | 3127 | -35.1 | -10.3 | 0.83 | 0.0 ms | 100.0 % | 32 % |
+| saber-sb8 | 48 kHz | 657 | 3119 | -28.4 | -10.2 | 0.83 | 0.0 ms | 100.0 % | 45 % |
+| saber-sb12 | 48 kHz | 666 | 3081 | -29.5 | -10.4 | 0.83 | 0.0 ms | 100.0 % | 48 % |
+| saber-sb16 | 48 kHz | 650 | 3068 | -31.0 | -10.4 | 0.83 | 0.0 ms | 100.1 % | 57 % |
+| saber-sb16-square | 48 kHz | 659 | 3088 | -29.9 | -10.2 | 0.83 | 0.0 ms | 100.0 % | 60 % |
+| saber-sb12-low-couple | 48 kHz | 659 | 3118 | -28.2 | -9.9 | 0.83 | 0.0 ms | 100.2 % | 43 % |
+| saber-sb4-two-stroke | 48 kHz | 681 | 3089 | -21.9 | -13.5 | 0.83 | 0.0 ms | 100.3 % | 48 % |
+| saber-sb8-two-stroke | 48 kHz | 674 | 3100 | -11.9 | -10.3 | 0.83 | 0.0 ms | 100.0 % | 51 % |
+| saber-sb8-diesel | 48 kHz | 717 | 2968 | -41.9 | -16.0 | 0.83 | 0.0 ms | 100.4 % | 37 % |
+| rr-vulture (24 cylinders) | 40 kHz | 430 | 3310 | -28.8 | -11.2 | 0.83 | 0.0 ms | 101.0 % | 83 % |
+
+The SB16 presets held 48 kHz in this run (32 kHz in the first round) and the SB12 ran at 48 % load (77 %). The engine code for these presets did not get cheaper between the two runs, so read that as the spread between runs on a shared container, not as a gain.
+
+Listener perspectives round-trip through the worklet: exterior-rear 78 dB, exterior-side 68 dB, engine-bay 66 dB, cabin 75 dB, dyno-tailpipe 91 dB, pass-by 61 dB. The fly-over read 30 dB in one run and silence in the next: its track starts 252 m out, so the first 0.7 s after selecting it is the sound still on its way.
+
+**Found by this run.** The two-stroke SB8 failed "full throttle louder than idle" (−12.0 against −11.9 dBFS) on the sport exhaust: a 300 mm straight-through silencer on 11 litres of two-stroke puts even the idle at full scale, and the auto level then holds both at its target. Both two-stroke Saber presets now carry the stock silencers (380 mm, denser packing). The idle still comes out within 2 dB of full throttle after levelling, because the auto level reads sparse pops low and lifts them; see `docs/HANDOFF.md` §5 item 11b.
+
 ## Controls
 
 | Control | Result |
