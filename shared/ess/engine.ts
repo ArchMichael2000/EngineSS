@@ -102,6 +102,10 @@ export interface SimulatorOptions {
 const BLOCK = 64;
 const TWO_PI = Math.PI * 2;
 
+/** Soft-limiter governor: loop rate of the speed trim (1/s), integral rate relative to it, plate-follows-pressure rate (1/s). */
+const LIM_LOOP = 6;
+const LIM_TI = 2.5;
+const LIM_KM = 40;
 export class EngineSimulator {
   readonly spec: EngineSpec;
   readonly schedule: FiringSchedule;
@@ -172,6 +176,17 @@ export class EngineSimulator {
   private fuelCut = false;
   private limiterActive = false;
   private softCutFraction = 0;
+  /** Largest throttle opening the soft limiter allows (1 = no limit). */
+  private limiterPlate = 1;
+  private limiterIntegral = 0;
+  private limiterHolding = false;
+  private limiterBelow = 0;
+  private limiterTrim = 0;
+  /** Indicated torque at full load, referred to 100 kPa manifold pressure (learned on the run). */
+  private wotIndicated = 0;
+  /** The limiter is withholding fuel or spark (as opposed to only closing the throttle). */
+  private limiterCutting = false;
+  private readonly throttleLimiter: boolean;
   private readonly command: CombustionCommand = { sparkAdvanceDeg: 0, lambda: 1, fuelEnabled: true, sparkEnabled: true, fuelOctane: 95, knockControl: true, injectionAdvanceDeg: 8, fuelMassKg: 0, smokeLambda: 1.2 };
   // Diesel governor state: fuel per cylinder per cycle (kg), its idle feed-forward and integrator.
   private dieselFuel = 0;
@@ -181,6 +196,11 @@ export class EngineSimulator {
   private sparkAdvance = 15;
   private lambdaTarget = 1;
   private readonly sparkCuts: Uint8Array;
+  private cutCarry = 0;
+  /** Soft limiter cuts fuel (four-stroke piston engines) or spark (two-strokes, rotaries). */
+  private readonly cutsFuel: boolean;
+  /** Cycle angle at which a cylinder's cut is decided for its next cycle. */
+  private readonly cutDecisionDeg: number;
 
   // Afterfire
   private readonly exhaustFuel: Float64Array;
@@ -260,6 +280,9 @@ export class EngineSimulator {
     this.allDucts = [...this.exhaust.ducts(), ...this.intake.ducts(), ...(this.fi?.ducts() ?? [])];
     this.pressureRates = new Float64Array(spec.cylinders);
     this.sparkCuts = new Uint8Array(spec.cylinders);
+    this.cutsFuel = !spec.twoStroke && !spec.rotary;
+    this.throttleLimiter = !spec.twoStroke && !spec.diesel;
+    this.cutDecisionDeg = this.cutsFuel ? 340 : cycleDegrees(spec) - 60;
     this.exhaustFuel = new Float64Array(this.exhaust.groups.length);
     this.exhaustOxygen = new Float64Array(this.exhaust.groups.length);
     this.popPulse = new Float64Array(this.exhaust.groups.length);
@@ -464,11 +487,15 @@ export class EngineSimulator {
     const cycle = this.cycleDeg;
     const omega = this.omega;
     this.prepareCommand();
+    const softLimiter = this.cmdSoft;
+    const cutAt = this.cutDecisionDeg;
+    const stepDeg = (omega * dt * 360) / TWO_PI + 1e-9;
     for (let i = 0; i < cyls.length; i++) {
       const cyl = cyls[i];
       cyl.plenumBurnedFraction = plenumFraction;
       let alpha = (this.crankDeg - cyl.fireAngleDeg) % cycle;
       if (alpha < 0) alpha += cycle;
+      if (softLimiter && alpha >= cutAt && alpha < cutAt + stepDeg) this.decideCut(i);
       const cmd = this.commandFor(i);
       cyl.alphaDeg = alpha;
       cyl.omega = omega;
@@ -575,15 +602,32 @@ export class EngineSimulator {
   }
 
   /**
-   * The command for cylinder i. Soft limiter: a cut cylinder loses spark as well as fuel, so the
-   * cut acts on the charge already inducted instead of one cycle later.
+   * The command for cylinder i. Soft limiter: a cut four-stroke cylinder gets no fuel for one
+   * intake stroke (sequential injector cut: it pumps air, and nothing unburned reaches the
+   * exhaust); the charge it already holds still fires. Two-strokes and rotaries, which cannot
+   * withhold fuel from one cylinder for one cycle, lose that cycle's spark instead.
    */
   private commandFor(i: number): CombustionCommand {
     const cut = this.cmdSoft && this.sparkCuts[i] === 1;
     const c = this.command;
-    c.fuelEnabled = this.cmdFuel && !cut;
-    c.sparkEnabled = this.cmdSpark && !cut;
+    c.fuelEnabled = this.cmdFuel && !(cut && this.cutsFuel);
+    c.sparkEnabled = this.cmdSpark && !(cut && !this.cutsFuel);
     return c;
+  }
+
+  /**
+   * Soft-limiter cut pattern. Each cylinder is decided once a cycle, just before its intake stroke
+   * (before its spark where the spark is what is cut), and the cut share is spread over the firing
+   * sequence by carrying the remainder from one cylinder to the next: at one half every second
+   * firing is dropped, at one third every third. Production limiters cut in such rotating
+   * patterns; drawing every cut at random turned the exhaust note into noise.
+   */
+  private decideCut(i: number): void {
+    this.cutCarry += this.softCutFraction;
+    if (this.cutCarry >= 1) {
+      this.cutCarry -= 1;
+      this.sparkCuts[i] = 1;
+    } else this.sparkCuts[i] = 0;
   }
 
   private throttlePlate(): number {
@@ -591,7 +635,7 @@ export class EngineSimulator {
     // Vehicle mode: the shift controller may blip the throttle to rev-match a downshift.
     const pedal = this.controls.mode === "vehicle" && this.drivetrain.blipThrottle !== null ? Math.max(this.controls.throttle, this.drivetrain.blipThrottle) : this.controls.throttle;
     // Drive-by-wire progression: small pedal → finer plate control at the bottom.
-    return clamp(Math.pow(pedal, 1.35), 0, 1);
+    return clamp(Math.min(Math.pow(pedal, 1.35), this.limiterPlate), 0, 1);
   }
 
   private frictionTorque(rpm: number): number {
@@ -794,14 +838,70 @@ export class EngineSimulator {
       if (!this.limiterActive && rpm > lim) this.limiterActive = true;
       else if (this.limiterActive && rpm < lim - 150) this.limiterActive = false;
       this.softCutFraction = 0;
+      this.limiterPlate = 1;
+      this.limiterCutting = this.limiterActive;
     } else if (cal.revLimiter === "soft") {
-      // Progressive cut, reaching every cylinder 130 rpm past the limiter (high-torque engines unloaded).
-      this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 1);
-      this.limiterActive = this.softCutFraction > 0;
-      for (let i = 0; i < this.sparkCuts.length; i++) this.sparkCuts[i] = this.rng.next() < this.softCutFraction ? 1 : 0;
+      if (this.throttleLimiter) {
+        // Soft limiter with an electronic throttle, as torque-based engine controls do it: from
+        // 30 rpm under the limit the manifold pressure is held to what carries the engine's own
+        // friction there, so it sits at the limit on part throttle with every cylinder firing.
+        //  - Feed-forward: friction torque over full-load indicated torque (learned while the
+        //    plate is open), taken as linear in manifold pressure above 10 kPa.
+        //  - A slow PI trim on speed, aimed 15 rpm under the limit. Its gain has to stay low: an
+        //    unloaded engine gains 90–300 rpm/s per kPa and answers 0.1 s late, and a loop faster
+        //    than about 6 per second hunts (tried up to 90 per second: 100–700 rpm of swing).
+        //  - The plate follows the allowed pressure (integral control on the logarithm of both;
+        //    its flow at speed is nearly all in its first few per cent).
+        // The arrival, too fast for the plate, is caught by the rotating fuel cut from 30 rpm
+        // past the limit, for a few cycles.
+        const mapKpa = this.intake.mapPa / 1000;
+        if (this.controls.mode === "dyno") {
+          // On the dyno the absorber holds the speed, so there is nothing to govern: the plate
+          // simply closes over 80 rpm from 30 rpm under the limit and reopens at once below it. (A
+          // latched hold cycled here: every release kicked the absorber past the limit again.)
+          this.limiterHolding = rpm > lim - 30;
+          const open = clamp(1 - (rpm - (lim - 30)) / 80, 0.02, 1);
+          this.limiterIntegral += (Math.log(open) - this.limiterIntegral) * (1 - Math.exp(-blockSec / 0.03));
+        } else {
+          // The hold lets go 12 % under the limit (a light engine undershoots by several per cent
+          // on its first arrival, before the trim has learned it), or after a full second spent
+          // more than 45 rpm under it: a load has taken the speed away (settling on the limit takes
+          // less than half of that). The trim is kept between visits: what it learned about this
+          // engine's holding pressure (blower drive, friction the estimate missed) still applies.
+          this.limiterBelow = rpm < lim - 45 ? this.limiterBelow + blockSec : 0;
+          if (!this.limiterHolding && rpm > lim - 30) this.limiterHolding = true;
+          else if (this.limiterHolding && (rpm < lim - Math.max(300, 0.12 * lim) || this.limiterBelow > 1)) this.limiterHolding = false;
+          if (this.limiterHolding) {
+            const fullLoad = this.wotIndicated > 0 ? this.wotIndicated : 100 * this.displacementL;
+            const holdKpa = 10 + 90 * clamp((this.frictionTorque(lim) + (this.fi ? Math.max(0, this.fi.crankTorque) : 0)) / fullLoad, 0.03, 0.9);
+            // Trim gain from the engine's own liveliness: LIM_LOOP per second of loop rate over
+            // the rpm/s it gains per kPa unloaded (full-load torque over its inertia).
+            const gain = LIM_LOOP / ((fullLoad / 90 / this.spec.inertiaKgM2) * (30 / Math.PI));
+            const err = lim - 15 - rpm;
+            // Falling more than 60 rpm under the aim means the holding estimate is too low for
+            // this engine: the trim then learns six times faster. (Erring high is harmless, the
+            // fuel cut trims the excess; erring low dropped the engine out of the hold and back,
+            // in a cycle.)
+            this.limiterTrim = clamp(this.limiterTrim + (err > 60 ? 6 : 1) * LIM_TI * gain * err * blockSec, -40, 60);
+            const allowedKpa = clamp(holdKpa + gain * err + this.limiterTrim, 12, 100);
+            this.limiterIntegral = clamp(this.limiterIntegral + LIM_KM * Math.log(allowedKpa / Math.max(5, mapKpa)) * blockSec, -6, 0);
+          } else this.limiterIntegral = Math.min(0, this.limiterIntegral + 20 * blockSec);
+        }
+        this.limiterPlate = Math.exp(this.limiterIntegral);
+        this.softCutFraction = clamp((rpm - (lim + 30)) / 100, 0, 1);
+      } else {
+        // No throttle to close (two-stroke on a carburettor): progressive cut, reaching every
+        // cylinder 130 rpm past the limiter.
+        this.limiterPlate = 1;
+        this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 1);
+      }
+      this.limiterCutting = this.softCutFraction > 0;
+      this.limiterActive = this.limiterCutting || this.limiterPlate < 0.97;
     } else {
       if (!this.limiterActive && rpm > lim) this.limiterActive = true;
       else if (this.limiterActive && rpm < lim - 180) this.limiterActive = false;
+      this.limiterPlate = 1;
+      this.limiterCutting = this.limiterActive;
     }
 
     // Spark: MBT for the measured burn. Knock limits are found per cylinder by the end-gas
@@ -851,6 +951,12 @@ export class EngineSimulator {
     // Telemetry (smoothed).
     const torque = this.blockTorque / BLOCK;
     this.blockTorque = 0;
+    // Full-load indicated torque referred to 100 kPa, for the soft limiter's holding estimate.
+    {
+      const kpa = this.intake.mapPa / 1000;
+      const indicated = torque + this.frictionTorque(this.rpm);
+      if (!this.limiterHolding && kpa > 85 && indicated > 0) this.wotIndicated += (indicated * (90 / (kpa - 10)) - this.wotIndicated) * (this.wotIndicated > 0 ? 0.012 : 1);
+    }
     const t = this.telemetry;
     const a = 0.08;
     t.rpm = rpm;
@@ -939,7 +1045,7 @@ export class EngineSimulator {
     // classic source of overrun crackle. Strength set by the calibration's afterfire tendency.
     // Interrupted combustion of any kind lets mixture reach the hot exhaust: fuel cut (port-wall
     // film), limiter or launch cuts, and ignition-cut flat shifts (unburned charge).
-    const cutting = this.fuelCut || this.limiterActive || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
+    const cutting = this.fuelCut || this.limiterCutting || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
     if (cutting && tendency > 0) {
       const perCycleFuel = (this.displacementL / 1000) * 1.1 / 14.7 / this.exhaustFuel.length;
       const film = tendency * 0.06 * perCycleFuel * (this.rpm / 120) * Math.exp(-this.fuelCutAge / 0.7) * dt;

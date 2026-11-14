@@ -33,13 +33,13 @@ describe("output leveler", () => {
     expect(harmonicsDb(l, 220)).toBeLessThan(-50);
   });
 
-  it("settles a loud sustained signal near the −6 dBFS target", () => {
+  it("settles a loud sustained signal near the −4 dBFS target", () => {
     const l = sine(4, 150, 4);
     const r = l.slice();
     new OutputLeveler(FS).process(l, r);
     const p = peak(l, 3 * FS);
-    expect(20 * Math.log10(p)).toBeGreaterThan(-8);
-    expect(20 * Math.log10(p)).toBeLessThan(-4);
+    expect(20 * Math.log10(p)).toBeGreaterThan(-5.5);
+    expect(20 * Math.log10(p)).toBeLessThan(-3);
   });
 
   it("boosts a quiet signal by at most 12 dB, and not at all with auto gain off", () => {
@@ -51,6 +51,36 @@ describe("output leveler", () => {
     const l2 = quiet.slice(), r2 = quiet.slice();
     new OutputLeveler(FS, { autoGain: false }).process(l2, r2);
     expect(peak(l2, FS) / 0.01).toBeCloseTo(1, 2);
+  });
+
+  it("does not ride sparse pulses up into the limiter", () => {
+    // 25 pulses a second, each 2 ms long at −3 dBFS over a −40 dBFS bed: an engine on its rev
+    // limiter, or a two-stroke popping at idle. With a slow envelope the gain rode 8 dB too high
+    // and the limiter took it back on every pulse.
+    const n = 4 * FS;
+    const l = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const inPulse = i % (FS / 25) < FS * 0.002;
+      l[i] = (inPulse ? 0.7 : 0.01) * Math.sin((2 * Math.PI * 300 * i) / FS);
+    }
+    const r = l.slice();
+    const lev = new OutputLeveler(FS);
+    const before = l.slice();
+    lev.process(l, r);
+    // Gain over the last second, measured on the pulses themselves (delayed by the look-ahead).
+    let ratioMin = Infinity;
+    let ratioMax = 0;
+    for (let i = 3 * FS; i < n - lev.latency; i++) {
+      const x = Math.abs(before[i]);
+      if (x > 0.5) {
+        const g = Math.abs(l[i + lev.latency]) / x;
+        ratioMin = Math.min(ratioMin, g);
+        ratioMax = Math.max(ratioMax, g);
+      }
+    }
+    // Pulses pass at one steady gain near the −4 dBFS target (−3 dBFS in, so about −1 dB of gain).
+    expect(20 * Math.log10(ratioMax)).toBeLessThan(0.5);
+    expect(20 * Math.log10(ratioMax / ratioMin)).toBeLessThan(1);
   });
 
   it("catches a sudden transient with the look-ahead limiter (no sample past full scale)", () => {

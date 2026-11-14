@@ -7,10 +7,14 @@
  * do above 0.9) turns a loud engine into a buzzing drone. This stage does what a recordist does
  * instead, in two parts:
  *
- * 1. Automatic gain (optional, on by default): a slow peak-envelope follower sets the gain so peaks
- *    sit near `targetDb`. It cuts by up to `maxCutDb` with a `attackS` attack and recovers over
- *    `releaseS`, so the idle → full-throttle swing of a single run is kept, and it boosts quiet
- *    engines by at most `maxBoostDb`. Off, the output stays at its physical level.
+ * 1. Automatic gain (optional, on by default): a peak-envelope follower sets the gain so peaks sit
+ *    near `targetDb`. The envelope catches a peak within 5 ms and lets go over `releaseS`; the
+ *    gain comes down within `attackS` and recovers over `releaseS`, so the idle → full-throttle
+ *    swing of a single run is kept, and it boosts quiet engines by at most `maxBoostDb`. It cuts
+ *    by up to `maxCutDb`. Off, the output stays at its physical level.
+ *    (The envelope used to rise over 0.4 s. On a signal of sparse pulses, an engine on its rev
+ *    limiter or a two-stroke popping at idle, it then read 8 dB under the real peaks, the gain
+ *    rode 8 dB too high and the limiter below took that back pulse by pulse: audible distortion.)
  * 2. A look-ahead peak limiter (`lookAheadS`, ceiling `ceilingDb`): the gain for each sample is the
  *    minimum over the look-ahead window of what every upcoming sample needs, smoothed, so it is
  *    already down when a peak leaves the delay line. No waveshaping, so no added harmonics.
@@ -38,6 +42,7 @@ export class OutputLeveler {
   private readonly minGain: number;
   private readonly attack: number;
   private readonly release: number;
+  private readonly peakAttack: number;
   private readonly ceiling: number;
   private readonly limRelease: number;
   /** Look-ahead delay in samples. */
@@ -61,10 +66,11 @@ export class OutputLeveler {
 
   constructor(private readonly sampleRate: number, options: LevelerOptions = {}) {
     this.autoGain = options.autoGain ?? true;
-    this.target = dbToGain(options.targetDb ?? -6);
+    this.target = dbToGain(options.targetDb ?? -4);
     this.maxBoost = dbToGain(options.maxBoostDb ?? 12);
     this.minGain = dbToGain(-(options.maxCutDb ?? 30));
-    this.attack = 1 - Math.exp(-1 / ((options.attackS ?? 0.4) * sampleRate));
+    this.attack = 1 - Math.exp(-1 / ((options.attackS ?? 0.05) * sampleRate));
+    this.peakAttack = 1 - Math.exp(-1 / (0.005 * sampleRate));
     this.release = 1 - Math.exp(-1 / ((options.releaseS ?? 4) * sampleRate));
     this.ceiling = dbToGain(options.ceilingDb ?? -2);
     this.latency = Math.max(1, Math.round((options.lookAheadS ?? 0.005) * sampleRate));
@@ -91,7 +97,7 @@ export class OutputLeveler {
 
       // 1. Slow automatic gain on the incoming signal's peak envelope.
       if (this.autoGain) {
-        this.envelope += (peak - this.envelope) * (peak > this.envelope ? this.attack : this.release);
+        this.envelope += (peak - this.envelope) * (peak > this.envelope ? this.peakAttack : this.release);
         const want = Math.min(this.maxBoost, Math.max(this.minGain, this.target / Math.max(1e-9, this.envelope)));
         this.agc += (want - this.agc) * (want < this.agc ? this.attack : this.release);
       } else this.agc = 1;

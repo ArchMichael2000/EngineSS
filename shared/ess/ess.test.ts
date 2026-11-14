@@ -364,6 +364,49 @@ describe("numerical health", () => {
   }
 });
 
+describe("soft rev limiter", () => {
+  // The soft limiter used to cut sparks at random: the engine held its speed on a fifth of its
+  // firings, a noise with exhaust bangs in place of a note. It now holds on part throttle.
+  for (const key of ["gm-ls3", "ferrari-f136", "nissan-vr38"]) {
+    it(`${key} holds its limit on the throttle in a free rev, every cylinder firing`, () => {
+      const spec = specOf(key);
+      const sim = new EngineSimulator(spec, 24000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(1);
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(3);
+      const inner = sim as unknown as { softCutFraction: number; limiterPlate: number };
+      const lim = spec.calibration.revLimiterRpm;
+      let lowest = Infinity;
+      let highest = 0;
+      let cutting = 0;
+      let plate = 0;
+      const steps = 150;
+      for (let k = 0; k < steps; k++) {
+        sim.prewarm(0.01);
+        lowest = Math.min(lowest, sim.rpm);
+        highest = Math.max(highest, sim.rpm);
+        if (inner.softCutFraction > 0) cutting++;
+        plate += inner.limiterPlate / steps;
+      }
+      expect(lowest, key).toBeGreaterThan(lim * 0.975);
+      expect(highest, key).toBeLessThan(lim * 1.02);
+      expect(cutting / steps, key).toBeLessThan(0.15);
+      expect(plate, key).toBeLessThan(0.5);
+      expect(sim.telemetry.limiter).toBe(true);
+    }, 60_000);
+  }
+
+  it("lets go of the throttle when a load takes the speed away", () => {
+    // A dyno run overshoots its set speed on the way up; 450 rpm under the limit it must be at full throttle.
+    const sim = new EngineSimulator(specOf("ferrari-f140"), 24000);
+    sim.setControls({ mode: "dyno", targetRpm: 8250, throttle: 1 });
+    sim.prewarm(2.5);
+    expect((sim as unknown as { limiterPlate: number }).limiterPlate).toBeGreaterThan(0.97);
+    expect(sim.telemetry.limiter).toBe(false);
+  }, 60_000);
+});
+
 describe("valve wave solve", () => {
   it("never steps a valve's outgoing wave near redline on a straight-piped V10", () => {
     // Strong rarefactions arriving at a closing exhaust valve once sent the solver to a spurious
