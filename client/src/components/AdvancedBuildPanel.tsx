@@ -18,7 +18,7 @@ const TOOLTIPS = {
   headerGeometry: 'Equal-length headers produce a smooth, even exhaust tone. Unequal-length creates the distinctive rumble of some boxer and V engines.',
   exhaustRouting: 'Single exhaust merges all cylinders. Dual separates banks. Separate pipes give every collector its own pipe and outlet (set the collector to one per bank in Physics for four pipes on a W or X). Open headers remove all restriction for maximum volume.',
   intakeType: 'ITBs give sharp throttle response and intake howl. Velocity stacks maximize airflow sound. Carbs add a distinctive mechanical character.',
-  revLimiter: 'Soft limiters gradually reduce power. Hard fuel cut creates a dramatic stutter. Ignition cut produces pops and bangs.',
+  revLimiter: 'Soft cut bounces off the limit in quick full-throttle bursts. Electronic throttle closes the throttle and holds the limit quietly with every cylinder firing. Hard fuel cut is a slower, deeper stutter. Ignition cut produces pops and bangs.',
 };
 
 function InfoTooltip({ text }: { text: string }) {
@@ -209,7 +209,8 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-dark-elevated border-hud-line">
-            <SelectItem value="soft">Soft Limiter</SelectItem>
+            <SelectItem value="soft">Soft Cut (bounces)</SelectItem>
+            <SelectItem value="throttle">Electronic Throttle (holds, quiet)</SelectItem>
             <SelectItem value="hard-fuel-cut">Hard Fuel Cut</SelectItem>
             <SelectItem value="hard-ignition-cut">Hard Ignition Cut</SelectItem>
           </SelectContent>

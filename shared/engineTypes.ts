@@ -23,7 +23,7 @@ export type HeaderGeometry = 'equal-length' | 'unequal-length';
 export type IntakeType = 'single-throttle-body' | 'itbs' | 'carb' | 'velocity-stacks' | 'airbox';
 
 /** Rev limiter types */
-export type RevLimiterType = 'soft' | 'hard-fuel-cut' | 'hard-ignition-cut';
+export type RevLimiterType = 'soft' | 'throttle' | 'hard-fuel-cut' | 'hard-ignition-cut';
 
 /** Exhaust character presets */
 export type ExhaustCharacter = 'stock' | 'sport' | 'race' | 'straight-pipe';

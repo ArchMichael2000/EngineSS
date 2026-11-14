@@ -69,7 +69,8 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Accessory drag | (min(2.05, 322/ω) + 0.0796·(6.23 + 5.22e-3·N − 1.79e-7·N²)) N·m per litre | Electrical, steering and climate loads: flat torque to 1500 rpm, constant power (322 W/L) above. Pumps: the auxiliary term of Patton, Nitschke & Heywood (SAE 890836), amep in kPa × 0.0796 N·m per kPa·L. Equal to the former (2.6 + 0.00035·rpm)·L at idle (≈ 16 N·m on a 6 L V8), about 60 % of it at 6000 rpm. Took the F136, S54 and K20A from −12/−13 % to −6/−7 % at peak power together with their cam data. |
 | Structure-borne speed gain | clamp(rpm/2000, 1, 4) on spark engines | The modelled impacts grow ≈ 30 dB per decade of speed; Anderton's surveys give ≈ 50·log N for petrol engines and ≈ 30·log N for NA DI diesels. Applied above 2000 rpm, where the level was fitted to HL-CEAD; limited to 12 dB. The slope is sourced, the level at speed is not anchored. |
 | Idle air valve | P 0.1, I 0.15/s on error clamped to ±0.6 (whole error after 1 s on one side), rate damping 0.1 × min(1, cylinders/6) | Fitted to the 48 kHz idle survey in §4 "Rev limiter and output level". |
-| Soft limiter governor | loop rate 6/s, integral 2.5× that, plate-follows-pressure 40/s, aim 15 rpm under, fuel cut from +30 rpm | Fitted on the free-rev holds listed in §4; faster loops hunt. |
+| Soft-cut limiter | band 2 % of the limit (50–120 rpm), 12° of retard through it, overspeed spark cut at +6 % (at least 150 rpm) | Bounce rates in §4 "Rev limiter and output level"; the band is an estimate of production soft cuts, not fitted to a recording. |
+| Throttle limiter governor | loop rate 6/s, integral 2.5× that, plate-follows-pressure 40/s, aim 15 rpm under, fuel cut from +30 rpm | Fitted on the free-rev holds listed in §4; faster loops hunt. |
 | Output leveler | peak attack 5 ms, gain attack 50 ms, release 4 s, target −4 dBFS, ceiling −2 dBFS | A slower peak attack under-reads sparse pulses (8 dB at 0.4 s). |
 | Idle spark feedback | 70° per unit speed error, 2° to MBT | Fitted to the idle survey in §4 (40 left the long-overlap engines hunting; 120 made the two-cylinder Harley hunt). |
 | Phaser park offset | half the extra duration over the family cam, ≤ half the phaser travel | Keeps a phased long cam's idle overlap at the family's. F136: 9.5° intake, 5.5° exhaust. |
@@ -285,7 +286,18 @@ The owner reported that free revs to the limiter sounded severely distorted whil
 | Output limiter | dips of 3–8 dB, five a second | not acting |
 | Automatic gain during the hold | +8 dB (envelope reading sparse peaks low) | +1 to +3 dB |
 
-**Soft limiter** (`engine.ts`, the limiter block of `blockUpdate`). From 30 rpm under the limit the plate is governed so the manifold holds the pressure that carries the engine's own friction (and blower drive) there:
+**Limiter types** (`revLimiterType`; `engine.ts`, the limiter block of `blockUpdate`).
+
+| Type | What it does | On the limiter, SB8 free rev |
+|---|---|---|
+| `soft` (default) | Fuel withheld from every cylinder above the limit, back once the speed is 2 % under it (50–120 rpm); spark retarded up to 12° through that band | bounces 2871–3202 rpm, 5 bursts a second, level within 1 dB of the rev-up |
+| `throttle` | Electronic throttle holds the limit, every cylinder firing (below) | 2981–2989 rpm, 7–15 dB under the rev-up |
+| `hard-fuel-cut` | As `soft` with a 180 rpm band and no retard | 2761–3162 rpm, 4.5 bursts a second |
+| `hard-ignition-cut` | Spark withheld; the charge burns in the exhaust | bangs |
+
+The throttle hold was the default for one pass and the owner heard it as muted: an unloaded engine at constant speed is quiet, and the output level had just been turned down by the rev-up. Bursts per second on the default: LS3 11.5, F136 14, 13B 16, RD350LC 11.5. On the dyno the cut ends as soon as the speed is back under the limit, with no band.
+
+**Throttle limiter.** From 30 rpm under the limit the plate is governed so the manifold holds the pressure that carries the engine's own friction (and blower drive) there:
 * feed-forward: friction torque at the limit over full-load indicated torque, learned while the plate is open and referred to 100 kPa, taken as linear in manifold pressure above 10 kPa;
 * a PI trim on speed aimed 15 rpm under the limit, loop rate 6 per second scaled by the engine's unloaded acceleration per kPa (full-load torque over inertia), learning six times faster when the speed falls more than 60 rpm under the aim, and kept between visits;
 * the plate follows the allowed pressure by integral control on the logarithm of both (40 per second);

@@ -180,6 +180,8 @@ export class EngineSimulator {
   private softCutFraction = 0;
   /** Largest throttle opening the soft limiter allows (1 = no limit). */
   private limiterPlate = 1;
+  /** Spark retard the limiter asks for, 0–1 of 12°. */
+  private limiterRetard = 0;
   private limiterIntegral = 0;
   private limiterHolding = false;
   private limiterBelow = 0;
@@ -579,9 +581,9 @@ export class EngineSimulator {
     const lim = this.spec.calibration.revLimiter;
     // Every strategy keeps a hard ignition backstop on instantaneous speed 150 rpm past the limiter
     // (overspeed protection in production ECUs).
-    const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + 150 && this.running;
+    const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + Math.max(150, 0.06 * this.spec.calibration.revLimiterRpm) && this.running;
     const live = this.running || this.cranking;
-    this.cmdSoft = lim === "soft";
+    this.cmdSoft = lim === "soft" || lim === "throttle";
     this.cmdFuel = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && live;
     this.cmdSpark =
       !(
@@ -858,10 +860,11 @@ export class EngineSimulator {
       else if (this.limiterActive && rpm < lim - 150) this.limiterActive = false;
       this.softCutFraction = 0;
       this.limiterPlate = 1;
+      this.limiterRetard = 0;
       this.limiterCutting = this.limiterActive;
-    } else if (cal.revLimiter === "soft") {
-      if (this.throttleLimiter) {
-        // Soft limiter with an electronic throttle, as torque-based engine controls do it: from
+    } else if (cal.revLimiter === "throttle" && this.throttleLimiter) {
+      {
+        // Electronic-throttle limiter, as torque-based engine controls do it: from
         // 30 rpm under the limit the manifold pressure is held to what carries the engine's own
         // friction there, so it sits at the limit on part throttle with every cylinder firing.
         //  - Feed-forward: friction torque over full-load indicated torque (learned while the
@@ -915,18 +918,31 @@ export class EngineSimulator {
         }
         this.limiterPlate = Math.exp(this.limiterIntegral);
         this.softCutFraction = clamp((rpm - (lim + 30)) / 100, 0, 1);
-      } else {
-        // No throttle to close (two-stroke on a carburettor): progressive cut, reaching every
-        // cylinder 130 rpm past the limiter.
-        this.limiterPlate = 1;
-        this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 1);
       }
+      this.limiterRetard = this.softCutFraction;
       this.limiterCutting = this.softCutFraction > 0;
       this.limiterActive = this.limiterCutting || this.limiterPlate < 0.97;
+    } else if (cal.revLimiter === "soft" || cal.revLimiter === "throttle") {
+      // Soft cut (the default; also where there is no throttle to close): the engine bounces off
+      // the limit. Fuel is withheld from every cylinder above the limit and returns once the speed
+      // has fallen 2 % under it (50–120 rpm; the hard cut waits for 180), and the spark is
+      // retarded up to 12° through that band so each return to the limit is gentler. What is
+      // heard is bursts of full-throttle firing at the limit, a few to a dozen a second.
+      const band = clamp(0.02 * lim, 50, 120);
+      // On the dyno the absorber holds the speed, so the cut ends as soon as the speed is back
+      // under the limit: with the band, a run that overshot on the way up stayed cut for good at
+      // any set speed inside it (the S54's rated speed is 100 rpm under its limiter).
+      if (!this.limiterActive && rpm > lim) this.limiterActive = true;
+      else if (this.limiterActive && rpm < lim - (this.controls.mode === "dyno" ? 0 : band)) this.limiterActive = false;
+      this.softCutFraction = this.limiterActive ? 1 : 0;
+      this.limiterRetard = this.controls.mode === "dyno" ? (this.limiterActive ? 1 : 0) : clamp((rpm - (lim - band)) / band, 0, 1);
+      this.limiterPlate = 1;
+      this.limiterCutting = this.limiterActive;
     } else {
       if (!this.limiterActive && rpm > lim) this.limiterActive = true;
       else if (this.limiterActive && rpm < lim - 180) this.limiterActive = false;
       this.limiterPlate = 1;
+      this.limiterRetard = 0;
       this.limiterCutting = this.limiterActive;
     }
 
@@ -941,7 +957,7 @@ export class EngineSimulator {
     duration /= this.cylinders.length;
     const mbt = mbtAdvance(duration);
     let advance = Math.min(mbt, 45);
-    if (cal.revLimiter === "soft" && this.limiterActive) advance -= 12 * this.softCutFraction;
+    if (this.cmdSoft) advance -= 12 * this.limiterRetard;
     // Idle: retarded base spark holds a torque reserve; spark moves fast to regulate speed.
     // Applies at every speed with the pedal closed, so coasting down onto idle is continuous
     // (no jump from retarded idle spark to MBT at some speed threshold).

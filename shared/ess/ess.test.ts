@@ -364,12 +364,53 @@ describe("numerical health", () => {
   }
 });
 
-describe("soft rev limiter", () => {
+describe("rev limiter", () => {
+  const withLimiter = (type: "soft" | "throttle") => (c: EngineConfiguration) => ({ ...c, advanced: { ...c.advanced, revLimiterType: type } }) as EngineConfiguration;
+
   // The soft limiter used to cut sparks at random: the engine held its speed on a fifth of its
-  // firings, a noise with exhaust bangs in place of a note. It now holds on part throttle.
+  // firings, a noise with exhaust bangs in place of a note. The default now bounces off the limit
+  // on a fuel cut; the throttle type holds it on part throttle.
+  it("the default soft cut bounces off the limit and stays as loud as the rev up to it", () => {
+    const level = (type: "soft" | "throttle") => {
+      const spec = specOf("gm-ls3", withLimiter(type));
+      const sim = new EngineSimulator(spec, 24000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(1);
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(2);
+      const n = 24000 * 2;
+      const l = new Float32Array(n);
+      const r = new Float32Array(n);
+      const cutting = sim as unknown as { limiterCutting: boolean };
+      let energy = 0;
+      let episodes = 0;
+      let was = false;
+      let lowest = Infinity;
+      let highest = 0;
+      for (let i = 0; i < n; i += 64) {
+        sim.process(l.subarray(i, i + 64), r.subarray(i, i + 64), 64);
+        for (let k = i; k < i + 64; k++) energy += l[k] * l[k];
+        if (cutting.limiterCutting && !was) episodes++;
+        was = cutting.limiterCutting;
+        lowest = Math.min(lowest, sim.rpm);
+        highest = Math.max(highest, sim.rpm);
+      }
+      return { db: 10 * Math.log10(energy / n), episodes: episodes / 2, lowest, highest, lim: spec.calibration.revLimiterRpm };
+    };
+    const soft = level("soft");
+    const held = level("throttle");
+    // Several cut episodes a second, within a few per cent of the limit.
+    expect(soft.episodes).toBeGreaterThan(4);
+    expect(soft.episodes).toBeLessThan(30);
+    expect(soft.lowest).toBeGreaterThan(soft.lim * 0.93);
+    expect(soft.highest).toBeLessThan(soft.lim * 1.08);
+    // Holding on the throttle is an unloaded engine at constant speed: the owner heard it as muted.
+    expect(soft.db).toBeGreaterThan(held.db + 2.5);
+  }, 60_000);
+
   for (const key of ["gm-ls3", "ferrari-f136", "nissan-vr38"]) {
-    it(`${key} holds its limit on the throttle in a free rev, every cylinder firing`, () => {
-      const spec = specOf(key);
+    it(`${key} with the throttle limiter holds its limit in a free rev, every cylinder firing`, () => {
+      const spec = specOf(key, withLimiter("throttle"));
       const sim = new EngineSimulator(spec, 24000);
       sim.setControls({ mode: "free", throttle: 0 });
       sim.prewarm(1);
@@ -400,7 +441,7 @@ describe("soft rev limiter", () => {
   it("learns nothing from blips that touch the limiter and are lifted", () => {
     // Each lift on the limiter used to read as "holding pressure too low" and add 25 kPa of trim,
     // so the next real hold sat in the fuel cut for seconds.
-    const sim = new EngineSimulator(resolveEngineSpec({ ...SABER_PRESETS["saber-sb8"].config, seed: 11 }), 24000);
+    const sim = new EngineSimulator(resolveEngineSpec(withLimiter("throttle")({ ...SABER_PRESETS["saber-sb8"].config, seed: 11 })), 24000);
     sim.setControls({ mode: "free", throttle: 0 });
     sim.prewarm(1);
     for (let blip = 0; blip < 3; blip++) {
@@ -414,7 +455,7 @@ describe("soft rev limiter", () => {
 
   it("lets go of the throttle when a load takes the speed away", () => {
     // A dyno run overshoots its set speed on the way up; 450 rpm under the limit it must be at full throttle.
-    const sim = new EngineSimulator(specOf("ferrari-f140"), 24000);
+    const sim = new EngineSimulator(specOf("ferrari-f140", withLimiter("throttle")), 24000);
     sim.setControls({ mode: "dyno", targetRpm: 8250, throttle: 1 });
     sim.prewarm(2.5);
     expect((sim as unknown as { limiterPlate: number }).limiterPlate).toBeGreaterThan(0.97);

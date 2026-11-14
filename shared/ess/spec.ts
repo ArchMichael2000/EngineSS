@@ -220,7 +220,12 @@ export interface SuperchargerSpec {
 
 export type ForcedInductionSpec = TurboSpec | SuperchargerSpec | { kind: "na" };
 
-export type RevLimiterKind = "soft" | "hard-fuel-cut" | "hard-ignition-cut";
+/**
+ * soft: fuel cut that bounces off the limit in a narrow band, with spark retard (the default).
+ * throttle: an electronic throttle holds the limit on part throttle, every cylinder firing (quiet).
+ * hard-fuel-cut / hard-ignition-cut: a 180 rpm band; the ignition cut sends its charge to the exhaust.
+ */
+export type RevLimiterKind = "soft" | "throttle" | "hard-fuel-cut" | "hard-ignition-cut";
 
 export interface CalibrationSpec {
   idleRpm: number;
