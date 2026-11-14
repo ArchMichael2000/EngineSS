@@ -139,6 +139,8 @@ export class EngineSimulator {
 
   // ECU state
   private idleIntegral = 0.3;
+  private idleSideTime = 0;
+  private idleSideHigh = false;
   private readonly idleFeedForward: number;
   private lastBlockRpm = 0;
   private overrunTimer = 0;
@@ -151,7 +153,7 @@ export class EngineSimulator {
   private plenumBurned = 0;
   private plenumGasMass = 0.004;
   /** Idle-speed control gains (air PI + speed damping, spark P + D). */
-  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.04, spark: 70, sparkD: 0 };
+  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.1, spark: 70, sparkD: 0 };
   private ecuRpm = 800;
   private lastPedal = 0;
   private bypass = 0.3;
@@ -764,9 +766,24 @@ export class EngineSimulator {
     const slowRate = (this.slowRpm - prevSlow) / blockSec;
     if (pedal < 0.03) {
       // Integrate only near idle (anti-windup during the fall from high speed).
-      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut && this.running && !this.cranking && rpm > 0.5 * cal.idleRpm;
-      if (this.controls.mode !== "dyno" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + idleErr * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
-      const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd;
+      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut && this.running && !this.cranking;
+      // The integrator takes at most 60 % of error either way, and learns below half the target as
+      // well as above it. It used to take the whole error and stop below half the target: in a
+      // large excursion it then saw the overshoots (up to +90 %) and not the dips, wound the air
+      // down a little on every swing (0.23 to 0.08 of the valve in 25 s on the flat-six preset)
+      // and turned one excursion into a permanent hunt.
+      // An error that has kept its sign for a full second is an offset, not a swing (an engine
+      // settling from its start flare with too much air): that one is taken whole.
+      this.idleSideTime = idleErr > 0 === this.idleSideHigh ? this.idleSideTime + blockSec : 0;
+      this.idleSideHigh = idleErr > 0;
+      const span = this.idleSideTime > 1 ? 2 : 0.6;
+      if (this.controls.mode !== "dyno" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + clamp(idleErr, -span, span) * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
+      // Rate damping on the air valve. Six cylinders and more take the full gain; with fewer, the
+      // speed ripple of single firings dominates the rate and the gain is scaled back with the count.
+      // (At 0.04 for every engine, one large dip left the flat-six preset ringing for 20 s.)
+      // It fades out between 30 % and 60 % over the target, so it does not hold the speed up while
+      // an engine comes down from its start flare.
+      const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd * Math.min(1, this.cylinders.length / 6) * clamp(2 + idleErr / 0.3, 0, 1);
       this.bypass = clamp(this.idleIntegral + idleErr * this.idleGains.kp + damping, this.idleFeedForward * 0.12, 1);
     } else {
       this.bypass = clamp(this.bypass + (this.idleIntegral + 0.12 - this.bypass) * 0.02, 0, 1);
