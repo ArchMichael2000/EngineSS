@@ -2,6 +2,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { SABER_CYLINDER_LITRES } from '../../../shared/engineTypes';
+import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
+import { solveFiringSchedule, xRockingCouple } from '../../../shared/ess/geometry';
+import { FiringOrderEditor } from '@/components/FiringOrderEditor';
 import type { EngineConfiguration, EngineLayout, CrankshaftType, AspirationType, ExhaustCharacter, IdleCharacter, EngineCycleType, FuelType } from '../../../shared/engineTypes';
 
 interface QuickBuildPanelProps {
@@ -10,7 +15,12 @@ interface QuickBuildPanelProps {
 }
 
 const TOOLTIPS = {
-  layout: 'Engine layout determines how cylinders are arranged. V-engines have two banks at an angle, inline engines have all cylinders in a row, flat engines have opposing banks at 180°.',
+  layout: 'Engine layout determines how cylinders are arranged. V-engines have two banks at an angle, inline engines have all cylinders in a row, flat engines have opposing banks at 180°. X (Cross-Four) stacks modules of four cylinders, each on its own crank pin, the pins 90° apart.',
+  xTilt: 'How far each cylinder leans off horizontal. At 0° the module is a flat four on four pins; at 45° it is a square X. The two opposed pairs of a module fire 90° + 2 × tilt apart, so the tilt sets the rhythm: 15° gives 120° / 240°, 45° gives an even 180°.',
+  xPins: 'Cross-Four: every cylinder has its own crank pin, four pins 90° apart in each module, and opposed cylinders move together. Shared pin: the classic X of the Rolls-Royce Vulture, where the four cylinders of a row share one pin through a master rod and three link rods, and the rows sit on an even inline crank.',
+  xCycle: 'Four-stroke: each cylinder fires every second revolution, so the two cylinders of an opposed pair take turns. Two-stroke: every cylinder fires every revolution through piston-controlled ports, so each opposed pair fires together.',
+  xExhaust: 'How the exhaust is gathered and where it ends. Twin pipes collect each side of the engine. Four pipes keep the upper and lower cylinders of each side apart. Stacks give every cylinder its own short open pipe. Tuned pipes (two-stroke) give every cylinder an expansion chamber.',
+  xPhasing: 'How each further module is turned on the crankshaft. Even firing spreads the power pulses as evenly as the tilt allows. Low couple minimises the end-to-end rocking of the whole engine, at the cost of bunched pulses. Custom takes your own crank offsets.',
   cylinderCount: 'More cylinders add pulse density and smoothness. Perceived pitch and depth depend on displacement, crank layout, firing order, intake, and exhaust geometry.',
   displacement: 'Larger displacement produces deeper, more powerful exhaust tones with more low-frequency energy.',
   crankshaft: 'Cross-plane creates the classic V8 burble with uneven exhaust pulses. Flat-plane produces an even, high-pitched scream. Odd-fire creates an asymmetric, distinctive rhythm.',
@@ -34,7 +44,106 @@ function InfoTooltip({ text }: { text: string }) {
   );
 }
 
+/** Displacement slider position 0–1000 on a log scale from 0.05 L to 60 L. */
+const DISP_MIN = 0.05;
+const DISP_MAX = 60;
+const dispToPos = (litres: number) => Math.round((1000 * Math.log(Math.min(DISP_MAX, Math.max(DISP_MIN, litres)) / DISP_MIN)) / Math.log(DISP_MAX / DISP_MIN));
+const posToDisp = (pos: number) => {
+  const litres = DISP_MIN * Math.pow(DISP_MAX / DISP_MIN, pos / 1000);
+  const step = litres < 1 ? 0.01 : litres < 10 ? 0.1 : 0.5;
+  return Math.round(litres / step) * step;
+};
+
+/** A slider's value readout that can also be typed into (Enter or leaving the field commits). */
+function ValueField({ value, onCommit, digits, unit, min, max, className = 'text-neon-cyan' }: { value: number; onCommit: (v: number) => void; digits: number; unit: string; min: number; max: number; className?: string }) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => setText(null), [value]);
+  const commit = () => {
+    if (text === null) return;
+    const v = Number(text);
+    setText(null);
+    if (Number.isFinite(v)) onCommit(Math.min(max, Math.max(min, v)));
+  };
+  return (
+    <span className={`flex items-baseline gap-0.5 text-xs font-[Orbitron] ${className}`}>
+      <input
+        className="w-14 bg-transparent text-right outline-none border-b border-transparent hover:border-hud-line focus:border-neon-cyan/70 [appearance:textfield]"
+        inputMode="decimal"
+        aria-label="value"
+        value={text ?? value.toFixed(digits)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      />
+      {unit}
+    </span>
+  );
+}
+
 export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
+  const isX = config.quick.layout === 'x' && config.quick.cycle !== 'rotary';
+  const modules = Math.min(6, Math.max(1, Math.round(config.quick.cylinderCount / 4)));
+  const sharedX = isX && config.physical?.xPins === 'shared';
+  const xTilt = config.physical?.xTiltDeg ?? (sharedX ? 45 : 15);
+  const xPhasing = config.physical?.xPhasing ?? 'even-firing';
+  const xInfo = useMemo(() => {
+    if (!isX) return null;
+    const spec = resolveEngineSpec(config);
+    const schedule = solveFiringSchedule(spec);
+    const offsets = schedule.moduleOffsetsDeg ?? [0];
+    // Peak rocking couple at the redline for an estimated reciprocating mass (piston ≈ 0.33 kg at 86 mm bore, ∝ bore³, plus a third of the rod).
+    const mass = 1.35 * 0.33 * Math.pow(spec.boreMm / 86, 3);
+    const omega = (config.quick.redline / 60) * 2 * Math.PI;
+    const couple = xRockingCouple(offsets, spec.x?.tiltDeg ?? 15, spec.strokeMm / 2, spec.rodLengthMm, spec.x?.planePitchMm ?? 46) * 1e-6 * mass * omega * omega;
+    return { offsets, couple, bore: spec.boreMm, stroke: spec.strokeMm, intervals: schedule.intervalsDeg };
+  }, [config, isX]);
+  const setPhysical = (patch: Record<string, unknown>) => onChange({ ...config, physical: { ...config.physical, ...patch } });
+  const twoStroke = config.quick.cycle === 'two-stroke';
+  // Exhaust arrangement of an X engine: a named combination of collector, routing and exit.
+  const X_EXHAUSTS: Record<string, { label: string; routing: 'single' | 'dual' | 'separate' | 'open-headers'; collector: 'bank' | 'each-bank' | 'none'; exit: 'rear' | 'side'; tuned?: boolean }> = {
+    'twin-rear': { label: 'Twin pipes to the rear (one per side)', routing: 'dual', collector: 'bank', exit: 'rear' },
+    'twin-side': { label: 'Side pipes (one per side)', routing: 'dual', collector: 'bank', exit: 'side' },
+    'four-rear': { label: 'Four pipes to the rear (one per bank)', routing: 'separate', collector: 'each-bank', exit: 'rear' },
+    'four-side': { label: 'Four side pipes (one per bank)', routing: 'separate', collector: 'each-bank', exit: 'side' },
+    single: { label: 'Single pipe', routing: 'single', collector: 'bank', exit: 'rear' },
+    stacks: { label: 'Open stacks (one per cylinder)', routing: 'open-headers', collector: 'none', exit: 'rear' },
+    tuned: { label: 'Tuned pipes (expansion chamber per cylinder)', routing: 'dual', collector: 'none', exit: 'rear', tuned: true },
+  };
+  const xExhaust = (() => {
+    const routing = config.advanced?.exhaustRouting ?? 'dual';
+    const collector = config.physical?.collector ?? 'bank';
+    const exit = config.physical?.exhaustExit ?? 'rear';
+    if (twoStroke && (config.physical?.expansionChamber ?? modules === 1)) return 'tuned';
+    if (collector === 'none' || routing === 'open-headers') return 'stacks';
+    if (routing === 'single') return 'single';
+    if (routing === 'separate' || collector === 'each-bank') return exit === 'side' ? 'four-side' : 'four-rear';
+    return exit === 'side' ? 'twin-side' : 'twin-rear';
+  })();
+  const setXExhaust = (key: string) => {
+    const e = X_EXHAUSTS[key];
+    if (!e) return;
+    onChange({
+      ...config,
+      advanced: { ...config.advanced, exhaustRouting: e.routing },
+      physical: { ...config.physical, collector: e.collector, exhaustExit: e.exit, ...(twoStroke ? { expansionChamber: !!e.tuned } : {}) },
+    });
+  };
+  const setXCycle = (cycle: 'four-stroke' | 'two-stroke') => {
+    // The exhaust arrangement and compression belong to the cycle: back to that cycle's defaults.
+    const { compressionRatio: _cr, expansionChamber: _ec, collector: _co, ...physical } = config.physical ?? {};
+    void _cr; void _ec; void _co;
+    const { exhaustRouting: _er, firingOrder: _fo, ...advanced } = config.advanced ?? {};
+    void _er; void _fo;
+    onChange({
+      ...config,
+      advanced,
+      physical,
+      quick: { ...config.quick, cycle, ...(cycle === 'two-stroke' ? { fuel: 'gasoline' as FuelType, aspiration: 'na' as AspirationType } : {}) },
+      ...(cycle === 'two-stroke' ? { forcedInduction: { type: 'na' as AspirationType } } : {}),
+    });
+  };
+  const [offsetText, setOffsetText] = useState<string | null>(null);
+
   const updateQuick = (key: string, value: any) => {
     onChange({
       ...config,
@@ -75,7 +184,19 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Layout</label>
           <InfoTooltip text={TOOLTIPS.layout} />
         </div>
-        <Select value={config.quick.layout} onValueChange={(v) => updateQuick('layout', v)}>
+        <Select
+          value={config.quick.layout}
+          onValueChange={(v) => {
+            if (v === 'x' && config.quick.layout !== 'x') {
+              // Entering the X layout: whole modules at the Saber study's proportions and speed.
+              const m = Math.min(6, Math.max(1, Math.round(config.quick.cylinderCount / 4)));
+              onChange({
+                ...config,
+                quick: { ...config.quick, layout: 'x', cylinderCount: 4 * m, displacement: Math.round(SABER_CYLINDER_LITRES * 4 * m * 100) / 100, redline: Math.min(config.quick.redline, 3000), cycle: config.quick.cycle === 'rotary' ? 'four-stroke' : config.quick.cycle },
+              });
+            } else updateQuick('layout', v);
+          }}
+        >
           <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
             <SelectValue />
           </SelectTrigger>
@@ -85,28 +206,188 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <SelectItem value="flat">Flat / Boxer</SelectItem>
             <SelectItem value="w">W-Engine</SelectItem>
             <SelectItem value="radial">Radial</SelectItem>
+            <SelectItem value="x">X (Cross-Four)</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {/* Cylinder Count */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{config.quick.cycle === 'rotary' ? 'Rotors' : 'Cylinders'}</label>
-            <InfoTooltip text={TOOLTIPS.cylinderCount} />
+      {/* Cylinder Count (X: whole modules of four) */}
+      {isX ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{sharedX ? 'Rows of four' : 'Modules'}</label>
+            <span className="text-xs font-[Orbitron] text-neon-cyan">{sharedX ? 'X-' : 'SB'}{4 * modules} · {4 * modules} cyl</span>
           </div>
-          <span className="text-xs font-[Orbitron] text-neon-cyan">{config.quick.cylinderCount}</span>
+          <div className="grid grid-cols-6 gap-1">
+            {[1, 2, 3, 4, 5, 6].map((m) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={m === modules}
+                onClick={() => onChange({ ...config, quick: { ...config.quick, cylinderCount: 4 * m, displacement: Math.round((config.quick.displacement / (4 * modules)) * 4 * m * 100) / 100 } })}
+                className={`h-8 rounded border text-xs font-[Orbitron] transition-colors ${m === modules ? 'border-neon-cyan bg-neon-cyan/15 text-neon-cyan' : 'border-hud-line text-muted-foreground hover:text-foreground'}`}
+              >
+                {4 * m}
+              </button>
+            ))}
+          </div>
         </div>
-        <Slider
-          value={[config.quick.cylinderCount]}
-          onValueChange={([v]) => updateQuick('cylinderCount', v)}
-          min={1}
-          max={config.quick.cycle === 'rotary' ? 4 : config.quick.layout === 'radial' ? 18 : 16}
-          step={1}
-          tone="cyan"
-        />
-      </div>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">{config.quick.cycle === 'rotary' ? 'Rotors' : 'Cylinders'}</label>
+              <InfoTooltip text={TOOLTIPS.cylinderCount} />
+            </div>
+            <span className="text-xs font-[Orbitron] text-neon-cyan">{config.quick.cylinderCount}</span>
+          </div>
+          <Slider
+            value={[config.quick.cylinderCount]}
+            onValueChange={([v]) => updateQuick('cylinderCount', v)}
+            min={1}
+            max={config.quick.cycle === 'rotary' ? 4 : 24}
+            step={1}
+            tone="cyan"
+          />
+        </div>
+      )}
+
+      {/* X layout: tilt and module phasing */}
+      {isX && xInfo && (
+        <div className="space-y-3 rounded border border-neon-cyan/25 bg-neon-cyan/[0.03] p-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Crank pins</label>
+              <InfoTooltip text={TOOLTIPS.xPins} />
+            </div>
+            <Select
+              value={sharedX ? 'shared' : 'four'}
+              onValueChange={(v) => {
+                // Each arrangement has its own natural tilt and has no use for the other's firing choices.
+                const { xModuleOffsetsDeg: _o, xFiring: _f, xPhasing: _p, ...physical } = config.physical ?? {};
+                void _o; void _f; void _p;
+                const { firingOrder: _fo, ...advanced } = config.advanced ?? {};
+                void _fo;
+                onChange({ ...config, advanced, physical: { ...physical, xPins: v as 'four' | 'shared', xTiltDeg: v === 'shared' ? 45 : 15 } });
+              }}
+            >
+              <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-dark-elevated border-hud-line">
+                <SelectItem value="four">Four pins per module (Cross-Four)</SelectItem>
+                <SelectItem value="shared">One shared pin per row (master and link rods)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cycle</label>
+              <InfoTooltip text={TOOLTIPS.xCycle} />
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {(['four-stroke', 'two-stroke'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={(config.quick.cycle ?? 'four-stroke') === c}
+                  onClick={() => setXCycle(c)}
+                  className={`h-8 rounded border text-[11px] font-[Orbitron] uppercase tracking-wide transition-colors ${(config.quick.cycle ?? 'four-stroke') === c ? 'border-neon-cyan bg-neon-cyan/15 text-neon-cyan' : 'border-hud-line text-muted-foreground hover:text-foreground'}`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Cylinder tilt</label>
+                <InfoTooltip text={TOOLTIPS.xTilt} />
+              </div>
+              <ValueField value={xTilt} digits={1} unit="°" min={sharedX ? 20 : 0} max={sharedX ? 70 : 45} onCommit={(v) => setPhysical({ xTiltDeg: v })} />
+            </div>
+            <Slider value={[xTilt]} onValueChange={([v]) => setPhysical({ xTiltDeg: v })} min={sharedX ? 20 : 0} max={sharedX ? 70 : 45} step={0.5} tone="cyan" />
+          </div>
+          <div className={`space-y-1.5 ${sharedX ? 'hidden' : ''}`}>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Phase modules for</label>
+              <InfoTooltip text={TOOLTIPS.xPhasing} />
+            </div>
+            <Select
+              value={xPhasing}
+              onValueChange={(v) => setPhysical(v === 'custom' ? { xPhasing: v, xModuleOffsetsDeg: xInfo.offsets } : { xPhasing: v })}
+            >
+              <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-dark-elevated border-hud-line">
+                <SelectItem value="even-firing">Even firing</SelectItem>
+                <SelectItem value="low-couple">Low rocking couple</SelectItem>
+                <SelectItem value="custom">Custom offsets</SelectItem>
+              </SelectContent>
+            </Select>
+            {xPhasing === 'custom' && (
+              <input
+                className="w-full h-8 rounded border border-hud-line bg-dark-surface px-2 text-xs font-[Orbitron] text-foreground outline-none focus:border-neon-cyan/70"
+                aria-label="Module crank offsets in degrees"
+                value={offsetText ?? xInfo.offsets.join(', ')}
+                onChange={(e) => setOffsetText(e.target.value)}
+                onBlur={() => {
+                  if (offsetText === null) return;
+                  const values = offsetText.split(/[\s,]+/).filter(Boolean).map(Number);
+                  setOffsetText(null);
+                  if (values.length === modules && values.every(Number.isFinite)) setPhysical({ xModuleOffsetsDeg: values.map((v) => ((v % 360) + 360) % 360) });
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Exhaust arrangement</label>
+              <InfoTooltip text={TOOLTIPS.xExhaust} />
+            </div>
+            <Select value={xExhaust} onValueChange={setXExhaust}>
+              <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-dark-elevated border-hud-line">
+                {Object.entries(X_EXHAUSTS)
+                  .filter(([, e]) => twoStroke || !e.tuned)
+                  .map(([key, e]) => (
+                    <SelectItem key={key} value={key}>{e.label}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!twoStroke && <FiringOrderEditor config={config} onChange={onChange} />}
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-[Rajdhani]">
+            {!sharedX && (
+              <>
+                <dt className="text-muted-foreground">Pair phase offset</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{(90 + 2 * xTilt).toFixed(1)}°</dd>
+                <dt className="text-muted-foreground">Module crank offsets</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.offsets.map((d) => `${Math.round(d)}°`).join(' · ')}</dd>
+              </>
+            )}
+            {sharedX && (
+              <>
+                <dt className="text-muted-foreground">Bank angles</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{(180 - 2 * xTilt).toFixed(0)}° / {(2 * xTilt).toFixed(0)}°</dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">Bore × stroke</dt>
+            <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.bore.toFixed(0)} × {xInfo.stroke.toFixed(0)} mm</dd>
+            {!sharedX && (
+              <>
+                <dt className="text-muted-foreground">Rocking couple at redline</dt>
+                <dd className="text-right font-[Orbitron] text-foreground/90">{xInfo.couple >= 1000 ? `${(xInfo.couple / 1000).toFixed(1)} kN·m` : `${xInfo.couple.toFixed(0)} N·m`}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+      )}
 
       {/* Displacement */}
       <div className="space-y-1.5">
@@ -115,20 +396,20 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Displacement</label>
             <InfoTooltip text={TOOLTIPS.displacement} />
           </div>
-          <span className="text-xs font-[Orbitron] text-neon-cyan">{config.quick.displacement.toFixed(1)}L</span>
+          <ValueField value={config.quick.displacement} digits={config.quick.displacement < 1 ? 2 : 1} unit="L" min={DISP_MIN} max={DISP_MAX} onCommit={(v) => updateQuick('displacement', Math.round(v * 100) / 100)} />
         </div>
         <Slider
-          value={[config.quick.displacement * 10]}
-          onValueChange={([v]) => updateQuick('displacement', v / 10)}
-          min={5}
-          max={80}
+          value={[dispToPos(config.quick.displacement)]}
+          onValueChange={([v]) => updateQuick('displacement', posToDisp(v))}
+          min={0}
+          max={1000}
           step={1}
           tone="cyan"
         />
       </div>
 
-      {/* Crankshaft */}
-      <div className="space-y-1.5">
+      {/* Crankshaft (the X layout's crank is fixed by its geometry) */}
+      <div className={`space-y-1.5 ${isX ? 'hidden' : ''}`}>
         <div className="flex items-center gap-1.5">
           <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Crankshaft</label>
           <InfoTooltip text={TOOLTIPS.crankshaft} />
@@ -156,8 +437,12 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
           value={`${config.quick.cycle ?? 'four-stroke'}:${config.quick.fuel ?? 'gasoline'}`}
           onValueChange={(v) => {
             const [cycle, fuel] = v.split(':');
+            // A compression ratio set for one fuel or cycle is wrong for another: back to the family default.
+            const { compressionRatio: _dropped, ...physical } = config.physical ?? {};
+            void _dropped;
             onChange({
               ...config,
+              physical,
               quick: {
                 ...config.quick,
                 cycle: cycle as EngineCycleType,
@@ -165,7 +450,7 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
                 // Diesels are governed far lower than spark engines.
                 ...(fuel === 'diesel' && config.quick.redline > 5200 && { redline: 4800 }),
                 // Rotary: the count is rotors (displacement = rotors × one chamber, Mazda convention).
-                ...(cycle === 'rotary' && config.quick.cylinderCount > 4 && { cylinderCount: 2, displacement: 1.3 }),
+                ...(cycle === 'rotary' && (config.quick.cylinderCount > 4 || config.quick.layout === 'x') && { cylinderCount: 2, displacement: 1.3, layout: 'inline' as EngineLayout, redline: Math.max(config.quick.redline, 7000) }),
               },
             });
           }}
@@ -245,13 +530,13 @@ export function QuickBuildPanel({ config, onChange }: QuickBuildPanelProps) {
             <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Redline</label>
             <InfoTooltip text={TOOLTIPS.redline} />
           </div>
-          <span className="text-xs font-[Orbitron] text-neon-pink">{config.quick.redline} RPM</span>
+          <ValueField value={config.quick.redline} digits={0} unit=" RPM" min={1200} max={20000} className="text-neon-pink" onCommit={(v) => updateQuick('redline', Math.round(v / 50) * 50)} />
         </div>
         <Slider
           value={[config.quick.redline]}
           onValueChange={([v]) => updateQuick('redline', v)}
-          min={4000}
-          max={12000}
+          min={1500}
+          max={14000}
           step={100}
           tone="pink"
         />

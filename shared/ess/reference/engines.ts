@@ -49,7 +49,8 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       ...v16,
       quick: { layout: "v", cylinderCount: 8, displacement: 4.5, crankshaft: "flat-plane", aspiration: "na", exhaustCharacter: "race", idleCharacter: "smooth", redline: 9000 },
       advanced: { bore: 94, stroke: 81, bankAngle: 90, revLimiterRpm: 9200 },
-      physical: { compressionRatio: 12.5, rodLengthMm: 140, intakePhaserDeg: 50, exhaustPhaserDeg: 40 },
+      // Cam durations estimated for a 9000 rpm engine with phasers on both cams (the family default is a mild road cam).
+      physical: { compressionRatio: 12.5, rodLengthMm: 140, intakePhaserDeg: 50, exhaustPhaserDeg: 40, intakeDurationDeg: 240, exhaustDurationDeg: 236 },
       forcedInduction: { type: "na" },
     },
   },
@@ -74,7 +75,8 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       ...v16,
       quick: { layout: "inline", cylinderCount: 6, displacement: 3.25, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 8000 },
       advanced: { bore: 87, stroke: 91, intakeType: "itbs", firingOrder: [1, 5, 3, 6, 2, 4] },
-      physical: { compressionRatio: 11.5, rodLengthMm: 139, intakePhaserDeg: 60, exhaustPhaserDeg: 45 },
+      // S54B32 cams: 260° seat duration on both (≈ 234° / 232° at 0.050"), 12 mm lift.
+      physical: { compressionRatio: 11.5, rodLengthMm: 139, intakePhaserDeg: 60, exhaustPhaserDeg: 45, intakeDurationDeg: 234, exhaustDurationDeg: 232, intakeLiftMm: 12, exhaustLiftMm: 12 },
       forcedInduction: { type: "na" },
     },
   },
@@ -265,6 +267,19 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 12, whineIntensity: 0.5 },
     },
   },
+  "rr-vulture": {
+    name: "Rolls-Royce Vulture X-24",
+    description: "Four banks of six at 90° on one six-throw crank, master and link rods, ejector stacks",
+    provenance: { geometry: "published", exhaust: "estimated", boost: "published" },
+    published: { peakPowerKw: [1327, 2850] },
+    config: {
+      ...v16,
+      quick: { layout: "x", cylinderCount: 24, displacement: 42.47, crankshaft: "even-fire", aspiration: "supercharged", exhaustCharacter: "straight-pipe", idleCharacter: "smooth", redline: 3200 },
+      advanced: { bore: 127, stroke: 139.7, exhaustRouting: "open-headers", primaryTubeLengthCm: 25 },
+      physical: { xPins: "shared", xTiltDeg: 45, compressionRatio: 6.0, collector: "none", idleRpm: 600, valvesPerCylinder: 4, fuelOctane: 100 },
+      forcedInduction: { type: "supercharged", superchargerType: "centrifugal", superchargerBoost: 6, whineIntensity: 0.5 },
+    },
+  },
   "bugatti-w16": {
     name: "Bugatti W16 8.0 quad-turbo",
     description: "Two narrow-angle VR8 banks at 90°, four turbochargers",
@@ -379,7 +394,8 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
       ...v16,
       quick: { layout: "inline", cylinderCount: 1, displacement: 0.249, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 9500, cycle: "two-stroke" },
       advanced: { bore: 66.4, stroke: 72 },
-      physical: { compressionRatio: 12.5, twoStrokeIntake: "reed", idleRpm: 1500, expansionChamberTunedRpm: 7800 },
+      // A 1990s five-port reed engine scavenges better than the family default (estimated; the real engine also has the RC power valve).
+      physical: { compressionRatio: 12.5, twoStrokeIntake: "reed", idleRpm: 1500, expansionChamberTunedRpm: 7800, scavengeQuality: 2.3 },
       forcedInduction: { type: "na" },
     },
   },
@@ -418,8 +434,12 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
     config: {
       ...v16,
       quick: { layout: "inline", cylinderCount: 2, displacement: 1.308, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: 8000, cycle: "rotary" },
+      // The naturally aspirated six-port manifold has long runners (≈ 40 cm to the port), which is
+      // what puts its torque peak at 4000 rpm; the family default (32 cm) tuned the intake near 7000.
+      advanced: { intakeRunnerLengthCm: 40 },
       // R = 105 mm, e = 15 mm, b = 80 mm follow from the 654 cc chamber with 13B proportions.
-      physical: { compressionRatio: 9.7, idleRpm: 800 },
+      // Intake closes 40° ABDC on the NA engine's primary and secondary ports (the turbo engine's 50° is the family default).
+      physical: { compressionRatio: 9.7, idleRpm: 800, rotaryIntakeCloseDeg: 850 },
       forcedInduction: { type: "na" },
     },
   },

@@ -8,7 +8,46 @@ import type { VehicleSpec } from "./vehicle";
  * family-typical values whose provenance is recorded in docs/reference-sources.md.
  */
 
-export type EssLayout = "inline" | "v" | "flat" | "w" | "radial";
+export type EssLayout = "inline" | "v" | "flat" | "w" | "radial" | "x";
+
+/**
+ * Cross-Four X engine (the owner's Saber SB4 … SB16 study). The engine is a stack of modules, each
+ * one X of four cylinders with its own four crank pins set 90° apart, one plain rod per cylinder
+ * (no master or link rods). Seen from the front with the crank turning clockwise:
+ *
+ *   cylinder 1 upper left   axis 180° + t   pin  45°
+ *   cylinder 2 lower left   axis 180° − t   pin 135°
+ *   cylinder 3 lower right  axis   t        pin 225°
+ *   cylinder 4 upper right  axis  −t        pin 315°      (angles clockwise from "right")
+ *
+ * where t is the cylinder tilt off horizontal. Opposed cylinders (1 and 3, 2 and 4) reach outer
+ * dead centre together, like a boxer pair; the two pairs run 90° + 2t apart. Each further module
+ * turns on the shaft by its crank offset. Rod planes run 1 · 3 · 2 · 4 front to back.
+ */
+export interface XLayoutSpec {
+  /** Cylinder tilt off horizontal, degrees: 0 = a flat four-pin opposed engine, 45 = a square X. */
+  tiltDeg: number;
+  /** How the modules are clocked: evenest power pulses, smallest rocking couple, or explicit offsets. */
+  phasing: "even-firing" | "low-couple" | "custom";
+  /** Crank offset of each module, degrees (index 0 = front module). Used by `custom`. */
+  moduleOffsetsDeg?: number[];
+  /** Rod plane to rod plane spacing along the crank, mm. */
+  planePitchMm: number;
+  /**
+   * Crank arrangement. `four` (default): the Cross-Four above. `shared`: the classic X of the
+   * Rolls-Royce Vulture and Daimler-Benz DB 604 — the four cylinders of a row share one crank pin
+   * through a master rod and three link rods (EngineSpec.linkRods), the rows on an even inline
+   * crank; module phasing and pair-lead presets do not apply.
+   */
+  pins?: "four" | "shared";
+  /**
+   * Which cylinder of each opposed pair fires first (the two reach TDC together and fire a
+   * revolution apart, so either can lead with the same overall evenness). `default`: the solver's
+   * choice (fewest consecutive firings on neighbouring throws). `even-sides`: the choice that
+   * spaces each side's exhaust pulses most evenly. `bunched-sides`: the one that groups them most.
+   */
+  firing?: "default" | "even-sides" | "bunched-sides";
+}
 
 /**
  * Crank strategy.
@@ -46,6 +85,9 @@ export interface CamSpec {
   /** Cam phaser authority, crank degrees: intake advance and exhaust retard from the base centrelines (0 = fixed cam). */
   intakePhaserDeg: number;
   exhaustPhaserDeg: number;
+  /** Part of each phaser's travel taken up between the parked (idle) position and the running range, crank degrees. */
+  intakeParkDeg?: number;
+  exhaustParkDeg?: number;
   /** Two-step lift switching (VTEC, VarioCam Plus, MIVEC): high-cam lobes engaged above `switchRpm` under load. */
   liftSwitch: LiftSwitchSpec | null;
 }
@@ -86,10 +128,12 @@ export interface IntakeSpec {
   resonatorVolumeL: number;
 }
 
-export type CollectorStrategy = "bank" | "firing-alternate" | "pairs-then-bank" | "all" | "none";
+/** `each-bank`: one collector per cylinder bank (two on a V, four on a W or X), however the banks sit. */
+export type CollectorStrategy = "bank" | "each-bank" | "firing-alternate" | "pairs-then-bank" | "all" | "none";
 export type CrossoverType = "none" | "x-pipe" | "h-pipe";
 export type MufflerType = "chambered" | "turbo" | "straight-through" | "glasspack" | "none";
-export type ExhaustRoutingType = "single" | "dual" | "open-headers";
+/** `separate`: every collector keeps its own pipe, silencer and outlet (four pipes on an X or W). */
+export type ExhaustRoutingType = "single" | "dual" | "separate" | "open-headers";
 
 export interface MufflerSpec {
   type: MufflerType;
@@ -118,6 +162,8 @@ export interface ExhaustSpec {
   tailpipeDiameterMm: number;
   /** Lateral spacing between outlets, m (dual routing). */
   outletSpacingM: number;
+  /** Where the pipes end: at the rear of the vehicle, or just behind the engine on each side (side pipes). */
+  exit?: "rear" | "side";
   /** Closed-end quarter-wave side branches ("J-pipe" drone killers) ahead of the muffler, tuned frequency Hz. */
   quarterWaveTubesHz: number[];
   /** Helmholtz resonators ahead of the muffler: tuned frequency Hz and cavity volume L. */
@@ -174,7 +220,12 @@ export interface SuperchargerSpec {
 
 export type ForcedInductionSpec = TurboSpec | SuperchargerSpec | { kind: "na" };
 
-export type RevLimiterKind = "soft" | "hard-fuel-cut" | "hard-ignition-cut";
+/**
+ * soft: fuel cut that bounces off the limit in a narrow band, with spark retard (the default).
+ * throttle: an electronic throttle holds the limit on part throttle, every cylinder firing (quiet).
+ * hard-fuel-cut / hard-ignition-cut: a 180 rpm band; the ignition cut sends its charge to the exhaust.
+ */
+export type RevLimiterKind = "soft" | "throttle" | "hard-fuel-cut" | "hard-ignition-cut";
 
 export interface CalibrationSpec {
   idleRpm: number;
@@ -288,6 +339,14 @@ export interface EngineSpec {
   bankAngleDeg: number;
   /** Narrow (VR) angle for W layouts, degrees. */
   vrAngleDeg: number;
+  /** Cross-Four geometry (layout "x"). */
+  x?: XLayoutSpec | null;
+  /**
+   * Master-and-link rods (radial rows on a shared crank pin): the first cylinder of each row
+   * carries the master rod (`rodLengthMm`), the others link rods on knuckle pins around its big
+   * end. See rods.ts. Null = every cylinder on a plain rod.
+   */
+  linkRods?: { knuckleRadiusMm: number; lengthMm: number } | null;
   crank: CrankSpec;
   /** Requested firing order (1-based cylinder numbers). Empty = derive from crank. */
   firingOrder: number[];

@@ -4,9 +4,10 @@ import { resolveEngineSpec } from "./resolveSpec";
 import { solveFiringSchedule } from "./geometry";
 import { cycleDegrees } from "./spec";
 import { REFERENCE_ENGINES } from "./reference/engines";
-import { DEFAULT_ENGINE_CONFIG } from "../engineTypes";
+import { DEFAULT_ENGINE_CONFIG, FACTORY_PRESETS, SABER_PRESETS } from "../engineTypes";
 import type { EngineConfiguration } from "../engineTypes";
 import { runConfig } from "./fuzz";
+import { Observer } from "./observer";
 
 const FS = 48000;
 
@@ -49,7 +50,8 @@ describe("firing schedules", () => {
 
   it("radials fire evenly at every cylinder count; even counts are staggered rows", () => {
     for (const n of [3, 5, 7, 8, 9, 10, 12, 14, 18]) {
-      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n } }));
+      // Plain rods: the idealised crank, exactly even. (Master-and-link rods are tested below.)
+      const spec = specOf("pw-r985", (c) => ({ ...c, quick: { ...c.quick, cylinderCount: n }, physical: { ...c.physical, articulatedRods: false } }));
       const s = solveFiringSchedule(spec);
       for (const d of s.intervalsDeg) expect(d).toBeCloseTo(720 / n, 3);
       if (n % 2 === 0 && (n / 2) % 2 === 1) {
@@ -57,6 +59,27 @@ describe("firing schedules", () => {
         const row = (cyl: number) => s.cylinders[cyl - 1].throwIndex;
         for (let k = 0; k < n; k++) expect(row(s.firingOrder[k])).not.toBe(row(s.firingOrder[(k + 1) % n]));
       }
+    }
+  });
+
+  it("a nine-cylinder radial fires 1-3-5-7-9-2-4-6-8, and its link rods make the intervals uneven", () => {
+    const s = solveFiringSchedule(specOf("pw-r985"));
+    expect(s.firingOrder).toEqual([1, 3, 5, 7, 9, 2, 4, 6, 8]);
+    expect(s.linkRows).toHaveLength(1);
+    // The master cylinder keeps its plain-rod TDC; link cylinders are up to about 4° off.
+    const offsets = s.cylinders.map((c) => c.motion!.tdcOffsetDeg);
+    expect(offsets[0]).toBeCloseTo(0, 6);
+    expect(Math.max(...offsets.map(Math.abs))).toBeGreaterThan(2.5);
+    expect(Math.max(...offsets.map(Math.abs))).toBeLessThan(5);
+    // Opposite sides of the master rod are mirror images.
+    for (let k = 1; k < 9; k++) expect(offsets[k]).toBeCloseTo(-offsets[9 - k], 3);
+    expect(s.intervalsDeg.reduce((a, b) => a + b, 0)).toBeCloseTo(720, 6);
+    expect(Math.max(...s.intervalsDeg) - Math.min(...s.intervalsDeg)).toBeGreaterThan(5);
+    // Strokes differ by well under a percent, and every piston returns to TDC (zero displacement) once a revolution.
+    for (const c of s.cylinders) {
+      expect(c.motion!.stroke / 131.8).toBeGreaterThan(0.999);
+      expect(c.motion!.stroke / 131.8).toBeLessThan(1.01);
+      expect(Math.min(...c.motion!.displacement)).toBeGreaterThan(-1e-6);
     }
   });
 
@@ -83,6 +106,7 @@ describe("reference engines against published figures", () => {
     ["yamaha-rd350lc", "power"],
     ["mazda-13b-fc", "torque"],
     ["mazda-13b-fc", "power"],
+    ["rr-vulture", "power"],
   ];
   for (const [key, kind] of points) {
     it(`${key} peak ${kind}`, () => {
@@ -301,6 +325,29 @@ describe("forced induction", () => {
 });
 
 describe("numerical health", () => {
+  // Regression: a dilution misfire limit applied to four-strokes dropped the long-overlap presets
+  // (V10, flat-six) to cranking speed every few seconds. Half-second mean speed, eight seconds.
+  for (const [key, preset] of Object.entries({ ...FACTORY_PRESETS, ...SABER_PRESETS })) {
+    it(`preset ${key} holds its idle without stall cycles`, () => {
+      const spec = resolveEngineSpec(preset.config);
+      const sim = new EngineSimulator(spec, 32000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(3);
+      let lowest = Infinity;
+      let highest = 0;
+      for (let w = 0; w < 16; w++) {
+        let sum = 0;
+        for (let k = 0; k < 10; k++) {
+          sim.prewarm(0.05);
+          sum += sim.rpm;
+        }
+        lowest = Math.min(lowest, sum / 10);
+        highest = Math.max(highest, sum / 10);
+      }
+      expect(lowest, key).toBeGreaterThan(0.6 * spec.calibration.idleRpm);
+      expect(highest, key).toBeLessThan(1.6 * spec.calibration.idleRpm);
+    }, 60_000);
+  }
   for (const key of Object.keys(REFERENCE_ENGINES)) {
     it(`${key} idles with finite output near its target`, () => {
       const out = new Float32Array(4800);
@@ -317,6 +364,105 @@ describe("numerical health", () => {
   }
 });
 
+describe("rev limiter", () => {
+  const withLimiter = (type: "soft" | "throttle") => (c: EngineConfiguration) => ({ ...c, advanced: { ...c.advanced, revLimiterType: type } }) as EngineConfiguration;
+
+  // The soft limiter used to cut sparks at random: the engine held its speed on a fifth of its
+  // firings, a noise with exhaust bangs in place of a note. The default now bounces off the limit
+  // on a fuel cut; the throttle type holds it on part throttle.
+  it("the default soft cut bounces off the limit and stays as loud as the rev up to it", () => {
+    const level = (type: "soft" | "throttle") => {
+      const spec = specOf("gm-ls3", withLimiter(type));
+      const sim = new EngineSimulator(spec, 24000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(1);
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(2);
+      const n = 24000 * 2;
+      const l = new Float32Array(n);
+      const r = new Float32Array(n);
+      const cutting = sim as unknown as { limiterCutting: boolean };
+      let energy = 0;
+      let episodes = 0;
+      let was = false;
+      let lowest = Infinity;
+      let highest = 0;
+      for (let i = 0; i < n; i += 64) {
+        sim.process(l.subarray(i, i + 64), r.subarray(i, i + 64), 64);
+        for (let k = i; k < i + 64; k++) energy += l[k] * l[k];
+        if (cutting.limiterCutting && !was) episodes++;
+        was = cutting.limiterCutting;
+        lowest = Math.min(lowest, sim.rpm);
+        highest = Math.max(highest, sim.rpm);
+      }
+      return { db: 10 * Math.log10(energy / n), episodes: episodes / 2, lowest, highest, lim: spec.calibration.revLimiterRpm };
+    };
+    const soft = level("soft");
+    const held = level("throttle");
+    // Several cut episodes a second, within a few per cent of the limit.
+    expect(soft.episodes).toBeGreaterThan(4);
+    expect(soft.episodes).toBeLessThan(30);
+    expect(soft.lowest).toBeGreaterThan(soft.lim * 0.93);
+    expect(soft.highest).toBeLessThan(soft.lim * 1.08);
+    // Holding on the throttle is an unloaded engine at constant speed: the owner heard it as muted.
+    expect(soft.db).toBeGreaterThan(held.db + 2.5);
+  }, 60_000);
+
+  for (const key of ["gm-ls3", "ferrari-f136", "nissan-vr38"]) {
+    it(`${key} with the throttle limiter holds its limit in a free rev, every cylinder firing`, () => {
+      const spec = specOf(key, withLimiter("throttle"));
+      const sim = new EngineSimulator(spec, 24000);
+      sim.setControls({ mode: "free", throttle: 0 });
+      sim.prewarm(1);
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(3);
+      const inner = sim as unknown as { softCutFraction: number; limiterPlate: number };
+      const lim = spec.calibration.revLimiterRpm;
+      let lowest = Infinity;
+      let highest = 0;
+      let cutting = 0;
+      let plate = 0;
+      const steps = 150;
+      for (let k = 0; k < steps; k++) {
+        sim.prewarm(0.01);
+        lowest = Math.min(lowest, sim.rpm);
+        highest = Math.max(highest, sim.rpm);
+        if (inner.softCutFraction > 0) cutting++;
+        plate += inner.limiterPlate / steps;
+      }
+      expect(lowest, key).toBeGreaterThan(lim * 0.975);
+      expect(highest, key).toBeLessThan(lim * 1.02);
+      expect(cutting / steps, key).toBeLessThan(0.15);
+      expect(plate, key).toBeLessThan(0.5);
+      expect(sim.telemetry.limiter).toBe(true);
+    }, 60_000);
+  }
+
+  it("learns nothing from blips that touch the limiter and are lifted", () => {
+    // Each lift on the limiter used to read as "holding pressure too low" and add 25 kPa of trim,
+    // so the next real hold sat in the fuel cut for seconds.
+    const sim = new EngineSimulator(resolveEngineSpec(withLimiter("throttle")({ ...SABER_PRESETS["saber-sb8"].config, seed: 11 })), 24000);
+    sim.setControls({ mode: "free", throttle: 0 });
+    sim.prewarm(1);
+    for (let blip = 0; blip < 3; blip++) {
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(0.6);
+      sim.setControls({ throttle: 0 });
+      sim.prewarm(1);
+    }
+    expect(Math.abs((sim as unknown as { limiterTrim: number }).limiterTrim)).toBeLessThan(8);
+  }, 60_000);
+
+  it("lets go of the throttle when a load takes the speed away", () => {
+    // A dyno run overshoots its set speed on the way up; 450 rpm under the limit it must be at full throttle.
+    const sim = new EngineSimulator(specOf("ferrari-f140", withLimiter("throttle")), 24000);
+    sim.setControls({ mode: "dyno", targetRpm: 8250, throttle: 1 });
+    sim.prewarm(2.5);
+    expect((sim as unknown as { limiterPlate: number }).limiterPlate).toBeGreaterThan(0.97);
+    expect(sim.telemetry.limiter).toBe(false);
+  }, 60_000);
+});
+
 describe("valve wave solve", () => {
   it("never steps a valve's outgoing wave near redline on a straight-piped V10", () => {
     // Strong rarefactions arriving at a closing exhaust valve once sent the solver to a spurious
@@ -325,20 +471,159 @@ describe("valve wave solve", () => {
     const sim = new EngineSimulator(resolveEngineSpec(config), FS);
     sim.setControls({ mode: "dyno", targetRpm: 7400, throttle: 1, load: 0.41 });
     sim.prewarm(1);
+    // A spurious root shows as a spike: a jump of > 40 kPa taken back within two samples. A jump
+    // that stays is a neighbour's blow-down shock reflecting off the closed valve (the send of a
+    // closed valve is the arriving wave), which this engine also produces, at 40–42 kPa.
     const cylinders = (sim as unknown as { cylinders: { exhaustSend: number }[] }).cylinders;
     const prev = cylinders.map((c) => c.exhaustSend);
+    const jump = cylinders.map(() => ({ size: 0, age: 9 }));
     const l = new Float32Array(1);
     const r = new Float32Array(1);
-    let steps = 0;
+    let spikes = 0;
+    let largest = 0;
     for (let i = 0; i < FS; i++) {
       sim.process(l, r, 1);
       cylinders.forEach((c, k) => {
-        if (Math.abs(c.exhaustSend - prev[k]) > 40_000) steps++;
+        const d = c.exhaustSend - prev[k];
         prev[k] = c.exhaustSend;
+        largest = Math.max(largest, Math.abs(d));
+        const j = jump[k];
+        j.age++;
+        if (j.age <= 2 && d * j.size < 0 && Math.abs(d) > 0.5 * Math.abs(j.size)) {
+          spikes++;
+          j.age = 9;
+        }
+        if (Math.abs(d) > 40_000) {
+          j.size = d;
+          j.age = 0;
+        }
       });
     }
-    expect(steps).toBe(0);
+    expect(spikes).toBe(0);
+    expect(largest).toBeLessThan(60_000);
   }, 60_000);
+});
+
+describe("Cross-Four X engines", () => {
+  for (const key of ["saber-sb4", "saber-sb16", "saber-sb8-diesel"]) {
+    it(`${key} idles steadily and pulls on the dyno`, () => {
+      const spec = resolveEngineSpec({ ...SABER_PRESETS[key].config, seed: 1 });
+      const sim = new EngineSimulator(spec, FS);
+      const L = new Float32Array(4800);
+      const R = new Float32Array(4800);
+      sim.prewarm(3);
+      sim.process(L, R);
+      expect(L.every(Number.isFinite)).toBe(true);
+      expect(Math.abs(sim.telemetry.rpm - spec.calibration.idleRpm)).toBeLessThan(0.25 * spec.calibration.idleRpm);
+      sim.setControls({ mode: "dyno", targetRpm: 2000, throttle: 1 });
+      sim.prewarm(2.5);
+      // A long-stroke engine at 2000 rpm: at least 8 bar BMEP unboosted (torque = BMEP·V/4π).
+      const bmepBar = (sim.telemetry.brakeTorqueNm * 4 * Math.PI) / (sim.displacementL / 1000) / 1e5;
+      expect(bmepBar).toBeGreaterThan(key.endsWith("diesel") ? 9 : 8);
+      expect(bmepBar).toBeLessThan(key.endsWith("diesel") ? 26 : 13.5);
+    }, 60_000);
+  }
+});
+
+describe("moving listener perspectives", () => {
+  it("a pass-by shifts the pitch down by the Doppler ratio and swells as the vehicle passes", () => {
+    // A pure 400 Hz monopole on the pass-by track at 27.8 m/s (the observer alone, no engine).
+    const obs = new Observer(FS, "pass-by", [{ kind: "exhaust", position: { x: 0, y: 0, z: 0.4 } }]);
+    const q = new Float64Array(1);
+    const ear = new Float64Array(2);
+    const seconds = 5;
+    const out = new Float64Array(seconds * FS);
+    const pos = new Float64Array(seconds * FS);
+    for (let i = 0; i < out.length; i++) {
+      q[0] = Math.sin((2 * Math.PI * 400 * i) / FS);
+      obs.process(q, 0, ear);
+      out[i] = ear[0];
+      pos[i] = obs.trackPosition;
+    }
+    // Zero-crossing frequency over a quarter second.
+    const freq = (from: number) => {
+      let crossings = 0;
+      for (let i = from + 1; i < from + FS / 4; i++) if (out[i - 1] < 0 && out[i] >= 0) crossings++;
+      return crossings * 4;
+    };
+    const rms = (from: number) => {
+      let sum = 0;
+      for (let i = from; i < from + FS / 10; i++) sum += out[i] * out[i];
+      return Math.sqrt(sum / (FS / 10));
+    };
+    // Starts 42 m before the listener: approaching for the first 1.2 s, well past by 3.5 s.
+    const abeam = pos.findIndex((p, i) => i > 0 && pos[i - 1] < 0 && p >= 0);
+    expect(abeam / FS).toBeGreaterThan(1.3);
+    expect(abeam / FS).toBeLessThan(1.7);
+    const approaching = freq(abeam - FS);
+    const receding = freq(abeam + FS);
+    // v/c = 27.8/346: +8.6 % approaching and −7.4 % receding, less a little for the 7.5 m offset.
+    expect(approaching).toBeGreaterThan(424);
+    expect(approaching).toBeLessThan(436);
+    expect(receding).toBeGreaterThan(368);
+    expect(receding).toBeLessThan(378);
+    expect(rms(abeam)).toBeGreaterThan(2.5 * rms(abeam - FS));
+    // No jumps: the largest sample-to-sample change stays that of a ≈ 430 Hz tone at the peak level.
+    let peak = 0;
+    let step = 0;
+    for (let i = 1; i < out.length; i++) {
+      peak = Math.max(peak, Math.abs(out[i]));
+      step = Math.max(step, Math.abs(out[i] - out[i - 1]));
+    }
+    expect(step).toBeLessThan(peak * 2 * Math.PI * (440 / FS) * 1.1);
+  });
+
+  it("a fly-over runs an engine without a discontinuity at the end of the track", () => {
+    const sim = new EngineSimulator(specOf("pw-r985"), 24000, { perspective: "fly-over" });
+    sim.prewarm(1);
+    const L = new Float32Array(24000 * 16);
+    const R = new Float32Array(L.length);
+    sim.process(L, R);
+    expect(L.every(Number.isFinite)).toBe(true);
+    // The track restarts about 13.3 s in (0.6 + 1 of a half-track at 62 m/s); the fade makes it silent there.
+    const window = (t: number) => Math.max(...Array.from(L.subarray(Math.round(t * 24000), Math.round((t + 0.2) * 24000)), Math.abs));
+    expect(window(10.75)).toBeLessThan(0.05 * window(5));
+  }, 60_000);
+});
+
+describe("exhaust arrangements and cylinder counts", () => {
+  const sb8 = (patch: Partial<EngineConfiguration>, quick: Partial<EngineConfiguration["quick"]> = {}) => {
+    const base = SABER_PRESETS["saber-sb8"].config;
+    return new EngineSimulator(resolveEngineSpec({ ...base, ...patch, quick: { ...base.quick, ...quick }, physical: { ...base.physical, ...patch.physical }, seed: 1 }), FS);
+  };
+  const outlets = (sim: EngineSimulator) => (sim as unknown as { exhaust: { outlets: Array<{ position: { x: number; y: number } }> } }).exhaust.outlets;
+
+  it("an X engine can run twin, four, single, side and stack exhausts", () => {
+    expect(outlets(sb8({}))).toHaveLength(2);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "separate" }, physical: { collector: "each-bank" } }))).toHaveLength(4);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "single" } }))).toHaveLength(1);
+    expect(outlets(sb8({ advanced: { exhaustRouting: "open-headers" }, physical: { collector: "none" } }))).toHaveLength(8);
+    const side = outlets(sb8({ physical: { exhaustExit: "side" } }));
+    // Side pipes end beside the engine, one each side; rear pipes end behind the vehicle.
+    expect(side.map((o) => Math.sign(o.position.x))).toEqual([-1, 1]);
+    expect(side.every((o) => o.position.y > 0)).toBe(true);
+    expect(outlets(sb8({})).every((o) => o.position.y < -2)).toBe(true);
+  });
+
+  it("a two-stroke X collects each side, or gives every cylinder a tuned pipe when asked", () => {
+    const collected = sb8({}, { cycle: "two-stroke" });
+    expect(outlets(collected)).toHaveLength(2);
+    const tuned = sb8({ physical: { expansionChamber: true } }, { cycle: "two-stroke" });
+    expect(outlets(tuned)).toHaveLength(8);
+    collected.setControls({ mode: "dyno", targetRpm: 2000, throttle: 1 });
+    collected.prewarm(3);
+    expect(collected.telemetry.brakeTorqueNm).toBeGreaterThan(500);
+  }, 60_000);
+
+  it("every piston layout builds and idles with 24 cylinders", () => {
+    for (const layout of ["inline", "v", "flat", "w", "radial", "x"] as const) {
+      const spec = resolveEngineSpec({ quick: { layout, cylinderCount: 24, displacement: 12, crankshaft: "even-fire", aspiration: "na", exhaustCharacter: "sport", idleCharacter: "smooth", redline: layout === "radial" || layout === "x" ? 3000 : 6500 }, forcedInduction: { type: "na" }, seed: 1 });
+      expect(spec.cylinders).toBe(24);
+      const sim = new EngineSimulator(spec, 24000);
+      sim.prewarm(2.5);
+      expect(Math.abs(sim.telemetry.rpm - spec.calibration.idleRpm), layout).toBeLessThan(0.25 * spec.calibration.idleRpm);
+    }
+  }, 120_000);
 });
 
 describe("random configurations", () => {
@@ -347,7 +632,7 @@ describe("random configurations", () => {
   const cases: Array<[number, boolean]> = [[3, true], [17, true], [34, false], [29, true]];
   for (const [seed, diesel] of cases) {
     it(`seed ${seed}${diesel ? "" : " (gasoline)"} idles, holds the dyno and respects its limiter`, () => {
-      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false });
+      const r = runConfig(seed, FS, { diesel, twoStroke: false, rotary: false, x: false, large: false });
       expect(r.problems).toEqual([]);
     }, 120_000);
   }

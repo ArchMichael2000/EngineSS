@@ -14,6 +14,7 @@ import { WaveformVisualizer } from '@/components/WaveformVisualizer';
 import { PhysicsPanel } from '@/components/PhysicsPanel';
 import { ListenerPanel } from '@/components/ListenerPanel';
 import { FiringChase } from '@/components/FiringChase';
+import { EngineView } from '@/components/EngineView';
 import { resolveEngineSpec } from '../../../shared/ess/resolveSpec';
 import { solveFiringSchedule } from '../../../shared/ess/geometry';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -44,7 +45,8 @@ export default function Simulator() {
     vehicleOptions,
     setVehicleOptions,
   } = useAudioEngine();
-  const schedule = useMemo(() => solveFiringSchedule(resolveEngineSpec(config)), [config]);
+  const spec = useMemo(() => resolveEngineSpec(config), [config]);
+  const schedule = useMemo(() => solveFiringSchedule(spec), [spec]);
 
   const [activeTab, setActiveTab] = useState('quick');
   const [showExport, setShowExport] = useState(false);
@@ -238,10 +240,14 @@ export default function Simulator() {
             <div className="hud-panel hud-bracket rounded-lg p-4 w-full">
               <div className="text-center space-y-1">
                 <h2 className="text-sm font-[Orbitron] text-neon-cyan glow-cyan uppercase tracking-widest">
-                  {config.quick.cylinderCount}-Cylinder {config.quick.layout.toUpperCase()}
+                  {config.quick.cycle === 'rotary'
+                    ? `${config.quick.cylinderCount}-Rotor Wankel`
+                    : config.quick.layout === 'x'
+                      ? config.physical?.xPins === 'shared' ? `X-${firingOrder.length}` : `SB${firingOrder.length} Cross-Four X`
+                      : `${config.quick.cylinderCount}-Cylinder ${config.quick.layout.toUpperCase()}`}
                 </h2>
                 <p className="text-xs font-[Rajdhani] text-muted-foreground">
-                  {config.quick.displacement}L | {config.quick.crankshaft} | {config.quick.exhaustCharacter} exhaust
+                  {config.quick.displacement}L | {config.quick.layout === 'x' ? `${config.physical?.xTiltDeg ?? 15}° tilt` : config.quick.crankshaft} | {config.quick.exhaustCharacter} exhaust
                   {config.quick.aspiration !== 'na' && ` | ${config.quick.aspiration}`}
                 </p>
               </div>
@@ -254,6 +260,14 @@ export default function Simulator() {
               boost={playbackState.boost}
               isPlaying={isPlaying}
             />
+
+            {/* Engine cross-section */}
+            <div className="hud-panel rounded-lg p-4 w-full">
+              <h4 className="text-xs font-[Rajdhani] text-muted-foreground uppercase tracking-wide mb-2 text-center">
+                Engine Cross-Section
+              </h4>
+              <EngineView spec={spec} schedule={schedule} rpm={playbackState.rpm} running={isPlaying} />
+            </div>
 
             {/* Firing Order Visualization */}
             <div className="hud-panel rounded-lg p-4 w-full">

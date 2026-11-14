@@ -13,7 +13,7 @@ import type { EngineSpec } from "./spec";
 import type { ExhaustGroup, FiringSchedule } from "./geometry";
 import { exhaustGroups } from "./geometry";
 import { BandNoise, C_AIR, P_AMBIENT, R_AIR, RHO_AIR, Rng, T_AMBIENT, clamp, orificeMassFlow } from "./gas";
-import { Duct, Junction, RadiationLoad, ReservoirOrifice, ResistiveJoint, send } from "./waveguide";
+import { Duct, Junction, RadiationLoad, ReservoirOrifice, ResistiveJoint } from "./waveguide";
 import type { Port } from "./waveguide";
 
 export interface Vec3 {
@@ -72,7 +72,7 @@ export class ExhaustNetwork {
   /** Pending injected mass-equivalent flow per collector (afterfire expansion, kg/s). */
   readonly collectorInjection: Float64Array;
   private readonly chain: ChainDuct[] = [];
-  private readonly solvers: Array<(dt: number) => void> = [];
+  private readonly solvers: Array<() => void> = [];
   private readonly joints: ResistiveJoint[] = [];
   private readonly groupOfCylinder: number[];
   private readonly egtByGroup: Float64Array;
@@ -104,7 +104,8 @@ export class ExhaustNetwork {
     const pipeD = ex.pipeDiameterMm / 1000;
 
     // ---- Two-stroke: one pipe per cylinder (tuned expansion chamber or a plain pipe) to its silencer.
-    if (spec.twoStroke) {
+    // A two-stroke without tuned pipes that names a collector uses the ordinary pipework below.
+    if (spec.twoStroke && (spec.twoStroke.expansionChamber || strategy === "none")) {
       this.primaries.forEach((header, i) => {
         let port: Port = { duct: header, end: "b" };
         let d = header.lengthM;
@@ -122,15 +123,15 @@ export class ExhaustNetwork {
             for (let k = 0; k < steps; k++) {
               const t = (k + 0.5) / steps;
               const diameter = from * Math.pow(to / from, t);
-              port = this.extend(port, { lengthM: length / steps, diameterM: diameter, name: `${name}${i}.${k}` }, d + length / steps / 2, g);
+              port = this.extend(port, { lengthM: length / steps, diameterM: diameter, steepening: true, name: `${name}${i}.${k}` }, d + length / steps / 2, g);
               d += length / steps;
             }
           };
           cone(primaryD, belly, 0.4 * lt, 4, "diffuser");
-          port = this.extend(port, { lengthM: 0.12 * lt, diameterM: belly, name: `belly${i}` }, d + 0.06 * lt, g);
+          port = this.extend(port, { lengthM: 0.12 * lt, diameterM: belly, steepening: true, name: `belly${i}` }, d + 0.06 * lt, g);
           d += 0.12 * lt;
           cone(belly, stinger, 0.36 * lt, 3, "baffle");
-          port = this.extend(port, { lengthM: 0.3 * lt, diameterM: stinger, name: `stinger${i}` }, d + 0.15 * lt, g);
+          port = this.extend(port, { lengthM: 0.3 * lt, diameterM: stinger, steepening: true, name: `stinger${i}` }, d + 0.15 * lt, g);
           d += 0.3 * lt;
         } else {
           port = this.extend(port, { lengthM: 0.6, diameterM: pipeD, name: `pipe${i}` }, d + 0.3, g);
@@ -152,7 +153,8 @@ export class ExhaustNetwork {
       this.groups.forEach((g, gi) => {
         const cyl = g.cylinders[0];
         const duct = this.primaries[cyl - 1];
-        const side = this.sideOf(g.bank, gi);
+        // Three or more banks (W, X, radial): each stack exits on the side its bank leans to.
+        const side = schedule.bankCount > 2 ? (Math.sin((schedule.bankAxesDeg[g.bank] * Math.PI) / 180) < -1e-9 ? -1 : 1) : this.sideOf(g.bank, gi);
         this.addOutlet(duct, primaryD, { x: side * 0.35, y: 1.1 - 0.1 * gi, z: 0.45 });
       });
       return;
@@ -218,14 +220,16 @@ export class ExhaustNetwork {
           orifice: new ReservoirOrifice({ duct: downpipe, end: "a" }, this.sampleRate),
         };
         this.turbines.push(stage);
-        this.solvers.push((dt) => this.solveTurbine(stage, dt));
+        this.solvers.push(() => this.solveTurbine(stage, 1 / this.sampleRate));
         heads.push({ duct: downpipe, end: "b" });
       }
       chainHeads = heads;
     }
 
+    // "separate": every collector keeps its own pipe to its own outlet.
+    const separate = ex.routing === "separate" && chainHeads.length >= 2;
     const dual = ex.routing === "dual" && chainHeads.length >= 2;
-    if (!dual && chainHeads.length > 1) {
+    if (!dual && !separate && chainHeads.length > 1) {
       const y = this.addDuct({ lengthM: Math.max(0.2, ex.midPipeLengthMm / 1000), diameterM: pipeD * 1.15, name: "y-pipe" }, 1.6, 0);
       this.addJunction([...chainHeads, { duct: y, end: "a" }]);
       chainHeads = [{ duct: y, end: "b" }];
@@ -304,8 +308,16 @@ export class ExhaustNetwork {
         d += ex.muffler.bodyLengthMm / 1000;
       }
       const tail = this.extend(port, { lengthM: Math.max(0.1, ex.tailpipeLengthMm / 1000), diameterM: ex.tailpipeDiameterMm / 1000, name: `tail${k}` }, d + 0.2, k);
-      const lateral = chainHeads.length === 1 ? 0.35 : (k === 0 ? -1 : 1) * ex.outletSpacingM / 2;
-      this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: lateral, y: -2.25, z: 0.3 });
+      const count = chainHeads.length;
+      // Outlets spread across the tail: one offset to the right, two at the spacing, more evenly between.
+      const lateral = count === 1 ? 0.35 : (k / (count - 1) - 0.5) * ex.outletSpacingM * (count > 2 ? 1.3 : 1);
+      if (ex.exit === "side") {
+        // Side pipes: outlets under the sills just behind the engine, left chains to the left.
+        const sideOf = count === 1 ? 1 : k < count / 2 ? -1 : 1;
+        this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: sideOf * 0.95, y: 0.35 - 0.12 * (k % Math.max(1, Math.ceil(count / 2))), z: 0.25 });
+      } else {
+        this.addOutlet(tail.duct, ex.tailpipeDiameterMm / 1000, { x: lateral, y: -2.25, z: 0.3 });
+      }
     });
   }
 
@@ -321,12 +333,14 @@ export class ExhaustNetwork {
 
   private addJunction(ports: Port[], volumeM3 = 0, autoSolve = true): Junction {
     const j = new Junction(ports, volumeM3, P_AMBIENT, 1.34);
+    j.dt = 1 / this.sampleRate;
     if (!autoSolve) return j;
     const index = this.collectors.length;
     const isCollector = ports.length >= 2;
-    this.solvers.push((dt) => {
+    this.solvers.push(() => {
       const inj = isCollector && this.collectors[index] === j ? this.collectorInjection[index] : 0;
-      j.solve(inj, dt);
+      if (inj === 0) j.passive();
+      else j.solve(inj, j.dt);
     });
     return j;
   }
@@ -363,7 +377,7 @@ export class ExhaustNetwork {
   }
 
   /** Append a duct after `from`, joined by an area-change junction. */
-  private extend(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; name: string }, distanceM: number, group: number): Port {
+  private extend(from: Port, opts: { lengthM: number; diameterM: number; absorption?: number; steepening?: boolean; name: string }, distanceM: number, group: number): Port {
     const duct = this.addDuct(opts, distanceM, group);
     this.addJunction([from, { duct, end: "a" }]);
     return { duct, end: "b" };
@@ -439,8 +453,7 @@ export class ExhaustNetwork {
     let tick = 0;
     this.solvers.push(() => {
       if ((tick++ & 15) === 0) load.setSpeedOfSound(duct.c);
-      const reflected = load.process(duct.arrivingB, duct.Z);
-      send({ duct, end: "b" }, reflected);
+      duct.sendB = load.process(duct.arrivingB, duct.Z);
       outlet.volumeAcceleration = load.volumeAcceleration;
     });
   }
@@ -472,13 +485,15 @@ export class ExhaustNetwork {
   }
 
   /** Solve every non-valve boundary for this sample (ducts' beginSample must already have run). */
-  step(dt: number): void {
-    for (let i = 0; i < this.solvers.length; i++) this.solvers[i](dt);
+  step(_dt: number): void {
+    for (let i = 0; i < this.solvers.length; i++) this.solvers[i]();
     this.collectorInjection.fill(0);
   }
 
   /** Record exhaust flow from a cylinder (for temperatures and jet noise). */
-  noteCylinderFlow(cylinderIndex: number, massFlow: number, gasTempK: number): void {
+  noteCylinderFlow(cylinderIndex: number, cylinder: { exhaustMassFlow: number; exhaustGasTemp: number }): void {
+    const massFlow = cylinder.exhaustMassFlow;
+    const gasTempK = cylinder.exhaustGasTemp;
     if (massFlow <= 0) return;
     const g = this.groupOfCylinder[cylinderIndex];
     const w = massFlow * 2e-3;

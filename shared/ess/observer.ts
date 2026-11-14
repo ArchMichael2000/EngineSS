@@ -11,7 +11,7 @@ import { C_AIR, RHO_AIR } from "./gas";
 import { DelayLine } from "./waveguide";
 import type { Vec3 } from "./exhaust";
 
-export type Perspective = "exterior-rear" | "exterior-side" | "engine-bay" | "cabin" | "dyno-tailpipe";
+export type Perspective = "exterior-rear" | "exterior-side" | "engine-bay" | "cabin" | "dyno-tailpipe" | "pass-by" | "fly-over";
 export type SourceKind = "exhaust" | "intake" | "structure" | "accessory";
 
 export interface SourceDef {
@@ -42,6 +42,14 @@ export interface PerspectiveDef {
   fullScaleDbSpl: number;
   groundReflection: number;
   shielding(kind: SourceKind, source: Vec3): { cutoffHz: number; gainDb: number };
+  /**
+   * The vehicle moves past a fixed listener along its own forward axis: it runs from `halfTrackM`
+   * before the listener to the same distance beyond, then starts again (faded at both ends). The
+   * path lengths change continuously, so the Doppler shift and the swell and fade of a pass come
+   * from the geometry. `altitudeM` lifts the track (an aircraft overhead); `speed` is used when the
+   * simulation has no road speed of its own (free rev, dyno).
+   */
+  motion?: { halfTrackM: number; speed: number; altitudeM: number };
 }
 
 const ENGINE_Y = 1.5;
@@ -52,7 +60,9 @@ export const PERSPECTIVES: Record<Perspective, PerspectiveDef> = {
     ears: [{ x: -0.09, y: -5.3, z: 1.2 }, { x: 0.09, y: -5.3, z: 1.2 }],
     fullScaleDbSpl: 118,
     groundReflection: 0.85,
-    shielding: (kind, src) => (src.y > 0 ? { cutoffHz: 700, gainDb: -9 } : kind === "exhaust" ? { cutoffHz: 0, gainDb: 0 } : { cutoffHz: 1500, gainDb: -3 }),
+    // An exhaust outlet is outside the body wherever it is (side pipes, stacks): only the engine and
+    // intake under the bonnet are shielded from behind.
+    shielding: (kind, src) => (kind === "exhaust" ? { cutoffHz: 0, gainDb: 0 } : src.y > 0 ? { cutoffHz: 700, gainDb: -9 } : { cutoffHz: 1500, gainDb: -3 }),
   },
   "exterior-side": {
     label: "Exterior — side, 7.5 m (pass-by line)",
@@ -83,7 +93,26 @@ export const PERSPECTIVES: Record<Perspective, PerspectiveDef> = {
     groundReflection: 0.6,
     shielding: (kind, src) => (src.y > 0 ? { cutoffHz: 600, gainDb: -12 } : { cutoffHz: 0, gainDb: 0 }),
   },
+  "pass-by": {
+    label: "Pass-by — roadside, 7.5 m from the lane (Doppler)",
+    ears: [{ x: 7.5, y: 0.09, z: 1.2 }, { x: 7.5, y: -0.09, z: 1.2 }],
+    fullScaleDbSpl: 110,
+    groundReflection: 0.85,
+    shielding: (_kind, src) => (src.x < -0.2 ? { cutoffHz: 1200, gainDb: -4 } : { cutoffHz: 0, gainDb: 0 }),
+    motion: { halfTrackM: 70, speed: 27.8, altitudeM: 0 },
+  },
+  "fly-over": {
+    label: "Fly-over — on the ground, 60 m under the flight path (Doppler)",
+    ears: [{ x: -0.09, y: 0, z: 1.6 }, { x: 0.09, y: 0, z: 1.6 }],
+    fullScaleDbSpl: 96,
+    groundReflection: 0.85,
+    shielding: () => ({ cutoffHz: 0, gainDb: 0 }),
+    motion: { halfTrackM: 420, speed: 62, altitudeM: 60 },
+  },
 };
+
+/** Paths of a moving perspective are re-aimed every this many samples and interpolated between. */
+const MOTION_BLOCK = 16;
 
 export class Observer {
   private readonly lines: DelayLine[];
@@ -96,10 +125,15 @@ export class Observer {
   private boomBp1 = 0;
   private boomBp2 = 0;
 
-  constructor(private readonly fs: number, perspective: Perspective, readonly sources: SourceDef[]) {
+  /**
+   * @param exposed the engine is in the open (motorcycle, kart): no bonnet, firewall or body
+   *   between it and an outside listener, and the "cabin" is a rider's helmet, not a car interior.
+   */
+  constructor(private readonly fs: number, perspective: Perspective, readonly sources: SourceDef[], private readonly exposed = false) {
     this.def = PERSPECTIVES[perspective];
     this.paToFullScale = 1 / (2e-5 * Math.pow(10, this.def.fullScaleDbSpl / 20));
     let maxDelay = 16;
+    const motion = this.def.motion;
     const geometry: Array<{ s: number; e: number; r: number; image: boolean }> = [];
     sources.forEach((src, s) => {
       this.def.ears.forEach((ear, e) => {
@@ -112,10 +146,14 @@ export class Observer {
       });
     });
     for (const g of geometry) maxDelay = Math.max(maxDelay, (g.r / C_AIR) * fs + 8);
+    // A moving perspective needs room for the farthest point of the track.
+    if (motion) maxDelay = Math.max(maxDelay, ((Math.hypot(motion.halfTrackM + 6, motion.altitudeM + 3, 12) + 4) / C_AIR) * fs + 16);
     this.lines = sources.map(() => new DelayLine(maxDelay));
     for (const g of geometry) {
       const src = sources[g.s];
-      const shield = this.def.shielding(src.kind, src.position);
+      // Exposed engine: nothing shields an outside listener. On the machine, a helmet takes about
+      // 6 dB above 2 kHz off everything (estimated; no rider's-ear recording to check it against).
+      const shield = this.exposed ? (this.def === PERSPECTIVES.cabin ? { cutoffHz: 2000, gainDb: -6 } : { cutoffHz: 0, gainDb: 0 }) : this.def.shielding(src.kind, src.position);
       // The ground image stays coherent only at low frequency: finite ground impedance, turbulence
       // and the source's own extent decorrelate it above a few hundred Hz at these ranges (Daigle
       // 1979; Embleton 1996), so interference notches stay a few dB deep as in field recordings.
@@ -123,7 +161,75 @@ export class Observer {
       const k = cutoff > 0 ? Math.exp((-2 * Math.PI * cutoff) / fs) : 0;
       const gain = (RHO_AIR / (4 * Math.PI * g.r)) * Math.pow(10, shield.gainDb / 20) * (g.image ? this.def.groundReflection : 1);
       this.paths.push({ source: g.s, ear: g.e, delay: Math.max(1.5, (g.r / C_AIR) * fs), gain, filter: { k, gain: 1, s1: 0, s2: 0 } });
+      if (motion) {
+        // What does not depend on distance, and where the source sits in the vehicle (image sources mirrored in the ground).
+        this.pathBase.push(Math.pow(10, shield.gainDb / 20) * (g.image ? this.def.groundReflection : 1));
+        this.pathImage.push(g.image);
+      }
     }
+    if (motion) {
+      this.arrivalRamp = 0.03 * fs;
+      this.travel = -0.6 * motion.halfTrackM;
+      this.speed = motion.speed;
+      this.delayStep = new Float64Array(this.paths.length);
+      this.gainStep = new Float64Array(this.paths.length);
+      this.aim(true);
+    }
+  }
+
+  // ---- Moving perspectives
+  private readonly pathBase: number[] = [];
+  private readonly pathImage: boolean[] = [];
+  private delayStep = new Float64Array(0);
+  private gainStep = new Float64Array(0);
+  /** Vehicle position along its track relative to the listener, m, and its speed, m/s. */
+  private travel = 0;
+  private speed = 0;
+  private motionTick = 0;
+  private arrivalRamp = 1;
+
+  /** Road (or air) speed of a moving perspective, m/s. Ignored by fixed perspectives. */
+  setTravelSpeed(metresPerSecond: number): void {
+    this.speed = Math.max(0, metresPerSecond);
+  }
+
+  /** Position along the track, −1 (start) … 0 (abeam the listener) … +1 (end); 0 for fixed perspectives. */
+  get trackPosition(): number {
+    return this.def.motion ? this.travel / this.def.motion.halfTrackM : 0;
+  }
+
+  /**
+   * Aim every path at where the vehicle will be one block from now, and set the per-sample steps
+   * that take delay and gain there. Linear steps in delay are a constant Doppler ratio over the
+   * block; successive blocks join without a jump.
+   */
+  private aim(snap: boolean): void {
+    const motion = this.def.motion!;
+    const half = motion.halfTrackM;
+    let next = this.travel + (this.speed * MOTION_BLOCK) / this.fs;
+    if (next > half) next -= 2 * half;
+    // Faded over the outer 15 % of the track, so the restart is silent.
+    const edge = Math.min(1, (half - Math.abs(next)) / (0.15 * half));
+    const fade = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, edge));
+    for (let i = 0; i < this.paths.length; i++) {
+      const p = this.paths[i];
+      const src = this.sources[p.source].position;
+      const ear = this.def.ears[p.ear];
+      const z = (this.pathImage[i] ? -1 : 1) * (src.z + motion.altitudeM);
+      const r = Math.max(0.5, Math.hypot(src.x - ear.x, src.y + next - ear.y, z - ear.z));
+      const delay = Math.max(1.5, (r / C_AIR) * this.fs);
+      const gain = (RHO_AIR / (4 * Math.PI * r)) * this.pathBase[i] * fade;
+      if (snap || Math.abs(next - this.travel) > 2) {
+        p.delay = delay;
+        p.gain = gain;
+        this.delayStep[i] = 0;
+        this.gainStep[i] = 0;
+      } else {
+        this.delayStep[i] = (delay - p.delay) / MOTION_BLOCK;
+        this.gainStep[i] = (gain - p.gain) / MOTION_BLOCK;
+      }
+    }
+    this.travel = next;
   }
 
   /**
@@ -135,9 +241,17 @@ export class Observer {
     for (let s = 0; s < this.lines.length; s++) this.lines[s].write(qdot[s]);
     let l = 0;
     let r = 0;
+    const moving = this.delayStep.length > 0;
+    if (moving && this.motionTick++ % MOTION_BLOCK === 0) this.aim(false);
     for (let i = 0; i < this.paths.length; i++) {
       const p = this.paths[i];
+      if (moving) {
+        p.delay += this.delayStep[i];
+        p.gain += this.gainStep[i];
+      }
       let x = this.lines[p.source].read(p.delay) * p.gain;
+      // The first sound to cross a long path arrives late: let it in over 30 ms instead of at once.
+      if (moving && this.motionTick < p.delay + this.arrivalRamp) x *= Math.max(0, (this.motionTick - p.delay) / this.arrivalRamp);
       const f = p.filter;
       if (f.k > 0) {
         f.s1 = x + f.k * (f.s1 - x);
@@ -147,7 +261,7 @@ export class Observer {
       if (p.ear === 0) l += x;
       else r += x;
     }
-    if (this.def === PERSPECTIVES.cabin) {
+    if (this.def === PERSPECTIVES.cabin && !this.exposed) {
       // Engine-mount transmitted torque ripple → body panels → cabin "boom" (band 25–180 Hz).
       const kLo = Math.exp((-2 * Math.PI * 25) / this.fs);
       const kHi = Math.exp((-2 * Math.PI * 180) / this.fs);

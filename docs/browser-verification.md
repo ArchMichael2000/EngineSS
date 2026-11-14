@@ -48,6 +48,47 @@ Each engine is selected from the preset menu, then idles for 2 s, runs 2.5 s at 
 
 "Idle rpm" is the median over 0.8–2.0 s after the preset switch, so engines that are still settling read low here. "Worklet load" is the worklet's own measurement of its share of the audio thread. On an idle page it matches a burst benchmark of the same engine on the audio thread to within 3 %. During this test it also includes contention from the page and from Playwright.
 
+### November 2026: Saber Cross-Four presets
+
+Same procedure and criteria, Chromium 141 headless on the 4 vCPU container, Pages build of PR #4. Every reference engine, every control and the exports passed again (55 checks, no console errors, no rate step-downs under the load test).
+
+| Engine | Internal rate | Idle rpm | WOT max rpm | Idle dBFS | WOT dBFS | Peak | Longest gap | Audio clock | Worklet load |
+|---|---|---|---|---|---|---|---|---|---|
+| saber-sb4 | 48 kHz | 653 | 3105 | -36.0 | -10.2 | 0.83 | 0.1 ms | 100.1 % | 42 % |
+| saber-sb8 | 48 kHz | 645 | 3072 | -28.7 | -9.9 | 0.83 | 0.0 ms | 99.9 % | 59 % |
+| saber-sb12 | 48 kHz | 648 | 3075 | -29.6 | -11.0 | 0.83 | 0.0 ms | 99.8 % | 77 % |
+| saber-sb16 | 32 kHz | 652 | 3067 | -29.4 | -10.2 | 0.83 | 0.0 ms | 100.5 % | 60 % |
+| saber-sb16-square | 32 kHz | 652 | 3087 | -30.0 | -11.1 | 0.83 | 0.0 ms | 100.1 % | 65 % |
+| saber-sb12-low-couple | 48 kHz | 646 | 3068 | -28.1 | -9.5 | 0.83 | 0.0 ms | 100.1 % | 66 % |
+| saber-sb8-diesel | 48 kHz | 730 | 2963 | -40.8 | -14.1 | 0.83 | 0.0 ms | 100.6 % | 68 % |
+
+![Engine cross-section view](figures/engine-view.png)
+
+### November 2026, second round: two-stroke and shared-pin X, moving listeners
+
+Same procedure on the Pages build after the idle work: 58 checks pass, no console errors, no rate step-downs under the load test (48 kHz held for 20.1 s of load, longest gap 0.0 ms).
+
+| Engine | Internal rate | Idle rpm | WOT max rpm | Idle dBFS | WOT dBFS | Peak | Longest gap | Audio clock | Worklet load |
+|---|---|---|---|---|---|---|---|---|---|
+| saber-sb4 | 48 kHz | 659 | 3127 | -35.1 | -10.3 | 0.83 | 0.0 ms | 100.0 % | 32 % |
+| saber-sb8 | 48 kHz | 657 | 3119 | -28.4 | -10.2 | 0.83 | 0.0 ms | 100.0 % | 45 % |
+| saber-sb12 | 48 kHz | 666 | 3081 | -29.5 | -10.4 | 0.83 | 0.0 ms | 100.0 % | 48 % |
+| saber-sb16 | 48 kHz | 650 | 3068 | -31.0 | -10.4 | 0.83 | 0.0 ms | 100.1 % | 57 % |
+| saber-sb16-square | 48 kHz | 659 | 3088 | -29.9 | -10.2 | 0.83 | 0.0 ms | 100.0 % | 60 % |
+| saber-sb12-low-couple | 48 kHz | 659 | 3118 | -28.2 | -9.9 | 0.83 | 0.0 ms | 100.2 % | 43 % |
+| saber-sb4-two-stroke | 48 kHz | 681 | 3089 | -21.9 | -13.5 | 0.83 | 0.0 ms | 100.3 % | 48 % |
+| saber-sb8-two-stroke | 48 kHz | 674 | 3100 | -11.9 | -10.3 | 0.83 | 0.0 ms | 100.0 % | 51 % |
+| saber-sb8-diesel | 48 kHz | 717 | 2968 | -41.9 | -16.0 | 0.83 | 0.0 ms | 100.4 % | 37 % |
+| rr-vulture (24 cylinders) | 40 kHz | 430 | 3310 | -28.8 | -11.2 | 0.83 | 0.0 ms | 101.0 % | 83 % |
+
+The SB16 presets held 48 kHz in this run (32 kHz in the first round) and the SB12 ran at 48 % load (77 %). The engine code for these presets did not get cheaper between the two runs, so read that as the spread between runs on a shared container, not as a gain.
+
+Listener perspectives round-trip through the worklet: exterior-rear 78 dB, exterior-side 68 dB, engine-bay 66 dB, cabin 75 dB, dyno-tailpipe 91 dB, pass-by 61 dB. The fly-over read 30 dB in one run and silence in the next: its track starts 252 m out, so the first 0.7 s after selecting it is the sound still on its way.
+
+**After the limiter and leveler work (third pass).** All checks pass again on the Pages build, no console errors, no rate step-downs. "Full throttle louder than idle" now compares idle with the loudest quarter second of the rev: the soft limiter holds on the throttle, so most of the old 2.6–4.5 s window is an unloaded engine at constant speed (the Wasp Junior read −27.8 dBFS there against −18.9 at idle). With the leveler's fast peak detector the two-stroke SB8 reads −17.7 dBFS at idle and −8.8 at full throttle (it was −11.9 and −10.3).
+
+**Found by this run.** The two-stroke SB8 failed "full throttle louder than idle" (−12.0 against −11.9 dBFS) on the sport exhaust: a 300 mm straight-through silencer on 11 litres of two-stroke puts even the idle at full scale, and the auto level then holds both at its target. Both two-stroke Saber presets now carry the stock silencers (380 mm, denser packing). The idle still comes out within 2 dB of full throttle after levelling, because the auto level reads sparse pops low and lifts them; see `docs/HANDOFF.md` §5 item 11b.
+
 ## Controls
 
 | Control | Result |

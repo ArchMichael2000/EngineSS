@@ -58,6 +58,7 @@ export class IntakeSystem {
   /** Throttle turbulence volume acceleration (radiated through the airbox path). */
   private smoothFlow = 0;
   private flowFilterState = 0;
+  private blockTick = 0;
 
   constructor(spec: EngineSpec, private readonly sampleRate: number, rng: Rng) {
     const n = spec.cylinders;
@@ -161,7 +162,7 @@ export class IntakeSystem {
    * @param bypass 0..1 idle-air-control opening
    */
   step(throttle: number, bypass: number, dt: number): void {
-    for (const j of this.rotorPorts) j.solve(0, dt);
+    for (let k = 0; k < this.rotorPorts.length; k++) this.rotorPorts[k].solve(0, dt);
     // Discharge coefficient rises from ~0.7 (sharp-edged gap) to ~0.86 with the plate edge-on.
     const cdA = (0.7 + 0.16 * clamp(throttle, 0, 1)) * this.throttleArea(throttle, bypass);
     if (this.plenum) {
@@ -200,7 +201,8 @@ export class IntakeSystem {
       let acc = 0;
       let total = 0;
       let mapSum = 0;
-      for (const stack of this.stacks) {
+      for (let k = 0; k < this.stacks.length; k++) {
+        const stack = this.stacks[k];
         stack.solve(perRunner, reservoir, this.upstreamK, orificeMassFlow, P_AMBIENT);
         acc += stack.volumeAcceleration;
         total += stack.massFlow;
@@ -226,8 +228,15 @@ export class IntakeSystem {
 
   /** Block-rate housekeeping: duct gas state follows manifold pressure and charge temperature. */
   updateBlock(): void {
-    for (const r of this.runners) r.setTemperature(this.airTempK, Math.max(0.05 * P_AMBIENT, P_AMBIENT + r.staticGauge));
-    for (const r of this.rotorRunners) r.setTemperature(this.airTempK, Math.max(0.05 * P_AMBIENT, P_AMBIENT + r.staticGauge));
+    // Runner gas state follows the manifold: refreshed when it has moved (0.5 K or 150 Pa), and
+    // every 16th block regardless so the mean-flow damping keeps up with the airflow.
+    const refresh = (this.blockTick++ & 15) === 0;
+    for (const set of [this.runners, this.rotorRunners]) {
+      for (const r of set) {
+        const mean = Math.max(0.05 * P_AMBIENT, P_AMBIENT + r.staticGauge);
+        if (refresh || Math.abs(this.airTempK - r.temperatureK) > 0.5 || Math.abs(mean - r.meanPressurePa) > 150) r.setTemperature(this.airTempK, mean);
+      }
+    }
     this.flowFilterState = this.flowFilterState * 0.9 + this.throttleMassFlow * 0.1;
     this.smoothFlow = this.flowFilterState;
     if (this.filterJoint) this.filterJoint.updateResistance(this.smoothFlow);

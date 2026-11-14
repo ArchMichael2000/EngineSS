@@ -1,12 +1,9 @@
-import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { FiringOrderEditor } from '@/components/FiringOrderEditor';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Info, AlertTriangle, Check } from 'lucide-react';
+import { Info } from 'lucide-react';
 import type { EngineConfiguration, HeaderGeometry, ExhaustRouting, IntakeType, RevLimiterType } from '../../../shared/engineTypes';
-import { validateFiringOrder, getDefaultFiringOrder } from '../../../shared/engineTypes';
 
 interface AdvancedBuildPanelProps {
   config: EngineConfiguration;
@@ -19,9 +16,9 @@ const TOOLTIPS = {
   bankAngle: 'The angle between cylinder banks in V and flat engines. Affects firing interval evenness and engine balance.',
   firingOrder: 'The sequence in which cylinders fire. Affects exhaust pulse spacing, vibration, and the characteristic sound of the engine.',
   headerGeometry: 'Equal-length headers produce a smooth, even exhaust tone. Unequal-length creates the distinctive rumble of some boxer and V engines.',
-  exhaustRouting: 'Single exhaust merges all cylinders. Dual separates banks. Open headers remove all restriction for maximum volume.',
+  exhaustRouting: 'Single exhaust merges all cylinders. Dual separates banks. Separate pipes give every collector its own pipe and outlet (set the collector to one per bank in Physics for four pipes on a W or X). Open headers remove all restriction for maximum volume.',
   intakeType: 'ITBs give sharp throttle response and intake howl. Velocity stacks maximize airflow sound. Carbs add a distinctive mechanical character.',
-  revLimiter: 'Soft limiters gradually reduce power. Hard fuel cut creates a dramatic stutter. Ignition cut produces pops and bangs.',
+  revLimiter: 'Soft cut bounces off the limit in quick full-throttle bursts. Electronic throttle closes the throttle and holds the limit quietly with every cylinder firing. Hard fuel cut is a slower, deeper stutter. Ignition cut produces pops and bangs.',
 };
 
 function InfoTooltip({ text }: { text: string }) {
@@ -38,9 +35,6 @@ function InfoTooltip({ text }: { text: string }) {
 }
 
 export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps) {
-  const [firingOrderInput, setFiringOrderInput] = useState('');
-  const [firingOrderError, setFiringOrderError] = useState<string | null>(null);
-
   const advanced = config.advanced || {};
   
   const updateAdvanced = (key: string, value: any) => {
@@ -49,28 +43,6 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
       advanced: { ...advanced, [key]: value },
     });
   };
-
-  const handleFiringOrderSubmit = () => {
-    const parsed = firingOrderInput.split(/[,\s-]+/).map(Number).filter(n => !isNaN(n));
-    const validation = validateFiringOrder(parsed, config.quick.cylinderCount);
-    
-    if (validation.valid) {
-      updateAdvanced('firingOrder', parsed);
-      setFiringOrderError(null);
-    } else {
-      setFiringOrderError(validation.errors[0]);
-    }
-  };
-
-  const loadDefaultFiringOrder = () => {
-    const order = getDefaultFiringOrder(config.quick.layout, config.quick.cylinderCount, config.quick.crankshaft);
-    setFiringOrderInput(order.join(', '));
-    updateAdvanced('firingOrder', order);
-    setFiringOrderError(null);
-  };
-
-  const currentFiringOrder = advanced.firingOrder || 
-    getDefaultFiringOrder(config.quick.layout, config.quick.cylinderCount, config.quick.crankshaft);
 
   return (
     <div className="space-y-4">
@@ -139,49 +111,7 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
       </div>
 
       {/* Firing Order */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Firing Order</label>
-          <InfoTooltip text={TOOLTIPS.firingOrder} />
-        </div>
-        <div className="flex items-center gap-1 mb-1 flex-wrap">
-          {currentFiringOrder.map((cyl, i) => (
-            <span key={i} className="text-xs font-[JetBrains_Mono] text-neon-cyan bg-dark-bg px-1.5 py-0.5 rounded border border-hud-line/30">
-              {cyl}
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={firingOrderInput}
-            onChange={(e) => setFiringOrderInput(e.target.value)}
-            placeholder="e.g. 1,3,4,2"
-            className="h-8 text-xs font-[JetBrains_Mono] bg-dark-bg border-hud-line"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleFiringOrderSubmit}
-            className="h-8 text-xs border-hud-line hover:border-neon-cyan/50"
-          >
-            <Check className="w-3 h-3" />
-          </Button>
-        </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={loadDefaultFiringOrder}
-          className="h-6 text-[10px] text-muted-foreground hover:text-neon-cyan"
-        >
-          Load default for {config.quick.layout}-{config.quick.cylinderCount}
-        </Button>
-        {firingOrderError && (
-          <div className="flex items-center gap-1 text-destructive text-[10px]">
-            <AlertTriangle className="w-3 h-3" />
-            {firingOrderError}
-          </div>
-        )}
-      </div>
+      <FiringOrderEditor config={config} onChange={onChange} />
 
       {/* Header Geometry */}
       <div className="space-y-1.5">
@@ -219,7 +149,25 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
           <SelectContent className="bg-dark-elevated border-hud-line">
             <SelectItem value="single">Single Exhaust</SelectItem>
             <SelectItem value="dual">Dual Exhaust</SelectItem>
+            <SelectItem value="separate">Separate Pipes (one per collector)</SelectItem>
             <SelectItem value="open-headers">Open Headers</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Exhaust exit */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Exhaust Exit</label>
+        <Select
+          value={config.physical?.exhaustExit ?? 'rear'}
+          onValueChange={(v) => onChange({ ...config, physical: { ...config.physical, exhaustExit: v as 'rear' | 'side' } })}
+        >
+          <SelectTrigger className="h-9 bg-dark-surface border-hud-line text-foreground font-[Rajdhani] text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-dark-elevated border-hud-line">
+            <SelectItem value="rear">Rear of the vehicle</SelectItem>
+            <SelectItem value="side">Side pipes behind the engine</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -261,7 +209,8 @@ export function AdvancedBuildPanel({ config, onChange }: AdvancedBuildPanelProps
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-dark-elevated border-hud-line">
-            <SelectItem value="soft">Soft Limiter</SelectItem>
+            <SelectItem value="soft">Soft Cut (bounces)</SelectItem>
+            <SelectItem value="throttle">Electronic Throttle (holds, quiet)</SelectItem>
             <SelectItem value="hard-fuel-cut">Hard Fuel Cut</SelectItem>
             <SelectItem value="hard-ignition-cut">Hard Ignition Cut</SelectItem>
           </SelectContent>

@@ -1,5 +1,5 @@
 /** Engine layout types */
-export type EngineLayout = 'inline' | 'v' | 'flat' | 'w' | 'radial';
+export type EngineLayout = 'inline' | 'v' | 'flat' | 'w' | 'radial' | 'x';
 
 /** Crankshaft character types */
 export type CrankshaftType = 'cross-plane' | 'flat-plane' | 'even-fire' | 'odd-fire';
@@ -14,7 +14,7 @@ export type TurboSize = 'small' | 'balanced' | 'large' | 'custom';
 export type SuperchargerType = 'roots' | 'twin-screw' | 'centrifugal';
 
 /** Exhaust routing types */
-export type ExhaustRouting = 'single' | 'dual' | 'open-headers';
+export type ExhaustRouting = 'single' | 'dual' | 'separate' | 'open-headers';
 
 /** Header geometry types */
 export type HeaderGeometry = 'equal-length' | 'unequal-length';
@@ -23,7 +23,7 @@ export type HeaderGeometry = 'equal-length' | 'unequal-length';
 export type IntakeType = 'single-throttle-body' | 'itbs' | 'carb' | 'velocity-stacks' | 'airbox';
 
 /** Rev limiter types */
-export type RevLimiterType = 'soft' | 'hard-fuel-cut' | 'hard-ignition-cut';
+export type RevLimiterType = 'soft' | 'throttle' | 'hard-fuel-cut' | 'hard-ignition-cut';
 
 /** Exhaust character presets */
 export type ExhaustCharacter = 'stock' | 'sport' | 'race' | 'straight-pipe';
@@ -157,11 +157,11 @@ export interface AdvancedConfig {
 
 /** Crank strategies understood by the physical core (superset of the Quick Build choices). */
 export type PhysicalCrankType = 'even-fire' | 'cross-plane' | 'flat-plane' | 'common-pin' | 'single-pin' | 'custom';
-export type CollectorType = 'bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
+export type CollectorType = 'bank' | 'each-bank' | 'firing-alternate' | 'pairs-then-bank' | 'all' | 'none';
 export type CrossoverPipe = 'none' | 'x-pipe' | 'h-pipe';
 export type MufflerKind = 'chambered' | 'turbo' | 'straight-through' | 'glasspack' | 'none';
 export type AirFilterKind = 'oem-paper' | 'cone' | 'sock' | 'none';
-export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe';
+export type ListenerPerspective = 'exterior-rear' | 'exterior-side' | 'engine-bay' | 'cabin' | 'dyno-tailpipe' | 'pass-by' | 'fly-over';
 
 /**
  * Detailed physical overrides for the v16 core. Every field is optional; anything
@@ -259,6 +259,24 @@ export interface PhysicalOverrides {
   /** Valved exhaust: bypass opening speed (auto mode) and mode. */
   exhaustValveOpenRpm: number;
   exhaustValveMode: 'auto' | 'open' | 'closed' | 'none';
+  /**
+   * Cross-Four X layout: cylinder tilt off horizontal (0–45°, default 15), how the modules are
+   * clocked along the crank, explicit module crank offsets (phasing 'custom'), and the rod-plane pitch.
+   */
+  /** Radial engines: master-and-link rods (default on). Off = idealised plain rods, exactly even firing. */
+  articulatedRods: boolean;
+  /** Knuckle-pin circle radius as a fraction of the master rod length (default 0.22). */
+  knuckleRadiusRatio: number;
+  /** Where the exhaust ends: the rear of the vehicle (default) or side pipes just behind the engine. */
+  exhaustExit: 'rear' | 'side';
+  /** Cross-Four: which cylinder of each opposed pair leads (see XLayoutSpec.firing). An explicit firing order overrides it. */
+  xFiring: 'default' | 'even-sides' | 'bunched-sides';
+  /** X layout crank: four pins per module (Cross-Four, default) or one shared pin per row with master-and-link rods. */
+  xPins: 'four' | 'shared';
+  xTiltDeg: number;
+  xPhasing: 'even-firing' | 'low-couple' | 'custom';
+  xModuleOffsetsDeg: number[];
+  xPlanePitchMm: number;
   turboCount: number;
   /** Variable-geometry turbine (default: boosted common-rail diesels). */
   turboVgt: boolean;
@@ -519,6 +537,50 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
       },
     },
   },
+};
+
+/** Per-cylinder displacement of the Saber Cross-Four study: 96 mm bore × 190 mm stroke. */
+export const SABER_CYLINDER_LITRES = (Math.PI / 4) * 0.96 * 0.96 * 1.9;
+
+function saberPreset(modules: number, description: string, extra: Partial<EngineConfiguration> = {}, quick: Partial<QuickBuildConfig> = {}): { name: string; description: string; config: EngineConfiguration } {
+  const n = 4 * modules;
+  return {
+    name: `Saber SB${n} Cross-${['Four', 'Eight', 'Twelve', 'Sixteen', 'Twenty', 'Twenty-Four'][modules - 1]}`,
+    description,
+    config: {
+      quick: {
+        layout: 'x',
+        cylinderCount: n,
+        displacement: Math.round(SABER_CYLINDER_LITRES * n * 100) / 100,
+        crankshaft: 'even-fire',
+        aspiration: 'na',
+        exhaustCharacter: 'sport',
+        idleCharacter: 'smooth',
+        redline: 3000,
+        ...quick,
+      },
+      forcedInduction: { type: 'na' },
+      physical: { xTiltDeg: 15, xPhasing: 'even-firing' },
+      ...extra,
+    },
+  };
+}
+
+/**
+ * The owner's Cross-Four X engines: modules of four cylinders (96 × 190 mm, 400 mm rods) on four
+ * crank pins 90° apart, cylinders tilted 15° off horizontal, modules clocked for even firing.
+ */
+export const SABER_PRESETS: Record<string, { name: string; description: string; config: EngineConfiguration }> = {
+  'saber-sb4': saberPreset(1, 'One module, 5.5 L. The two opposed pairs fire 120° / 240° apart.'),
+  'saber-sb8': saberPreset(2, 'Two modules 180° apart, 11 L: 60° / 120° firing.'),
+  'saber-sb12': saberPreset(3, 'Three modules at 0° / 160° / 80°, 16.5 L: 40° / 80° firing.'),
+  'saber-sb16': saberPreset(4, 'Four modules a quarter turn apart, 22 L: 30° / 60° firing.'),
+  'saber-sb16-square': saberPreset(4, 'SB16 with the cylinders at 45°: a square X firing evenly every 45°.', { physical: { xTiltDeg: 45, xPhasing: 'even-firing' } }),
+  'saber-sb12-low-couple': saberPreset(3, 'SB12 clocked 0° / 120° / 240°: the rocking couple cancels, firing 120° / 0° / 120° in pairs.', { physical: { xTiltDeg: 15, xPhasing: 'low-couple' } }),
+  // Two-strokes carry the long, densely packed silencers: on the sport exhaust the eight's idle alone reaches full scale.
+  'saber-sb4-two-stroke': saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
+  'saber-sb8-two-stroke': saberPreset(2, 'SB8 as a two-stroke on side collectors and long silencers: four paired firings a revolution.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
+  'saber-sb8-diesel': saberPreset(2, 'SB8 as a turbo-diesel at the study\'s 16.8 : 1 compression, on twin 100 mm exhausts.', { forcedInduction: { type: 'turbo', turboSize: 'balanced', maxBoost: 18, bovEnabled: false, wastegateEnabled: true }, physical: { xTiltDeg: 15, xPhasing: 'even-firing', compressionRatio: 16.8, pipeDiameterMm: 100, tailpipeDiameterMm: 110 } }, { fuel: 'diesel', aspiration: 'turbo' }),
 };
 
 /**

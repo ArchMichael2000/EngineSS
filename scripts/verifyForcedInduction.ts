@@ -242,10 +242,16 @@ function liftOff(key: string, bov: boolean, name: string) {
   sim.setControls({ throttle: 1 });
   let peak = 0;
   const trace: number[] = [];
+  // Boost averaged over each 0.1 s (four engine cycles): single readings ride ±3 % of intake
+  // pulsation, which says nothing about the wastegate.
   for (let k = 0; k < 40; k++) {
-    sim.prewarm(0.1);
-    peak = Math.max(peak, sim.telemetry.boostKpa);
-    trace.push(sim.telemetry.boostKpa);
+    let boost = 0;
+    for (let j = 0; j < 20; j++) {
+      sim.prewarm(0.005);
+      boost += sim.telemetry.boostKpa / 20;
+    }
+    peak = Math.max(peak, boost);
+    trace.push(boost);
   }
   const settled = trace.slice(-10).reduce((a, b) => a + b, 0) / 10;
   check("Wastegate: settled boost / target", (settled / target) * 100, 90, 106, " %", 1);

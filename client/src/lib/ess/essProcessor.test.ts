@@ -45,7 +45,8 @@ describe("essProcessor rate tiering", () => {
     let quietRun = 0;
     let maxQuietRun = 0;
     let stepBlock = -1;
-    for (let b = 0; b < 1400; b++) {
+    // Long enough for three steps (about 375 blocks each) and a further 400 blocks at the lowest tier.
+    for (let b = 0; b < 1900; b++) {
       proc.process([], out);
       if (stepBlock < 0 && messages.some((m) => m.type === "rate")) stepBlock = b;
       if (b < 40) continue; // fade-in from silence at start
@@ -63,9 +64,10 @@ describe("essProcessor rate tiering", () => {
     expect(stepBlock).toBeLessThan(450);
     expect(maxQuietRun).toBeLessThan(48); // < 1 ms of silence anywhere, crossfade included
     // The fake clock keeps reporting overload, so it steps again to the lowest tier and stays there.
-    expect(messages.filter((m) => m.type === "rate").map((m) => m.internalRate)).toEqual([40000, 32000]);
+    // (5/6, 2/3 and 1/2 of the device rate; the half-rate tier is what carries 20–24 cylinders.)
+    expect(messages.filter((m) => m.type === "rate").map((m) => m.internalRate)).toEqual([40000, 32000, 24000]);
     const tele = messages.filter((m) => m.type === "telemetry").at(-1) as { audio: { tier: number; internalRate: number } };
-    expect(tele.audio.tier).toBe(2);
-    expect(tele.audio.internalRate).toBe(32000);
+    expect(tele.audio.tier).toBe(3);
+    expect(tele.audio.internalRate).toBe(24000);
   }, 60_000); // about 3 s alone; much longer on a shared CI runner
 });

@@ -113,4 +113,5 @@ export class Upsampler {
 }
 
 /** Internal-rate tiers as fractions of the device rate. */
-export const RATE_TIERS = [1, 5 / 6, 2 / 3] as const;
+/** The half-rate tier (11 kHz of bandwidth at a 48 kHz device) is what lets 20–24 cylinders play on a modest machine. */
+export const RATE_TIERS = [1, 5 / 6, 2 / 3, 1 / 2] as const;

@@ -159,15 +159,19 @@ async function capture(label, script) {
 
 // ---- 1. every reference engine: idle, full-throttle free rev, lift-off
 const presetSelect = page.locator("select").first();
-const refKeys = (await presetSelect.locator("option").evaluateAll((os) => os.map((o) => o.value))).filter((v) => v.startsWith("ref:")).map((v) => v.slice(4));
+const presetValues = await presetSelect.locator("option").evaluateAll((os) => os.map((o) => o.value));
+const refKeys = presetValues.filter((v) => v.startsWith("ref:")).map((v) => v.slice(4));
+// The Saber Cross-Four presets run through the same engine checks as the reference engines.
+const saberKeys = presetValues.filter((v) => v.startsWith("saber-"));
+const presetValueOf = (key) => (saberKeys.includes(key) ? key : `ref:${key}`);
 
 if (!flag("skip-engines")) {
-  console.log(`Engines (${only.length ? only.length : refKeys.length}):`);
-  for (const key of refKeys) {
+  console.log(`Engines (${only.length ? only.length : refKeys.length + saberKeys.length}):`);
+  for (const key of [...saberKeys, ...refKeys]) {
     if (only.length && !only.includes(key)) continue;
     const before = await page.evaluate(() => window.__ess.getEngineInfo()?.builds ?? 0);
     await click("Idle");
-    await presetSelect.selectOption(`ref:${key}`);
+    await presetSelect.selectOption(presetValueOf(key));
     const ready = await page.waitForFunction((b) => (window.__ess.getEngineInfo()?.builds ?? 0) > b, before, { timeout: 8000 }).then(() => true, () => false);
     if (!ready) fail(key, "no 'ready' message from the worklet after selecting the preset");
     const cap = await capture(key, async () => {
@@ -180,7 +184,14 @@ if (!flag("skip-engines")) {
     });
     const sr = cap.sampleRate;
     const idle = analyse(cap.left, cap.right, sr, 0.4, 2.0);
-    const wot = analyse(cap.left, cap.right, sr, 2.6, 4.5);
+    // Full throttle: the loudest quarter second of the rev. (The mean over 2.6–4.5 s served while
+    // the soft limiter held the speed by cutting cylinders at full throttle; it now holds on the
+    // throttle, so most of that window is an unloaded engine at constant speed, which is quiet.)
+    let wot = analyse(cap.left, cap.right, sr, 2.0, 2.25);
+    for (let t = 2.05; t <= 4.25; t += 0.05) {
+      const w = analyse(cap.left, cap.right, sr, t, t + 0.25);
+      if (w.rmsDb > wot.rmsDb) wot = w;
+    }
     const lift = analyse(cap.left, cap.right, sr, 4.6, 6.4);
     const whole = analyse(cap.left, cap.right, sr, 0.06, cap.left.length / sr);
     const idleRpm = median(cap.tele.filter((t) => t.t > 0.8 && t.t < 2.0).map((t) => t.rpm));

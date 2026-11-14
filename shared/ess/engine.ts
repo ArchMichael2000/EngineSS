@@ -102,6 +102,10 @@ export interface SimulatorOptions {
 const BLOCK = 64;
 const TWO_PI = Math.PI * 2;
 
+/** Soft-limiter governor: loop rate of the speed trim (1/s), integral rate relative to it, plate-follows-pressure rate (1/s). */
+const LIM_LOOP = 6;
+const LIM_TI = 2.5;
+const LIM_KM = 40;
 export class EngineSimulator {
   readonly spec: EngineSpec;
   readonly schedule: FiringSchedule;
@@ -122,10 +126,12 @@ export class EngineSimulator {
   private readonly sourceQdot: Float64Array;
   private readonly sourceDefs: SourceDef[];
   private readonly ear = new Float64Array(2);
+  private readonly exposed: boolean;
+  private structureSpeedGain = 1;
 
   // Mechanical state
   private crankDeg = 0;
-  private omega: number;
+  private omega = 0;
   private indicatedTorque = 0;
   private torqueRipple = 0;
   private absorberIntegral = 0;
@@ -133,6 +139,8 @@ export class EngineSimulator {
 
   // ECU state
   private idleIntegral = 0.3;
+  private idleSideTime = 0;
+  private idleSideHigh = false;
   private readonly idleFeedForward: number;
   private lastBlockRpm = 0;
   private overrunTimer = 0;
@@ -145,7 +153,7 @@ export class EngineSimulator {
   private plenumBurned = 0;
   private plenumGasMass = 0.004;
   /** Idle-speed control gains (air PI + speed damping, spark P + D). */
-  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.04, spark: 40, sparkD: 0 };
+  readonly idleGains = { kp: 0.1, ki: 0.15, kd: 0.1, spark: 70, sparkD: 0 };
   private ecuRpm = 800;
   private lastPedal = 0;
   private bypass = 0.3;
@@ -170,6 +178,21 @@ export class EngineSimulator {
   private fuelCut = false;
   private limiterActive = false;
   private softCutFraction = 0;
+  /** Largest throttle opening the soft limiter allows (1 = no limit). */
+  private limiterPlate = 1;
+  /** Spark retard the limiter asks for, 0–1 of 12°. */
+  private limiterRetard = 0;
+  private limiterIntegral = 0;
+  private limiterHolding = false;
+  private limiterBelow = 0;
+  /** Largest pedal position since the hold began (a drop from it is the driver lifting). */
+  private limiterPedal = 0;
+  private limiterTrim = 0;
+  /** Indicated torque at full load, referred to 100 kPa manifold pressure (learned on the run). */
+  private wotIndicated = 0;
+  /** The limiter is withholding fuel or spark (as opposed to only closing the throttle). */
+  private limiterCutting = false;
+  private readonly throttleLimiter: boolean;
   private readonly command: CombustionCommand = { sparkAdvanceDeg: 0, lambda: 1, fuelEnabled: true, sparkEnabled: true, fuelOctane: 95, knockControl: true, injectionAdvanceDeg: 8, fuelMassKg: 0, smokeLambda: 1.2 };
   // Diesel governor state: fuel per cylinder per cycle (kg), its idle feed-forward and integrator.
   private dieselFuel = 0;
@@ -179,6 +202,11 @@ export class EngineSimulator {
   private sparkAdvance = 15;
   private lambdaTarget = 1;
   private readonly sparkCuts: Uint8Array;
+  private cutCarry = 0;
+  /** Soft limiter cuts fuel (four-stroke piston engines) or spark (two-strokes, rotaries). */
+  private readonly cutsFuel: boolean;
+  /** Cycle angle at which a cylinder's cut is decided for its next cycle. */
+  private readonly cutDecisionDeg: number;
 
   // Afterfire
   private readonly exhaustFuel: Float64Array;
@@ -226,7 +254,14 @@ export class EngineSimulator {
       twoStroke: spec.twoStroke,
       rotary: spec.rotary,
     };
-    this.cylinders = this.schedule.cylinders.map((g) => new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729)));
+    this.cylinders = this.schedule.cylinders.map((g) => {
+      // Link-rod motion comes from the schedule in millimetres; the cylinder works in metres.
+      const motion = g.motion
+        ? { ...g.motion, stroke: g.motion.stroke / 1000, tdcDistance: g.motion.tdcDistance / 1000, displacement: g.motion.displacement.map((v) => v / 1000), rate: g.motion.rate.map((v) => v / 1000) }
+        : null;
+      return new Cylinder(cylParams, g.fireAngleDeg, new Rng(spec.seed * 7919 + g.number * 104729), motion);
+    });
+    for (const c of this.cylinders) c.dt = 1 / sampleRate;
     // Fixed per-cylinder build offsets (the same engine always has the same "fingerprint").
     const tol = spec.calibration.buildTolerance;
     const build = new Rng(spec.seed * 31337 + 17);
@@ -251,19 +286,28 @@ export class EngineSimulator {
     this.allDucts = [...this.exhaust.ducts(), ...this.intake.ducts(), ...(this.fi?.ducts() ?? [])];
     this.pressureRates = new Float64Array(spec.cylinders);
     this.sparkCuts = new Uint8Array(spec.cylinders);
+    this.cutsFuel = !spec.twoStroke && !spec.rotary;
+    this.throttleLimiter = !spec.twoStroke && !spec.diesel;
+    this.cutDecisionDeg = this.cutsFuel ? 340 : cycleDegrees(spec) - 60;
     this.exhaustFuel = new Float64Array(this.exhaust.groups.length);
     this.exhaustOxygen = new Float64Array(this.exhaust.groups.length);
     this.popPulse = new Float64Array(this.exhaust.groups.length);
     this.popRemaining = new Float64Array(this.exhaust.groups.length);
 
+    // An exposed engine (motorcycle, kart) sits about 1.3 m ahead of its exhaust outlet with the
+    // airbox behind it; a car's engine is under the bonnet at the front.
+    this.exposed = !!spec.vehicle.exposedEngine;
+    const outletY = Math.max(...this.exhaust.outlets.map((o) => o.position.y));
+    const enginePosition = this.exposed ? { x: 0, y: outletY + 1.3, z: 0.45 } : ENGINE_POSITION;
+    const intakePosition = this.exposed ? { x: 0.12, y: outletY + 1.0, z: 0.75 } : INTAKE_MOUTH_POSITION;
     this.sourceDefs = [
       ...this.exhaust.outlets.map((o) => ({ kind: "exhaust" as const, position: o.position })),
-      { kind: "intake", position: INTAKE_MOUTH_POSITION },
-      { kind: "structure", position: ENGINE_POSITION },
+      { kind: "intake", position: intakePosition },
+      { kind: "structure", position: enginePosition },
       ...(this.fi?.sourceDefs ?? []),
     ];
     this.sourceQdot = new Float64Array(this.sourceDefs.length);
-    this.observer = new Observer(sampleRate, options.perspective ?? "exterior-rear", this.sourceDefs);
+    this.observer = new Observer(sampleRate, options.perspective ?? "exterior-rear", this.sourceDefs, this.exposed);
     this.setMonitorGain(options.monitorGainDb ?? 0);
 
     // Idle-air feed-forward from the energy balance at idle: gross indicated work must cover
@@ -303,7 +347,7 @@ export class EngineSimulator {
     // Burned-gas capacity of each runner: its gas mass at idle manifold density.
     const runnerVolume = (Math.PI / 4) * Math.pow(spec.intake.runnerDiameterMm / 1000, 2) * (spec.intake.runnerLengthMm / 1000);
     for (const cyl of this.cylinders) cyl.runnerResidualCapacity = runnerVolume * (this.idleMapTarget / (287.05 * 320));
-    if (spec.twoStroke) {
+    if (!spec.rotary) {
       this.cylinders.forEach((cyl, i) => {
         const header = this.exhaust.primaries[i];
         cyl.headerCapacity = header.area * header.lengthM * (P_AMBIENT / (287.05 * 700));
@@ -335,7 +379,7 @@ export class EngineSimulator {
   }
 
   setPerspective(perspective: Perspective): void {
-    this.observer = new Observer(this.sampleRate, perspective, this.sourceDefs);
+    this.observer = new Observer(this.sampleRate, perspective, this.sourceDefs, this.exposed);
   }
 
   setMonitorGain(db: number): void {
@@ -373,12 +417,12 @@ export class EngineSimulator {
 
   /**
    * Estimated CPU cost as a real-time factor on the reference machine (fit over the reference
-   * engines: 0.11 + 0.050·cylinders + 0.004·ducts + 0.057·turbochargers at 48 kHz, ±25 %).
+   * engines: 0.086 + 0.039·cylinders + 0.0031·ducts + 0.057·turbochargers at 48 kHz, ±25 %).
    * Scales with the sample rate; the worklet multiplies it by a measured machine factor.
    */
   get costEstimate(): number {
     const turbos = this.fi ? this.fi.sourceVolumeAccelerations.length : 0;
-    return (0.11 + 0.05 * this.cylinders.length + 0.004 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
+    return (0.086 + 0.039 * this.cylinders.length + 0.0031 * this.allDucts.length + 0.057 * turbos) * (this.sampleRate / 48000);
   }
 
   private modCycle(x: number): number {
@@ -445,14 +489,24 @@ export class EngineSimulator {
     const primaries = this.exhaust.primaries;
     const runners = this.intake.runners;
     const intakeT = this.intake.airTempK;
-    const dilutionGain = 1;
     const plenumFraction = clamp(this.plenumBurned / Math.max(1e-6, this.plenumGasMass), 0, 0.8);
+    const cycle = this.cycleDeg;
+    const omega = this.omega;
+    this.prepareCommand();
+    const softLimiter = this.cmdSoft;
+    const cutAt = this.cutDecisionDeg;
+    const stepDeg = (omega * dt * 360) / TWO_PI + 1e-9;
     for (let i = 0; i < cyls.length; i++) {
       const cyl = cyls[i];
       cyl.plenumBurnedFraction = plenumFraction;
-      const alpha = this.modCycle(this.crankDeg - cyl.fireAngleDeg);
+      let alpha = (this.crankDeg - cyl.fireAngleDeg) % cycle;
+      if (alpha < 0) alpha += cycle;
+      if (softLimiter && alpha >= cutAt && alpha < cutAt + stepDeg) this.decideCut(i);
       const cmd = this.commandFor(i);
-      cyl.step(alpha, this.omega, dt, this.exhaust.primaryPorts[i], this.intake.runnerPorts[i], intakeT, cmd, dilutionGain);
+      cyl.alphaDeg = alpha;
+      cyl.omega = omega;
+      cyl.intakeTempK = intakeT;
+      cyl.step(this.exhaust.primaryPorts[i], this.intake.runnerPorts[i], cmd);
       // Exhaust-valve throat jet: broadband turbulence injected at the port while the jet is fast.
       let jetQ = 0;
       if (cyl.exhaustMassFlow > 0 && cyl.exhaustCdA > 0) {
@@ -471,7 +525,7 @@ export class EngineSimulator {
       this.pressureRates[i] = cyl.pressure - P_AMBIENT + cyl.knockPressure;
       if (cyl.knocked) this.telemetry.knockEvents++;
       if (cyl.exhaustMassFlow > 0) {
-        this.exhaust.noteCylinderFlow(i, cyl.exhaustMassFlow, cyl.exhaustGasTemp);
+        this.exhaust.noteCylinderFlow(i, cyl);
         this.blockExhaustFlow += cyl.exhaustMassFlow;
         const g = this.exhaust.groupOf(i);
         this.exhaustFuel[g] += cyl.unburnedFuelOut;
@@ -496,12 +550,14 @@ export class EngineSimulator {
     for (let i = 0; i < ducts.length; i++) ducts[i].commit();
 
     this.structure.starterRevPerSec = this.cranking ? this.omega / TWO_PI : 0;
-    this.structure.step(this.pressureRates, 0.9, rpm);
+    this.structure.step(this.pressureRates, 0.9 * this.structureSpeedGain, rpm);
     if (!render) return;
 
     // ---- Radiation to the listener
     let s = 0;
-    for (const outlet of this.exhaust.outlets) {
+    const outlets = this.exhaust.outlets;
+    for (let k = 0; k < outlets.length; k++) {
+      const outlet = outlets[k];
       this.sourceQdot[s++] = outlet.volumeAcceleration * this.stems.exhaust + this.exhaust.outletJetNoise(outlet) * this.stems.exhaustJet;
     }
     this.sourceQdot[s++] = this.intake.mouthVolumeAcceleration * this.stems.intake;
@@ -515,38 +571,69 @@ export class EngineSimulator {
     this.splN++;
   }
 
-  private commandFor(i: number): CombustionCommand {
-    const cut = this.sparkCuts[i] === 1;
+  // Parts of the combustion command shared by every cylinder this sample (see prepareCommand).
+  private cmdFuel = true;
+  private cmdSpark = true;
+  private cmdSoft = false;
+
+  /** Per-sample part of the combustion command: everything that does not depend on the cylinder. */
+  private prepareCommand(): void {
     const lim = this.spec.calibration.revLimiter;
-    const fuelEnabled = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && !(cut && lim === "soft");
-    // Soft limiter: a cut cylinder loses spark as well as fuel, so the cut acts on the charge
-    // already inducted instead of one cycle later. Every strategy keeps a hard ignition backstop on
-    // instantaneous speed 150 rpm past the limiter (overspeed protection in production ECUs).
-    const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + 150 && this.running;
-    const ignitionCut =
-      overspeed ||
-      (cut && lim === "soft") ||
-      (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) ||
-      (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
+    // Every strategy keeps a hard ignition backstop on instantaneous speed 150 rpm past the limiter
+    // (overspeed protection in production ECUs).
+    const overspeed = this.rpm > this.spec.calibration.revLimiterRpm + Math.max(150, 0.06 * this.spec.calibration.revLimiterRpm) && this.running;
     const live = this.running || this.cranking;
-    const sparkEnabled = !ignitionCut && live;
+    this.cmdSoft = lim === "soft" || lim === "throttle";
+    this.cmdFuel = !this.fuelCut && !(this.limiterActive && lim === "hard-fuel-cut") && live;
+    this.cmdSpark =
+      !(
+        overspeed ||
+        (this.limiterActive && (lim === "hard-ignition-cut" || this.launchHold !== null)) ||
+        (this.controls.mode === "vehicle" && this.drivetrain.shiftCut)
+      ) && live;
     const cal = this.spec.calibration;
-    // One reused command object: this runs per cylinder per sample, and cylinders never keep it.
+    // One reused command object: cylinders never keep it.
     const c = this.command;
     c.sparkAdvanceDeg = this.sparkAdvance;
     c.lambda = this.lambdaTarget;
-    c.fuelEnabled = fuelEnabled && live;
-    c.sparkEnabled = sparkEnabled;
     c.fuelOctane = cal.fuelOctane;
     c.knockControl = cal.knockControl;
     if (this.spec.diesel) {
       // Compression ignition: the only lever is fuel; overspeed cuts injection.
-      c.fuelEnabled = c.fuelEnabled && !overspeed;
+      this.cmdFuel = this.cmdFuel && !overspeed;
       c.fuelMassKg = this.dieselFuel;
       c.injectionAdvanceDeg = this.injectionAdvance;
       c.smokeLambda = this.spec.diesel.smokeLambda;
     }
+  }
+
+  /**
+   * The command for cylinder i. Soft limiter: a cut four-stroke cylinder gets no fuel for one
+   * intake stroke (sequential injector cut: it pumps air, and nothing unburned reaches the
+   * exhaust); the charge it already holds still fires. Two-strokes and rotaries, which cannot
+   * withhold fuel from one cylinder for one cycle, lose that cycle's spark instead.
+   */
+  private commandFor(i: number): CombustionCommand {
+    const cut = this.cmdSoft && this.sparkCuts[i] === 1;
+    const c = this.command;
+    c.fuelEnabled = this.cmdFuel && !(cut && this.cutsFuel);
+    c.sparkEnabled = this.cmdSpark && !(cut && !this.cutsFuel);
     return c;
+  }
+
+  /**
+   * Soft-limiter cut pattern. Each cylinder is decided once a cycle, just before its intake stroke
+   * (before its spark where the spark is what is cut), and the cut share is spread over the firing
+   * sequence by carrying the remainder from one cylinder to the next: at one half every second
+   * firing is dropped, at one third every third. Production limiters cut in such rotating
+   * patterns; drawing every cut at random turned the exhaust note into noise.
+   */
+  private decideCut(i: number): void {
+    this.cutCarry += this.softCutFraction;
+    if (this.cutCarry >= 1) {
+      this.cutCarry -= 1;
+      this.sparkCuts[i] = 1;
+    } else this.sparkCuts[i] = 0;
   }
 
   private throttlePlate(): number {
@@ -554,7 +641,7 @@ export class EngineSimulator {
     // Vehicle mode: the shift controller may blip the throttle to rev-match a downshift.
     const pedal = this.controls.mode === "vehicle" && this.drivetrain.blipThrottle !== null ? Math.max(this.controls.throttle, this.drivetrain.blipThrottle) : this.controls.throttle;
     // Drive-by-wire progression: small pedal → finer plate control at the bottom.
-    return clamp(Math.pow(pedal, 1.35), 0, 1);
+    return clamp(Math.min(Math.pow(pedal, 1.35), this.limiterPlate), 0, 1);
   }
 
   private frictionTorque(rpm: number): number {
@@ -571,9 +658,15 @@ export class EngineSimulator {
     // valvetrain or reciprocating mass, but apex, side and corner seals rubbing at rotor tip speed
     // (≈ the four-stroke figure at equal airflow).
     const cycleFactor = this.spec.twoStroke ? 0.65 : this.spec.rotary ? 0.65 : 1;
-    // Driven accessories (alternator, water/oil/fuel pumps, steering, A/C idle load) scale with the
-    // engine they serve: ~16 N·m on a 6 L V8 at idle, ~3 N·m on a 1 L motorcycle engine.
-    const accessory = (2.6 + 0.00035 * rpm) * this.displacementL;
+    // Driven accessories scale with the engine they serve, in two parts. Electrical, steering and
+    // climate loads: 2.05 N·m per litre up to 1500 rpm, constant power (322 W per litre) above,
+    // so their torque falls with speed instead of growing. Water, oil and fuel pumps follow the
+    // auxiliary term of Patton, Nitschke & Heywood (SAE 890836): amep = 6.23 + 5.22e-3·N −
+    // 1.79e-7·N² kPa. Together ≈ 16 N·m on a 6 L V8 at idle, as before; at 6000 rpm about 60 % of
+    // the former straight line in rpm. (The load is flat, not constant-power, through the idle
+    // range: a load that grows as the speed dips turns an idle wobble into a stall.)
+    const n = Math.min(rpm, 10_000);
+    const accessory = (Math.min(2.05, 322 / Math.max(1, (rpm / 60) * TWO_PI)) + 0.0796 * (6.23 + 5.22e-3 * n - 1.79e-7 * n * n)) * this.displacementL;
     return (cycleFactor * fmep * vd) / (4 * Math.PI) + accessory;
   }
 
@@ -595,8 +688,12 @@ export class EngineSimulator {
     const rpmN = rpm / cal.redlineRpm;
     const full = clamp((load - 0.6) / 0.3, 0, 1);
     const wotIntake = clamp(1 - (rpmN - 0.2) / 0.6, 0.15, 1);
-    const intakeTarget = idle || this.fuelCut ? 0 : cam.intakePhaserDeg * (0.75 * (1 - full) + wotIntake * full);
-    const exhaustTarget = idle || this.fuelCut ? 0 : cam.exhaustPhaserDeg * (0.8 * (1 - full) + 0.4 * full);
+    // Off idle the phasers first take up the park offset (a long cam parks on wider centrelines, see
+    // resolveSpec), then work over the travel that is left.
+    const pi = cam.intakeParkDeg ?? 0;
+    const pe = cam.exhaustParkDeg ?? 0;
+    const intakeTarget = idle || this.fuelCut ? 0 : pi + (cam.intakePhaserDeg - pi) * (0.75 * (1 - full) + wotIntake * full);
+    const exhaustTarget = idle || this.fuelCut ? 0 : pe + (cam.exhaustPhaserDeg - pe) * (0.8 * (1 - full) + 0.4 * full);
     const slew = 300 * blockSec;
     this.intakeCamAdvance += clamp(intakeTarget - this.intakeCamAdvance, -slew, slew);
     this.exhaustCamRetard += clamp(exhaustTarget - this.exhaustCamRetard, -slew, slew);
@@ -624,8 +721,10 @@ export class EngineSimulator {
       // Absorber holds the set-point (it can also motor the engine, like an AC dyno).
       const err = this.omega - (c.targetRpm / 60) * TWO_PI;
       const J = this.spec.inertiaKgM2;
-      this.absorberIntegral = clamp(this.absorberIntegral + err * J * 160 / this.sampleRate, -1500, 3000);
-      return clamp(err * J * 60 + this.absorberIntegral, -600, 4000);
+      // The absorber is sized to the engine: 4000 N·m covers cars, large aero and marine engines need more.
+      const capacity = Math.max(4000, 400 * this.displacementL);
+      this.absorberIntegral = clamp(this.absorberIntegral + err * J * 160 / this.sampleRate, -1500, 0.75 * capacity);
+      return clamp(err * J * 60 + this.absorberIntegral, -600, capacity);
     }
     // Free running: road-load style torque that rises with speed, scaled by the load control.
     const ratedTorque = this.displacementL * 120 * (this.spec.forcedInduction.kind === "na" ? 1 : 1.6);
@@ -671,9 +770,24 @@ export class EngineSimulator {
     const slowRate = (this.slowRpm - prevSlow) / blockSec;
     if (pedal < 0.03) {
       // Integrate only near idle (anti-windup during the fall from high speed).
-      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut && this.running && !this.cranking && rpm > 0.5 * cal.idleRpm;
-      if (this.controls.mode !== "dyno" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + idleErr * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
-      const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd;
+      const quasiSteady = Math.abs(slowRate) < cal.idleRpm * 0.6 && this.sinceLift > 1.2 && !this.fuelCut && this.running && !this.cranking;
+      // The integrator takes at most 60 % of error either way, and learns below half the target as
+      // well as above it. It used to take the whole error and stop below half the target: in a
+      // large excursion it then saw the overshoots (up to +90 %) and not the dips, wound the air
+      // down a little on every swing (0.23 to 0.08 of the valve in 25 s on the flat-six preset)
+      // and turned one excursion into a permanent hunt.
+      // An error that has kept its sign for a full second is an offset, not a swing (an engine
+      // settling from its start flare with too much air): that one is taken whole.
+      this.idleSideTime = idleErr > 0 === this.idleSideHigh ? this.idleSideTime + blockSec : 0;
+      this.idleSideHigh = idleErr > 0;
+      const span = this.idleSideTime > 1 ? 2 : 0.6;
+      if (this.controls.mode !== "dyno" && quasiSteady) this.idleIntegral = clamp(this.idleIntegral + clamp(idleErr, -span, span) * this.idleGains.ki * blockSec, this.idleFeedForward * 0.15, Math.min(1, this.idleFeedForward * 2.5));
+      // Rate damping on the air valve. Six cylinders and more take the full gain; with fewer, the
+      // speed ripple of single firings dominates the rate and the gain is scaled back with the count.
+      // (At 0.04 for every engine, one large dip left the flat-six preset ringing for 20 s.)
+      // It fades out between 30 % and 60 % over the target, so it does not hold the speed up while
+      // an engine comes down from its start flare.
+      const damping = -(rpmRate / cal.idleRpm) * this.idleGains.kd * Math.min(1, this.cylinders.length / 6) * clamp(2 + idleErr / 0.3, 0, 1);
       this.bypass = clamp(this.idleIntegral + idleErr * this.idleGains.kp + damping, this.idleFeedForward * 0.12, 1);
     } else {
       this.bypass = clamp(this.bypass + (this.idleIntegral + 0.12 - this.bypass) * 0.02, 0, 1);
@@ -745,14 +859,91 @@ export class EngineSimulator {
       if (!this.limiterActive && rpm > lim) this.limiterActive = true;
       else if (this.limiterActive && rpm < lim - 150) this.limiterActive = false;
       this.softCutFraction = 0;
-    } else if (cal.revLimiter === "soft") {
-      // Progressive cut, reaching every cylinder 130 rpm past the limiter (high-torque engines unloaded).
-      this.softCutFraction = clamp((rpm - (lim - 30)) / 160, 0, 1);
-      this.limiterActive = this.softCutFraction > 0;
-      for (let i = 0; i < this.sparkCuts.length; i++) this.sparkCuts[i] = this.rng.next() < this.softCutFraction ? 1 : 0;
+      this.limiterPlate = 1;
+      this.limiterRetard = 0;
+      this.limiterCutting = this.limiterActive;
+    } else if (cal.revLimiter === "throttle" && this.throttleLimiter) {
+      {
+        // Electronic-throttle limiter, as torque-based engine controls do it: from
+        // 30 rpm under the limit the manifold pressure is held to what carries the engine's own
+        // friction there, so it sits at the limit on part throttle with every cylinder firing.
+        //  - Feed-forward: friction torque over full-load indicated torque (learned while the
+        //    plate is open), taken as linear in manifold pressure above 10 kPa.
+        //  - A slow PI trim on speed, aimed 15 rpm under the limit. Its gain has to stay low: an
+        //    unloaded engine gains 90–300 rpm/s per kPa and answers 0.1 s late, and a loop faster
+        //    than about 6 per second hunts (tried up to 90 per second: 100–700 rpm of swing).
+        //  - The plate follows the allowed pressure (integral control on the logarithm of both;
+        //    its flow at speed is nearly all in its first few per cent).
+        // The arrival, too fast for the plate, is caught by the rotating fuel cut from 30 rpm
+        // past the limit, for a few cycles.
+        const mapKpa = this.intake.mapPa / 1000;
+        if (this.controls.mode === "dyno") {
+          // On the dyno the absorber holds the speed, so there is nothing to govern: the plate
+          // simply closes over 80 rpm from 30 rpm under the limit and reopens at once below it. (A
+          // latched hold cycled here: every release kicked the absorber past the limit again.)
+          this.limiterHolding = rpm > lim - 30;
+          const open = clamp(1 - (rpm - (lim - 30)) / 80, 0.02, 1);
+          this.limiterIntegral += (Math.log(open) - this.limiterIntegral) * (1 - Math.exp(-blockSec / 0.03));
+        } else {
+          // The hold lets go 12 % under the limit (a light engine undershoots by several per cent
+          // on its first arrival, before the trim has learned it), or after a full second spent
+          // more than 45 rpm under it: a load has taken the speed away (settling on the limit takes
+          // less than half of that). The trim is kept between visits: what it learned about this
+          // engine's holding pressure (blower drive, friction the estimate missed) still applies.
+          this.limiterBelow = rpm < lim - 45 ? this.limiterBelow + blockSec : 0;
+          // It also lets go the moment the pedal asks for less than the limiter allows: the driver
+          // has lifted, and the speed falling away then says nothing about the holding pressure.
+          // (Without this, each blip that touched the limiter taught the trim 25 kPa too much.)
+          const lifted = pedal < this.limiterPedal - 0.05 && Math.pow(pedal, 1.35) < this.limiterPlate;
+          if (!this.limiterHolding && rpm > lim - 30 && pedal > 0.03) {
+            this.limiterHolding = true;
+            this.limiterPedal = pedal;
+          } else if (this.limiterHolding && (lifted || rpm < lim - Math.max(300, 0.12 * lim) || this.limiterBelow > 1)) this.limiterHolding = false;
+          if (this.limiterHolding) this.limiterPedal = Math.max(this.limiterPedal, pedal);
+          if (this.limiterHolding) {
+            const fullLoad = this.wotIndicated > 0 ? this.wotIndicated : 100 * this.displacementL;
+            const holdKpa = 10 + 90 * clamp((this.frictionTorque(lim) + (this.fi ? Math.max(0, this.fi.crankTorque) : 0)) / fullLoad, 0.03, 0.9);
+            // Trim gain from the engine's own liveliness: LIM_LOOP per second of loop rate over
+            // the rpm/s it gains per kPa unloaded (full-load torque over its inertia).
+            const gain = LIM_LOOP / ((fullLoad / 90 / this.spec.inertiaKgM2) * (30 / Math.PI));
+            const err = lim - 15 - rpm;
+            // Falling more than 60 rpm under the aim means the holding estimate is too low for
+            // this engine: the trim then learns six times faster. (Erring high is harmless, the
+            // fuel cut trims the excess; erring low dropped the engine out of the hold and back,
+            // in a cycle.)
+            this.limiterTrim = clamp(this.limiterTrim + (err > 60 ? 6 : 1) * LIM_TI * gain * err * blockSec, -40, 60);
+            const allowedKpa = clamp(holdKpa + gain * err + this.limiterTrim, 12, 100);
+            this.limiterIntegral = clamp(this.limiterIntegral + LIM_KM * Math.log(allowedKpa / Math.max(5, mapKpa)) * blockSec, -6, 0);
+          } else this.limiterIntegral = Math.min(0, this.limiterIntegral + 20 * blockSec);
+        }
+        this.limiterPlate = Math.exp(this.limiterIntegral);
+        this.softCutFraction = clamp((rpm - (lim + 30)) / 100, 0, 1);
+      }
+      this.limiterRetard = this.softCutFraction;
+      this.limiterCutting = this.softCutFraction > 0;
+      this.limiterActive = this.limiterCutting || this.limiterPlate < 0.97;
+    } else if (cal.revLimiter === "soft" || cal.revLimiter === "throttle") {
+      // Soft cut (the default; also where there is no throttle to close): the engine bounces off
+      // the limit. Fuel is withheld from every cylinder above the limit and returns once the speed
+      // has fallen 2 % under it (50–120 rpm; the hard cut waits for 180), and the spark is
+      // retarded up to 12° through that band so each return to the limit is gentler. What is
+      // heard is bursts of full-throttle firing at the limit, a few to a dozen a second.
+      const band = clamp(0.02 * lim, 50, 120);
+      // On the dyno the absorber holds the speed, so the cut ends as soon as the speed is back
+      // under the limit: with the band, a run that overshot on the way up stayed cut for good at
+      // any set speed inside it (the S54's rated speed is 100 rpm under its limiter).
+      if (!this.limiterActive && rpm > lim) this.limiterActive = true;
+      else if (this.limiterActive && rpm < lim - (this.controls.mode === "dyno" ? 0 : band)) this.limiterActive = false;
+      this.softCutFraction = this.limiterActive ? 1 : 0;
+      this.limiterRetard = this.controls.mode === "dyno" ? (this.limiterActive ? 1 : 0) : clamp((rpm - (lim - band)) / band, 0, 1);
+      this.limiterPlate = 1;
+      this.limiterCutting = this.limiterActive;
     } else {
       if (!this.limiterActive && rpm > lim) this.limiterActive = true;
       else if (this.limiterActive && rpm < lim - 180) this.limiterActive = false;
+      this.limiterPlate = 1;
+      this.limiterRetard = 0;
+      this.limiterCutting = this.limiterActive;
     }
 
     // Spark: MBT for the measured burn. Knock limits are found per cylinder by the end-gas
@@ -766,15 +957,30 @@ export class EngineSimulator {
     duration /= this.cylinders.length;
     const mbt = mbtAdvance(duration);
     let advance = Math.min(mbt, 45);
-    if (cal.revLimiter === "soft" && this.limiterActive) advance -= 12 * this.softCutFraction;
+    if (this.cmdSoft) advance -= 12 * this.limiterRetard;
     // Idle: retarded base spark holds a torque reserve; spark moves fast to regulate speed.
     // Applies at every speed with the pedal closed, so coasting down onto idle is continuous
     // (no jump from retarded idle spark to MBT at some speed threshold).
-    if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, Math.min(advance, 28));
+    // The feedback runs up to MBT when the speed sags (0.09 °/rpm at a 750 rpm idle): the air valve
+    // answers through the manifold's filling lag, so only spark can catch a dip inside one cycle.
+    if (pedal < 0.03) advance = clamp(12 + idleErr * this.idleGains.spark - (rpmRate / cal.idleRpm) * this.idleGains.sparkD, 2, advance);
     if (this.cranking) advance = 5; // cranking spark: fixed near TDC
     this.sparkAdvance = clamp(advance, -5, 48);
     this.lambdaTarget = pedal > 0.75 || map > 92 ? cal.lambdaWot : rpm < cal.idleRpm * 1.3 ? 1 : cal.lambdaPart;
     if (this.spec.diesel) this.dieselGovernor(rpm, pedal, idleErr, rpmRate, blockSec);
+
+    // A moving listener perspective follows the road speed in Drive mode (the vehicle stays where it
+    // is on the track while it stands); otherwise the pass runs at the perspective's own speed.
+    const motion = this.observer.def.motion;
+    if (motion) this.observer.setTravelSpeed(this.controls.mode === "vehicle" && motion.altitudeM === 0 ? this.drivetrain.speed : motion.speed);
+
+    // Structure-borne level against speed. The modelled impacts grow about 30 dB per decade of
+    // speed. Measured spark-ignition engines grow about 50 (Anderton and co-workers' surveys of
+    // engine noise at 1 m: petrol ≈ 50·log N, naturally aspirated DI diesel ≈ 30·log N), because
+    // impacts also shorten and move energy up into the radiating band, which fixed contact times
+    // do not reproduce. Above 2000 rpm, where the level was fitted, spark engines get the missing
+    // 20 dB per decade, limited to 12 dB.
+    this.structureSpeedGain = this.spec.diesel ? 1 : clamp(rpm / 2000, 1, 4);
 
     // Housekeeping at block rate.
     this.intake.updateBlock();
@@ -787,6 +993,12 @@ export class EngineSimulator {
     // Telemetry (smoothed).
     const torque = this.blockTorque / BLOCK;
     this.blockTorque = 0;
+    // Full-load indicated torque referred to 100 kPa, for the soft limiter's holding estimate.
+    {
+      const kpa = this.intake.mapPa / 1000;
+      const indicated = torque + this.frictionTorque(this.rpm);
+      if (!this.limiterHolding && kpa > 85 && indicated > 0) this.wotIndicated += (indicated * (90 / (kpa - 10)) - this.wotIndicated) * (this.wotIndicated > 0 ? 0.012 : 1);
+    }
     const t = this.telemetry;
     const a = 0.08;
     t.rpm = rpm;
@@ -875,7 +1087,7 @@ export class EngineSimulator {
     // classic source of overrun crackle. Strength set by the calibration's afterfire tendency.
     // Interrupted combustion of any kind lets mixture reach the hot exhaust: fuel cut (port-wall
     // film), limiter or launch cuts, and ignition-cut flat shifts (unburned charge).
-    const cutting = this.fuelCut || this.limiterActive || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
+    const cutting = this.fuelCut || this.limiterCutting || (this.controls.mode === "vehicle" && this.drivetrain.shiftCut);
     if (cutting && tendency > 0) {
       const perCycleFuel = (this.displacementL / 1000) * 1.1 / 14.7 / this.exhaustFuel.length;
       const film = tendency * 0.06 * perCycleFuel * (this.rpm / 120) * Math.exp(-this.fuelCutAge / 0.7) * dt;

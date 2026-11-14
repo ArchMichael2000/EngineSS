@@ -80,9 +80,10 @@ function linearisedFlow(pr: number): number {
 
 /** xorshift32 PRNG — deterministic, allocation free. */
 export class Rng {
-  private s: number;
+  /** State as a signed 32-bit integer: always a small integer to the JavaScript engine, so storing it never allocates. */
+  private s = 0;
   constructor(seed: number) {
-    this.s = (seed >>> 0) || 0x9e3779b9;
+    this.s = ((seed >>> 0) || 0x9e3779b9) | 0;
   }
   /** Uniform in [0, 1). */
   next(): number {
@@ -90,8 +91,8 @@ export class Rng {
     x ^= x << 13;
     x ^= x >>> 17;
     x ^= x << 5;
-    this.s = x >>> 0;
-    return this.s / 4294967296;
+    this.s = x;
+    return (x >>> 0) / 4294967296;
   }
   /** Uniform in [-1, 1). */
   bipolar(): number {
@@ -165,9 +166,10 @@ export function lerpTable(table: ReadonlyArray<readonly [number, number]>, x: nu
  * with 4096 intervals over the wave-amplitude range the relative error stays below 1e-5.
  */
 export class PowTable {
-  private readonly table: Float64Array;
-  private readonly scale: number;
-  constructor(readonly exponent: number, private readonly lo: number, private readonly hi: number, intervals = 4096) {
+  /** Public so a hot caller can write the lookup out in place (see `at`) instead of calling it. */
+  readonly table: Float64Array;
+  readonly scale: number;
+  constructor(readonly exponent: number, readonly lo: number, readonly hi: number, intervals = 4096) {
     this.table = new Float64Array(intervals + 2);
     this.scale = intervals / (hi - lo);
     for (let i = 0; i <= intervals + 1; i++) this.table[i] = Math.pow(lo + i / this.scale, exponent);
