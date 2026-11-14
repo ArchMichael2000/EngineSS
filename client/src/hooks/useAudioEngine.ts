@@ -3,9 +3,22 @@ import { AUDIO_ENGINE_MODEL_VERSION, getAudioEngine, AudioEngine } from '@/lib/a
 import type { EngineConfiguration, ListenerPerspective, PlaybackState } from '../../../shared/engineTypes';
 import type { DriveMode, StemGains } from '../../../shared/ess/engine';
 import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from '../../../shared/engineTypes';
+import { createRpmFollower } from '@/lib/displaySmoothing';
 
-/** How often telemetry-driven numbers on screen may change. */
+/** How often telemetry-driven numbers on screen may change: at rest, and while the speed is moving. */
 const DISPLAY_HZ = 8;
+const DISPLAY_HZ_MOVING = 20;
+/** Where the listener volume is kept between visits (it belongs to the listener, not to an engine). */
+const VOLUME_KEY = 'ess.listenerVolume';
+
+function storedVolume(): number {
+  try {
+    const v = Number(window.localStorage.getItem(VOLUME_KEY));
+    return Number.isFinite(v) ? Math.min(100, Math.max(-100, v)) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 export function useAudioEngine() {
   const engineRef = useRef<AudioEngine | null>(null);
@@ -43,15 +56,17 @@ export function useAudioEngine() {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    // Telemetry arrives ~23 times a second and the crank speed swings within every cycle, so the
-    // display shows smoothed values (rpm over ~0.25 s, the rest over ~0.4 s), commits at most
-    // DISPLAY_HZ times a second, and holds a limiter/fuel-cut/pops flag for at least a second.
-    // Control changes (throttle, load, mode, start/stop) still show at once.
+    // Telemetry arrives ~47 times a second and an idling engine wanders, so the display shows
+    // smoothed values and holds a limiter/fuel-cut/pops flag for at least a second. Speed goes
+    // through the follower in lib/displaySmoothing.ts (calm at a steady speed, no low-pass lag on a
+    // pull or a fall) and commits DISPLAY_HZ times a second at rest, DISPLAY_HZ_MOVING while it is
+    // moving; the rest is smoothed over ~0.4 s. Control changes still show at once.
     let lastControls = '';
     let lastShown = '';
     let lastCommit = 0;
     let lastFrame = 0;
     let rpm = -1;
+    const follower = createRpmFollower();
     let boost = 0;
     let smooth: Record<string, number> = {};
     const held = { limiter: 0, fuelCut: 0, afterfire: 0, afterfireCount: 0 };
@@ -62,7 +77,10 @@ export function useAudioEngine() {
         const dt = lastFrame ? Math.min(0.25, (now - lastFrame) / 1000) : 0;
         lastFrame = now;
         const a = (tau: number) => 1 - Math.exp(-dt / tau);
-        rpm = rpm < 0 || !state.isPlaying ? state.rpm : rpm + (state.rpm - rpm) * a(0.25);
+        if (rpm < 0 || !state.isPlaying) {
+          rpm = state.rpm;
+          follower.reset(state.rpm);
+        } else rpm = follower.step(state.rpm, dt);
         boost += (state.boost - boost) * a(0.4);
         let telemetry = state.telemetry;
         if (telemetry) {
@@ -87,7 +105,7 @@ export function useAudioEngine() {
         const controls = `${state.isPlaying}|${state.throttle}|${state.load}|${state.targetRpm}|${state.driveMode}|${telemetry?.engineState}|${telemetry?.gear}`;
         const shownRpm = Math.round(rpm / 10) * 10;
         const shown = `${shownRpm}|${boost.toFixed(1)}|${telemetry ? Object.values(smooth).map((v) => v.toPrecision(3)).join(',') : ''}|${telemetry?.limiter}|${telemetry?.fuelCut}|${telemetry?.afterfire}`;
-        const due = now - lastCommit >= 1000 / DISPLAY_HZ;
+        const due = now - lastCommit >= 1000 / (follower.moving ? DISPLAY_HZ_MOVING : DISPLAY_HZ);
         if (controls !== lastControls || (due && shown !== lastShown)) {
           lastControls = controls;
           lastShown = shown;
@@ -179,6 +197,23 @@ export function useAudioEngine() {
     setConfig((prev) => ({ ...prev, listener: { ...prev.listener, autoLevel: on } }));
   }, [ensureEngine]);
 
+  const [volume, setVolumeState] = useState<number>(storedVolume);
+  const setVolume = useCallback((value: number) => {
+    const v = Math.min(100, Math.max(-100, Math.round(value)));
+    setVolumeState(v);
+    ensureEngine().setVolume(v);
+    try {
+      window.localStorage.setItem(VOLUME_KEY, String(v));
+    } catch {
+      // Private browsing: the setting lasts for this visit only.
+    }
+  }, [ensureEngine]);
+  // The engine object outlives this hook's first render: give it the stored setting once.
+  useEffect(() => {
+    ensureEngine().setVolume(volume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const setIgnition = useCallback((on: boolean) => {
     ensureEngine().setIgnition(on);
   }, [ensureEngine]);
@@ -213,6 +248,8 @@ export function useAudioEngine() {
     setPerspective,
     setStemGains,
     setAutoLevel,
+    volume,
+    setVolume,
     shift,
     setIgnition,
     vehicleOptions,

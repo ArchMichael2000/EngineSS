@@ -23,6 +23,7 @@ type Message =
   | { type: "perspective"; perspective: Perspective }
   | { type: "stems"; stems: Partial<StemGains> }
   | { type: "monitorGain"; db: number }
+  | { type: "volume"; gain: number }
   | { type: "shift"; dir: 1 | -1 }
   | { type: "ignition"; on: boolean }
   | { type: "autoLevel"; on: boolean }
@@ -30,7 +31,7 @@ type Message =
   | { type: "dispose" };
 
 const FADE_SAMPLES = 2400;
-const TELEMETRY_INTERVAL = 2048;
+const TELEMETRY_INTERVAL = 1024;
 /** Target share of the audio thread's time budget the simulator may use. */
 const LOAD_TARGET = 0.6;
 /** Sustained load above this steps the running engine down one rate tier. */
@@ -113,6 +114,9 @@ class EssProcessor extends AudioWorkletProcessor {
         case "monitorGain":
           this.monitorDb = msg.db;
           this.voice?.sim.setMonitorGain(msg.db);
+          break;
+        case "volume":
+          this.leveler.volume = Number.isFinite(msg.gain) ? Math.max(0, msg.gain) : 1;
           break;
         case "autoLevel":
           this.leveler.autoGain = msg.on;

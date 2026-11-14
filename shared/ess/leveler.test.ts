@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OutputLeveler } from "./leveler";
+import { OutputLeveler, volumeToGain } from "./leveler";
 
 const FS = 48000;
 function sine(amp: number, freq: number, seconds: number): Float32Array {
@@ -112,6 +112,26 @@ describe("output leveler", () => {
     expect(settled - gainAt(5)).toBeLessThan(1.5);
     expect(peak(l)).toBeLessThanOrEqual(Math.pow(10, -2 / 20) + 1e-6);
     expect(n).toBe(l.length);
+  });
+
+  it("applies the listener volume without passing the ceiling", () => {
+    const level = (volume: number) => {
+      const l = sine(0.3, 150, 6);
+      const r = l.slice();
+      const lev = new OutputLeveler(FS);
+      lev.volume = volumeToGain(volume);
+      lev.effort = 0;
+      lev.process(l, r);
+      // (the control moves over 30 ms, so the first second is left out of the silence check)
+      return { lufs: lufs(l.subarray(5 * FS), r.subarray(5 * FS)), peak: peak(l), late: peak(l, FS) };
+    };
+    const zero = level(0);
+    expect(level(-100).late).toBeLessThan(1e-9);
+    expect(zero.lufs - level(-50).lufs).toBeGreaterThan(11.5);
+    expect(zero.lufs - level(-50).lufs).toBeLessThan(12.5);
+    // Quiet running (idle effort) comes up by most of the 12 dB; nothing passes the ceiling.
+    expect(level(100).lufs - zero.lufs).toBeGreaterThan(9);
+    expect(level(100).peak).toBeLessThanOrEqual(Math.pow(10, -2 / 20) + 1e-6);
   });
 
   it("does not ride sparse pulses up into the limiter", () => {

@@ -358,6 +358,67 @@ The change: the speed gain no longer applies to the timing-drive term (`Structur
 
 **Found and not changed: the outlet-jet burst on a flat-shift bang.** The afterfire at a full-throttle upshift drives the tailpipe velocity on the K20A to 380–520 m/s for about 20 ms (the linear waveguide lets it pass the speed of sound; the jet-noise source limits it to 0.9 c). With the U⁸ law that is a 39 dB jump in jet noise: on the S54's 2–3 shift the jet stem peaks at +11.3 dBFS against +1.8 for the pressure wave itself, a burst of broadband noise 15 dB over the running engine for a tenth of a second. The K20A does the same (+11.9 against +6.0). The jet coefficient K is also 60 times the 10⁻⁴ written beside it, without a recorded basis. The leveler no longer lets these bangs duck the run, but the burst itself is as it was: bounding the outlet velocity or the afterfire charge is the place to start.
 
+### Two-stroke against four-stroke: why they sound different (November 2026, owner's question)
+
+The owner hears the two-strokes as louder, clearer and more precise, and the four-strokes as clearer at high revs than low. Measured on twelve presets held at full throttle on the dyno at 35, 65 and 95 % of the redline (exterior rear, calibrated pressure before the leveler; `mix`, then each stem alone). The cleanest comparison is the Saber SB4 and SB8, which exist as both cycles on the same bore, stroke and crank.
+
+**How the model differs (all of it physical, none of it a separate "two-stroke sound"):**
+
+| | Four-stroke | Two-stroke |
+|---|---|---|
+| Firing | once per cylinder every two revolutions | every revolution: twice the firing frequency at the same speed |
+| Gas exchange | poppet valves on a cam, lifting over tens of degrees | ports the piston uncovers, the exhaust port opening abruptly on a cylinder still at high pressure |
+| Exhaust | primaries, collector, catalyst, mufflers, tailpipe | tuned expansion chamber and stinger, or side collectors on the Saber; no catalyst |
+| Mechanical noise | valve seating, timing-drive tone and noise | no valvetrain: half the drive noise, no tooth tone |
+| Lift-off | fuel cut on the overrun | no fuel cut (it keeps firing, irregularly) |
+
+**What the renders show (means over the group; SB = same-geometry Saber pairs):**
+
+| | Two-stroke | Four-stroke |
+|---|---|---|
+| Level per litre of displacement, low / mid / high speed (dB re full scale) | −21.0 / −14.6 / −13.6 | −25.5 / −20.2 / −17.4 |
+| SB4 at 1950 rpm, level | −7.7 dB | −18.3 dB |
+| SB8 at 1950 rpm, level | −4.4 dB | −19.3 dB |
+| Crest factor (peak over rms) | 11–12 dB | 8–9.5 dB |
+| Spectral centroid, low / mid / high | 441 / 568 / 812 Hz | 181 / 325 / 498 Hz |
+| Share of 1–4 kHz energy on engine orders | 97.6–99.1 % | 89.4–93.7 % |
+| Structure-borne stem under the mix at high speed | −40.6 dB | −35.0 dB |
+
+* **Louder:** at the same geometry and speed the two-stroke puts out 10–15 dB more sound pressure (SB4 +10.6 dB, SB8 +14.9 dB at 1950 rpm): twice the firings and a port that releases the cylinder earlier and faster. On the deployed site (before this branch) the leveler passed most of that on: the Saber SB8 two-stroke idled at −13.2 LUFS against −34.0 for the four-stroke SB8, and the SB4 pair at −19.0 against −34.5. With the loudness rider both idle within 1 LU of each other (−23.4 and −23.6; −22.4 and −23.1). On a dyno pull the two-strokes now sit under the four-strokes in LUFS (SB4 −16.3 against −10.5), because their peaks reach the guard first; they may still be heard as louder, since their energy sits an octave higher (next point), where the ear is more sensitive than the K-weighting allows for.
+* **Clearer, more precise:** the two-stroke pulse is sharper (crest 11–12 dB against 8–9.5) and its spectrum sits about an octave and a third higher (centroid 441–812 Hz against 181–498 Hz). Almost all of its 1–4 kHz energy is on engine orders (98–99 %); the four-strokes carry 6–11 % of that band between the orders, from valvetrain and timing-drive noise and from structure-borne sound that is 5–6 dB stronger in their mix.
+* **Four-strokes clearer at high revs:** from 35 % to 95 % of the redline their centroid rises 2.75 times (181 → 498 Hz) and their level 8 dB, as the firing frequency climbs from the 30–150 Hz range, where harmonics blur into a rumble and small speakers reproduce little, into 90–420 Hz. That is physical. Two things in the model work against it at the top: the structure stem's share rises 16 dB over the same range (−51 → −35 dB), and the LS3 loses order-locked share at 95 % (86.8 % in 1–4 kHz).
+
+Not measured: any of this against a recording at a known microphone position. The existing recording comparisons (above) put the two-stroke renders 12–17 dB too dull above 2 kHz on light free revs, so a real two-stroke is, if anything, brighter still.
+
+### Gauge lag and the engine view's pace (November 2026)
+
+**Gauge.** The owner saw the rpm gauge trail near the peak of a dyno pull and on the fall after it. Three places could hold it back; a model of the display chain on real speed tracks (the app's dyno pull: 6 s to the redline, 0.4 s held, lift) separates them:
+
+| Preset | Telemetry behind the crank on the pull | Old display behind on the pull | Old display behind on the fall (mean / worst) | New (pull; fall mean / worst) | Idle flicker, old → new (sd) |
+|---|---|---|---|---|---|
+| GM LS3 | 23 rpm | 298 rpm | 1268 / 2202 rpm | 76; 369 / 802 | 4 → 4 rpm |
+| Yamaha CP3 | 46 | 540 | 2053 / 3132 | 141; 638 / 1087 | 35 → 40 |
+| Yamaha RD350LC | 45 | 468 | 518 / 916 | 127; 187 / 408 | 40 → 41 |
+| V10 preset | 30 | 401 | 1499 / 2502 | 101; 444 / 879 | 48 → 49 |
+| Harley M8 | 28 | 251 | 913 / 1484 | 71; 309 / 556 | 28 → 32 |
+
+The engine and its telemetry were never the slow part. The display smoothed speed with a 0.25 s low-pass, which trails a ramp by 0.25 s × its rate, and redrew 8 times a second; the gauge reached 150–250 rpm short of the peak and was still a thousand rpm high a second into the fall. Now (`client/src/lib/displaySmoothing.ts`): the same low-pass, plus its own rate of change times its time constant added back once the speed moves faster than an idle does (from 250 rpm/s, fully by 900), held between the low-pass and the newest reading so it cannot overshoot; 20 redraws a second while moving, 8 at rest; telemetry every 1024 samples instead of 2048. What is left on the fall is the first 0.15 s after the lift, before the rate estimate has caught up.
+
+**Engine view.** The cross-section cannot turn at engine speed (100 rev/s at 6000 rpm on a 60 Hz screen only strobes). It keeps its idle pace (0.35 rev/s + 0.85 × rpm / redline, about 0.45 rev/s) and above idle rises to 5 rev/s at the redline along (share of the way from idle to redline)^1.3 (`client/src/lib/enginePace.ts`). Half way up it turns 4.3–5.4 times its idle pace (three presets from a 3000 rpm diesel to a 14 000 rpm bike); the old mapping gave 1.6–1.9 times. The view prints the pace shown and how many times slower than the engine it is.
+
+### Listener volume (November 2026)
+
+A volume control in the Listener panel, −100 … +100 (`volumeToGain` in `leveler.ts`). 0 is the level the leveler sets. Below 0 the gain is ((100 + v)/100)²: −12 dB at −50, silence at −100. Above 0 it rises to +12 dB at +100, applied between the rider and the limiter. Measured on four presets (LS3, CP3, EA288, RD350LC):
+
+| Volume | Idle (LUFS) | Dyno pull (LUFS) | Limiter more than 1 dB down on the pull |
+|---|---|---|---|
+| −50 | −35.6 … −33.0 | −25.8 … −22.6 | 0 % |
+| 0 | −23.6 … −21.0 | −13.8 … −10.6 | 0–3 % |
+| +50 | −17.6 … −16.4 | −12.8 … −9.2 | 1.7–5.7 % |
+| +100 | −16.4 … −11.6 | −12.8 … −9.2 | 1.7–5.7 % |
+
+Quiet running comes up by the whole amount (LS3 idle −23.6 → −11.6 LUFS at +100). Full load gains only 1–2.5 LU, and no more above about +25: its peaks are already 2.5 dB under the ceiling, and the rider gives the control 1.5 dB of that. The first version let the limiter take up the rest and it worked more than 1 dB down through 47–81 % of a pull, which is the pulse-by-pulse limiting the owner heard as distortion in the limiter round. So above 0 the control narrows the idle-to-full swing more than it raises full load; more than that belongs to the device's own volume. No output sample passes the −2 dBFS ceiling at any setting. The setting is kept in the browser (localStorage), not in the engine configuration, so a saved or published engine does not carry it. Exports use it unless Normalize is on (a normalised file is scaled to its own peak either way); the server renderer always normalises.
+
 ### Engine-bay perspective against HL-CEAD
 
 No-load steady speed (dyno with pedal trimmed for zero absorber torque), engine-bay listener, same statistics as the corpus:

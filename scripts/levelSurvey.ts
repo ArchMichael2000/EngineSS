@@ -11,6 +11,7 @@
  *             and the exhaust without the valve-throat jet) without leveling, for source isolation
  *   PERSPECTIVE listener (default exterior-rear)
  *   RATE      sample rate (default 48000)
+ *   VOLUME    listener volume, -100 to 100 (default 0)
  *   PATCH     JSON deep-merged into every config
  *
  * Programs:
@@ -27,7 +28,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EngineSimulator } from "../shared/ess/engine";
 import type { EngineControls, StemGains } from "../shared/ess/engine";
-import { OutputLeveler } from "../shared/ess/leveler";
+import { OutputLeveler, volumeToGain } from "../shared/ess/leveler";
 import { resolveEngineSpec } from "../shared/ess/resolveSpec";
 import { REFERENCE_ENGINES } from "../shared/ess/reference/engines";
 import { FACTORY_PRESETS, SABER_PRESETS } from "../shared/engineTypes";
@@ -124,6 +125,7 @@ for (const key of keys) {
     writeFloatWav(join(outDir, `${key}.${program}.raw.wav`), left, right, n);
     // The live chain: the worklet's leveler, which has been running since the engine started.
     const leveler = new OutputLeveler(fs, { autoGain: config.listener?.autoLevel ?? true });
+    leveler.volume = volumeToGain(Number(process.env.VOLUME ?? 0));
     const liveL = left.slice(0, n);
     const liveR = right.slice(0, n);
     const warm = Math.min(n, fs);

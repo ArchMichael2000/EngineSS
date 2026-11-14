@@ -56,6 +56,29 @@ export interface LevelerOptions {
 
 const dbToGain = (db: number) => Math.pow(10, db / 20);
 
+/** Where the volume control may put recurring peaks, as a share of the ceiling (1 dB under it). */
+const VOLUME_PEAK_ROOM = 0.89;
+/** Gain at the top of the listener volume control, dB. */
+export const VOLUME_TOP_DB = 12;
+
+/**
+ * Listener volume control, −100 … +100, to a linear gain. 0 leaves the level where the leveler puts
+ * it. Below, the gain falls as the square of what is left ((100 + v) / 100)², −12 dB at −50 and
+ * silence at −100, which is close to how a fader is heard. Above, it rises in decibels to
+ * `VOLUME_TOP_DB` at +100. The gain sits between the rider and the limiter, so turning it up cannot
+ * clip. Quiet running comes up by the whole amount. Full-load peaks are already 2.5 dB under the
+ * ceiling, and the rider gives up only 1.5 dB of that (asking the limiter for more made it work
+ * through half of a dyno pull): full load gains 1 to 2 dB at the top of the control, not 12, and
+ * the idle to full-load swing narrows as the control goes up. More than that is the job of the
+ * volume control of the device.
+ */
+export function volumeToGain(volume: number): number {
+  if (!Number.isFinite(volume)) return 1;
+  const v = Math.min(100, Math.max(-100, volume));
+  if (v <= 0) return ((100 + v) / 100) * ((100 + v) / 100);
+  return dbToGain((VOLUME_TOP_DB * v) / 100);
+}
+
 /** The rider updates its target every this many samples. */
 const TARGET_BLOCK = 32;
 /** The peak guard's 0.1 s windows (five 20 ms slices each) and how many it looks back over; slices a level must last to count at once. */
@@ -124,6 +147,10 @@ export class OutputLeveler {
   effort = 1;
   /** Freeze the automatic gain (engine stopped or on the starter: nothing to level). */
   hold = false;
+  /** Listener volume as a linear gain (`volumeToGain`), applied after the rider and before the limiter. */
+  volume = 1;
+  private volumeNow = 1;
+  private readonly volumeCoef: number;
   private readonly fullMs: number;
   private readonly dynamicsNp: number;
   private readonly gateMs: number;
@@ -198,6 +225,7 @@ export class OutputLeveler {
     this.attack = 1 - Math.exp(-1 / ((options.attackS ?? 0.05) * sampleRate));
     this.release = 1 - Math.exp(-1 / ((options.releaseS ?? 2) * sampleRate));
     this.loudCoef = 1 - Math.exp(-1 / (0.4 * sampleRate));
+    this.volumeCoef = 1 - Math.exp(-1 / (0.03 * sampleRate));
     this.effortCoef = 1 - Math.exp(-TARGET_BLOCK / (0.15 * sampleRate));
     this.sliceLength = Math.max(1, Math.round(0.02 * sampleRate));
     this.fastRelease = 1 - Math.exp(-1 / (0.15 * sampleRate));
@@ -290,7 +318,10 @@ export class OutputLeveler {
         else if (!this.hold && this.msFill > 0.2 && this.ms > this.gateMs * this.msFill) {
           const byLoudness = Math.sqrt((this.targetMs * this.msFill) / this.ms);
           const peaks = this.rising && this.fastPeak > this.envelope ? this.fastPeak : this.envelope;
-          const byPeak = this.peakTarget / Math.max(1e-9, peaks);
+          // With the volume turned up the guard keeps recurring peaks just under the ceiling, so the
+          // limiter is not driven the whole time.
+          const room = (this.ceiling * VOLUME_PEAK_ROOM) / Math.max(1, this.volumeNow);
+          const byPeak = (room < this.peakTarget ? room : this.peakTarget) / Math.max(1e-9, peaks);
           let want = byLoudness;
           if (byPeak < want) want = Math.max(byPeak, byLoudness * this.peakFloor);
           if (want > this.maxBoost) want = this.maxBoost;
@@ -298,8 +329,11 @@ export class OutputLeveler {
           this.agc += (want - this.agc) * (want < this.agc ? this.attack : this.release);
         }
       }
-      l *= this.agc;
-      r *= this.agc;
+      // Listener volume, moved over 30 ms so the control does not zip.
+      this.volumeNow += (this.volume - this.volumeNow) * this.volumeCoef;
+      const gain = this.agc * this.volumeNow;
+      l *= gain;
+      r *= gain;
 
       // 2. Look-ahead limiter. The gain each sample needs, minimum over the samples still in the delay
       // line (this one and the L before it), then a box average over L samples: every value in the
@@ -309,7 +343,7 @@ export class OutputLeveler {
       const w = t % size;
       this.delayL[w] = l;
       this.delayR[w] = r;
-      const req = Math.min(1, this.ceiling / Math.max(1e-12, peak * this.agc));
+      const req = Math.min(1, this.ceiling / Math.max(1e-12, peak * gain));
       while (this.dqLen > 0 && this.dqGain[(this.dqHead + this.dqLen - 1) % dqSize] >= req) this.dqLen--;
       const tail = (this.dqHead + this.dqLen) % dqSize;
       this.dqTime[tail] = t;

@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { EngineSpec } from '../../../shared/ess/spec';
 import type { FiringSchedule } from '../../../shared/ess/geometry';
 import { articulatedState } from '../../../shared/ess/rods';
+import { viewPace } from '@/lib/enginePace';
 
 /**
  * Animated cross-section of the engine as the simulator has it: every bank axis, crank pin, rod
  * and firing angle comes from the solved firing schedule and the resolved spec, so what is drawn
  * is what is heard. Front view (looking along the crankshaft from the front, crank turning
  * clockwise), a plan of the cylinders along the crank, and the firing timeline over one cycle.
- * Shown slowed down: at speed nothing would be visible.
+ * Shown slowed down (at speed nothing would be visible) on the mapping in lib/enginePace.ts: the
+ * idle pace it always had, rising steeply to 5 rev/s at the redline. The view prints the shown pace
+ * and how many times slower than the engine it is.
  */
 
 interface EngineViewProps {
@@ -380,16 +383,25 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
       ctx.fillText(`${model.cycle}°`, x0 + w, y0 + 14);
     };
 
+    let pace = 0;
     const frame = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       const { rpm: liveRpm, running: on } = live.current;
       if (on && !reduced) {
-        // A readable pace that still follows the engine: 0.35 rev/s at idle to about 1.2 at the redline.
-        const pace = 0.35 + 0.85 * Math.min(1, liveRpm / Math.max(1000, spec.calibration.redlineRpm));
+        pace = viewPace(liveRpm, spec.calibration.idleRpm, spec.calibration.redlineRpm);
         cycleAngle = mod(cycleAngle + pace * 360 * dt, model.cycle);
       }
       ctx.clearRect(0, 0, width, height);
+      if (on && !reduced && liveRpm > 0) {
+        // The drawing is not at engine speed: say what it shows.
+        ctx.font = '10px Rajdhani, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = TEXT;
+        const slower = liveRpm / 60 / pace;
+        ctx.fillText(`shown at ${pace.toFixed(1)} rev/s · ${slower >= 10 ? Math.round(slower) : slower.toFixed(1)}× slower than the engine`, 6, 4);
+      }
       const timelineH = 40;
       const planH = Math.min(96, height * 0.2);
       const viewH = height - timelineH - planH - 8;
@@ -445,7 +457,7 @@ export function EngineView({ spec, schedule, rpm, running }: EngineViewProps) {
             {model.cycle === 360 && k === 'compression' ? 'scavenge + compression' : k}
           </span>
         ))}
-        <span className="text-muted-foreground/70 normal-case">front view · crank turns clockwise · slowed down</span>
+        <span className="text-muted-foreground/70 normal-case">front view · crank turns clockwise · slowed down, faster with revs</span>
       </div>
     </div>
   );

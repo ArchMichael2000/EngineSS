@@ -7,7 +7,7 @@ import { EngineSimulator } from "./engine";
 import type { DriveMode } from "./engine";
 import type { Perspective } from "./observer";
 import { resolveEngineSpec } from "./resolveSpec";
-import { OutputLeveler } from "./leveler";
+import { OutputLeveler, volumeToGain } from "./leveler";
 
 export type EssRenderProgram =
   /** Dyno WOT pull idle → redline, then a closed-throttle lift (decel fuel cut / afterfire). */
@@ -32,6 +32,11 @@ export interface EssRenderOptions {
    * in full-scale units, which can exceed ±1 on loud engines (analysis only).
    */
   leveling?: "live" | "none";
+  /**
+   * Listener volume, −100 … +100 (see `volumeToGain`), as on the live control. Ignored when
+   * `normalize` is set: a normalised file is scaled to its own peak whatever the volume was.
+   */
+  volume?: number;
   /** Seconds of silent pre-roll to settle temperatures, manifold pressure and idle. */
   prerollSec?: number;
 }
@@ -95,6 +100,7 @@ export function renderEssPcm(config: EngineConfiguration, options: EssRenderOpti
 
   if ((options.leveling ?? "live") === "live") {
     const leveler = new OutputLeveler(sampleRate, { autoGain: config.listener?.autoLevel ?? true });
+    leveler.volume = options.normalize ? 1 : volumeToGain(options.volume ?? 0);
     // Settle the gain rider on the first second so the export does not start with a level swell,
     // then level the whole clip and drop the look-ahead delay so it stays aligned with the program.
     const warm = Math.min(n, sampleRate);

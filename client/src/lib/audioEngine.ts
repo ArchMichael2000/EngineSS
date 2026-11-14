@@ -12,6 +12,7 @@ import type { EngineConfiguration, ListenerPerspective, PlaybackState } from "..
 import { CURRENT_SOUND_PROFILE, DEFAULT_ENGINE_CONFIG } from "../../../shared/engineTypes";
 import type { RenderRequest, RenderResponse } from "./ess/renderWorker";
 import type { DriveMode, EngineTelemetry, StemGains } from "../../../shared/ess/engine";
+import { volumeToGain } from "../../../shared/ess/leveler";
 import essProcessorUrl from "./ess/essProcessor?worker&url";
 
 export const AUDIO_ENGINE_MODEL_VERSION = "ess-audio-v16-physical-core";
@@ -40,6 +41,8 @@ export class AudioEngine {
   private perspective: ListenerPerspective = "exterior-rear";
   private stemGains: Partial<StemGains> = {};
   private autoLevel = true;
+  /** Listener volume, −100 … +100 (0 = the leveler's own level). */
+  private volume = 0;
   private telemetry: EngineTelemetry | null = null;
   /** Audio-thread figures from the worklet: measured load, learned machine factor, internal rate. */
   private audioStats: { load: number; machineFactor: number; internalRate: number; tier: number; levelDb?: number; autoLevel?: boolean } | null = null;
@@ -153,6 +156,7 @@ export class AudioEngine {
     this.postControls();
     if (Object.keys(this.stemGains).length) node.port.postMessage({ type: "stems", stems: this.stemGains });
     node.port.postMessage({ type: "autoLevel", on: this.autoLevel });
+    node.port.postMessage({ type: "volume", gain: volumeToGain(this.volume) });
     return node;
   }
 
@@ -244,6 +248,16 @@ export class AudioEngine {
     this.essNode?.port.postMessage({ type: "autoLevel", on });
   }
 
+  /** Listener volume −100 (silence) … 0 (as leveled) … +100 (+12 dB, held under the ceiling by the limiter). */
+  setVolume(volume: number): void {
+    this.volume = Math.min(100, Math.max(-100, Number.isFinite(volume) ? volume : 0));
+    this.essNode?.port.postMessage({ type: "volume", gain: volumeToGain(this.volume) });
+  }
+
+  getVolume(): number {
+    return this.volume;
+  }
+
   getAutoLevel(): boolean {
     return this.autoLevel;
   }
@@ -319,7 +333,7 @@ export class AudioEngine {
 
   async renderOffline(config: EngineConfiguration, durationSec: number, options?: { normalize?: boolean; sampleRate?: number }): Promise<AudioBuffer> {
     const sampleRate = options?.sampleRate || 48000;
-    const pcm = await renderInWorker({ config, options: { durationSec, sampleRate, normalize: options?.normalize, program: "sweep" } });
+    const pcm = await renderInWorker({ config, options: { durationSec, sampleRate, normalize: options?.normalize, volume: this.volume, program: "sweep" } });
     if (typeof OfflineAudioContext === "undefined") {
       throw new Error("Offline audio rendering is not available in this browser.");
     }
