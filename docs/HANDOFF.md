@@ -7,7 +7,7 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | | |
 |---|---|
 | Repository | `ArchMichael2000/EngineSS` |
-| Working branch | `t3/41b98773` (November 2026, third round): loudness rider, high-speed structure hiss, short preset names. PR #4 (X layouts, link rods, faster core, engine view, moving listeners, steady idle) and earlier work are merged to `main`. |
+| Working branch | `t3/engine-audio-and-preset-menu-fixes` (November 2026, third round): loudness rider, high-speed structure hiss, short preset names. PR #4 (X layouts, link rods, faster core, engine view, moving listeners, steady idle) and earlier work are merged to `main`. |
 | `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
 | Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
 | Tests | `npx vitest run`: 237 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
