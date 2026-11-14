@@ -637,3 +637,43 @@ describe("random configurations", () => {
     }, 120_000);
   }
 });
+
+describe("structure-borne noise at high speed", () => {
+  // The timing-drive term is a stationary noise fitted at 1000–2000 rpm. Carried up with the speed
+  // gain meant for impacts it stood 15 dB over the exhaust in 4–12 kHz on an exposed motorcycle
+  // engine at 10 000 rpm: a hiss that followed the revs like wind.
+  function stemAbove4k(stem: "exhaust" | "structure") {
+    const sim = dyno("yamaha-cp3", 10000, 1.5);
+    Object.assign(sim.stems, { exhaust: 0, exhaustJet: 0, intake: 0, structure: 0, accessory: 0, [stem]: 1 });
+    const n = FS / 2;
+    const l = new Float32Array(n);
+    sim.process(l, new Float32Array(n), n);
+    // Fourth-order high-pass at 4 kHz (two Butterworth sections), then mean square.
+    const w = (2 * Math.PI * 4000) / FS;
+    const cw = Math.cos(w);
+    let e = 0;
+    const state = [0, 0, 0, 0, 0, 0, 0, 0];
+    const qs = [0.5412, 1.3066];
+    for (let i = 0; i < n; i++) {
+      let x = l[i];
+      for (let sct = 0; sct < 2; sct++) {
+        const alpha = Math.sin(w) / (2 * qs[sct]);
+        const a0 = 1 + alpha;
+        const o = sct * 4;
+        const y = (((1 + cw) / 2) * (x - 2 * state[o] + state[o + 1]) + 2 * cw * state[o + 2] - (1 - alpha) * state[o + 3]) / a0;
+        state[o + 1] = state[o];
+        state[o] = x;
+        state[o + 3] = state[o + 2];
+        state[o + 2] = y;
+        x = y;
+      }
+      e += x * x;
+    }
+    return 10 * Math.log10(e / n);
+  }
+  it("does not bury the exhaust under timing-drive noise above 4 kHz on a motorcycle engine", () => {
+    // 12.6 dB over the exhaust here before the timing-drive term was exempted from the speed gain, 1.5 dB after
+    // (what is left is combustion force and piston slap as much as the drive noise).
+    expect(stemAbove4k("structure") - stemAbove4k("exhaust")).toBeLessThan(6);
+  });
+});

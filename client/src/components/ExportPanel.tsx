@@ -251,7 +251,7 @@ export function ExportPanel({ config, isPlaying, onClose }: ExportPanelProps) {
         <div className="flex items-center justify-between py-2">
           <div>
             <Label className="text-xs font-medium font-[Rajdhani] text-foreground/80 uppercase tracking-wide">Normalize</Label>
-            <p className="text-[10px] text-muted-foreground font-[Rajdhani]">Maximize volume without clipping</p>
+            <p className="text-[10px] text-muted-foreground font-[Rajdhani]">Maximize volume without clipping. Off, the file is at the Listener volume setting.</p>
           </div>
           <Switch
             checked={normalize}

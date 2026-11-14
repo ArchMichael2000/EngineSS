@@ -40,6 +40,8 @@ export default function Simulator() {
     setPerspective,
     setStemGains,
     setAutoLevel,
+    volume,
+    setVolume,
     shift,
     setIgnition,
     vehicleOptions,
@@ -317,6 +319,8 @@ export default function Simulator() {
                 onStemsChange={setStemGains}
                 autoLevel={config.listener?.autoLevel ?? true}
                 onAutoLevelChange={setAutoLevel}
+                volume={volume}
+                onVolumeChange={setVolume}
               />
             </div>
 

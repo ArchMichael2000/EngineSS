@@ -11,6 +11,9 @@ interface ListenerPanelProps {
   onStemsChange: (stems: Partial<StemGains>) => void;
   autoLevel: boolean;
   onAutoLevelChange: (on: boolean) => void;
+  /** Listener volume, −100 (silence) … 0 (as leveled) … +100. */
+  volume: number;
+  onVolumeChange: (volume: number) => void;
 }
 
 const STEMS: Array<{ key: keyof StemGains; label: string; hint: string }> = [
@@ -23,7 +26,7 @@ const STEMS: Array<{ key: keyof StemGains; label: string; hint: string }> = [
 ];
 
 /** v16 listener placement and stem mixer. Stems change only what reaches the microphone, never the physics. */
-export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange, autoLevel, onAutoLevelChange }: ListenerPanelProps) {
+export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange, autoLevel, onAutoLevelChange, volume, onVolumeChange }: ListenerPanelProps) {
   const [gains, setGains] = useState<Record<string, number>>(() => Object.fromEntries(STEMS.map((s) => [s.key, 100])));
   return (
     <div className="space-y-3">
@@ -57,6 +60,26 @@ export function ListenerPanel({ perspective, onPerspectiveChange, onStemsChange,
             {label}
           </button>
         ))}
+      </div>
+      <div
+        className="space-y-1"
+        title="0 is the level the leveler sets. −100 is silence. Above 0 the sound is turned up by as much as 12 dB; a limiter holds the peaks under full scale, so loud passages get denser instead of clipping. The setting is kept in this browser and applies to exports unless Normalize is on."
+      >
+        <div className="flex items-center justify-between">
+          <span id="listener-volume-label" className="text-[10px] font-[Rajdhani] uppercase text-foreground/70">Volume</span>
+          <span className="flex items-center gap-2">
+            {volume !== 0 && (
+              <button type="button" onClick={() => onVolumeChange(0)} className="text-[10px] font-[Rajdhani] uppercase text-neon-cyan/80 hover:text-neon-cyan">
+                Reset
+              </button>
+            )}
+            <span className="text-[10px] font-[Orbitron] text-muted-foreground" aria-live="off">
+              {volume > 0 ? `+${volume}` : volume}
+              {volume === -100 ? ' (silent)' : ''}
+            </span>
+          </span>
+        </div>
+        <Slider value={[volume]} min={-100} max={100} step={1} onValueChange={([v]) => onVolumeChange(v)} aria-labelledby="listener-volume-label" />
       </div>
       <div className="space-y-2">
         {STEMS.map((stem) => (

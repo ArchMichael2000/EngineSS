@@ -158,8 +158,15 @@ async function capture(label, script) {
 }
 
 // ---- 1. every reference engine: idle, full-throttle free rev, lift-off
-const presetSelect = page.locator("select").first();
-const presetValues = await presetSelect.locator("option").evaluateAll((os) => os.map((o) => o.value));
+// The preset menu is a button + listbox (option values: preset key, "ref:"-prefixed for reference
+// engines). selectOption() opens it and clicks the option, as a user would.
+const presetSelect = {
+  async selectOption(value) {
+    await page.getByTestId("preset-trigger").click();
+    await page.locator(`[data-testid=preset-listbox] [role=option][data-value="${value}"]`).click();
+  },
+};
+const presetValues = await page.locator("[data-testid=preset-listbox] [role=option]").evaluateAll((os) => os.map((o) => o.dataset.value));
 const refKeys = presetValues.filter((v) => v.startsWith("ref:")).map((v) => v.slice(4));
 // The Saber Cross-Four presets run through the same engine checks as the reference engines.
 const saberKeys = presetValues.filter((v) => v.startsWith("saber-"));

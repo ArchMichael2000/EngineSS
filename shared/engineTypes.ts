@@ -388,9 +388,10 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfiguration = {
 /**
  * Factory presets for common engine types.
  */
-export const FACTORY_PRESETS: Record<string, { name: string; description: string; config: EngineConfiguration }> = {
+export const FACTORY_PRESETS: Record<string, { name: string; shortName?: string; description: string; config: EngineConfiguration }> = {
   'v8-crossplane': {
     name: 'American V8',
+    shortName: 'American V8',
     description: 'Classic cross-plane V8 with a deep, burbling exhaust note',
     config: {
       quick: {
@@ -408,6 +409,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'v8-flatplane': {
     name: 'Flat-Plane V8',
+    shortName: 'Flat-Plane V8',
     description: 'High-revving flat-plane V8 with a screaming, even exhaust note',
     config: {
       quick: {
@@ -425,6 +427,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'inline-6': {
     name: 'Inline Six',
+    shortName: 'Inline Six',
     description: 'Smooth, naturally balanced inline-6 with a refined exhaust tone',
     config: {
       quick: {
@@ -442,6 +445,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'inline-4-turbo': {
     name: 'Turbo Inline-4',
+    shortName: 'Turbo Inline-4',
     description: 'Rally-inspired turbocharged 4-cylinder with spool and BOV',
     config: {
       quick: {
@@ -466,6 +470,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'v12': {
     name: 'V12 Grand Tourer',
+    shortName: 'V12 GT',
     description: 'Silky smooth V12 with a rich, complex exhaust note',
     config: {
       quick: {
@@ -483,6 +488,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'flat-6': {
     name: 'Flat Six',
+    shortName: 'Flat Six',
     description: 'Air-cooled character flat-6 with distinctive boxer rumble',
     config: {
       quick: {
@@ -500,6 +506,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'v10': {
     name: 'V10 Supercar',
+    shortName: 'V10 Supercar',
     description: 'High-revving V10 with an exotic, screaming exhaust note',
     config: {
       quick: {
@@ -517,6 +524,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
   },
   'supercharged-v8': {
     name: 'Supercharged V8',
+    shortName: 'Supercharged V8',
     description: 'Roots-blown V8 with supercharger whine and massive torque',
     config: {
       quick: {
@@ -542,7 +550,7 @@ export const FACTORY_PRESETS: Record<string, { name: string; description: string
 /** Per-cylinder displacement of the Saber Cross-Four study: 96 mm bore × 190 mm stroke. */
 export const SABER_CYLINDER_LITRES = (Math.PI / 4) * 0.96 * 0.96 * 1.9;
 
-function saberPreset(modules: number, description: string, extra: Partial<EngineConfiguration> = {}, quick: Partial<QuickBuildConfig> = {}): { name: string; description: string; config: EngineConfiguration } {
+function saberPreset(modules: number, description: string, extra: Partial<EngineConfiguration> = {}, quick: Partial<QuickBuildConfig> = {}): { name: string; shortName?: string; description: string; config: EngineConfiguration } {
   const n = 4 * modules;
   return {
     name: `Saber SB${n} Cross-${['Four', 'Eight', 'Twelve', 'Sixteen', 'Twenty', 'Twenty-Four'][modules - 1]}`,
@@ -570,17 +578,17 @@ function saberPreset(modules: number, description: string, extra: Partial<Engine
  * The owner's Cross-Four X engines: modules of four cylinders (96 × 190 mm, 400 mm rods) on four
  * crank pins 90° apart, cylinders tilted 15° off horizontal, modules clocked for even firing.
  */
-export const SABER_PRESETS: Record<string, { name: string; description: string; config: EngineConfiguration }> = {
-  'saber-sb4': saberPreset(1, 'One module, 5.5 L. The two opposed pairs fire 120° / 240° apart.'),
-  'saber-sb8': saberPreset(2, 'Two modules 180° apart, 11 L: 60° / 120° firing.'),
-  'saber-sb12': saberPreset(3, 'Three modules at 0° / 160° / 80°, 16.5 L: 40° / 80° firing.'),
-  'saber-sb16': saberPreset(4, 'Four modules a quarter turn apart, 22 L: 30° / 60° firing.'),
-  'saber-sb16-square': saberPreset(4, 'SB16 with the cylinders at 45°: a square X firing evenly every 45°.', { physical: { xTiltDeg: 45, xPhasing: 'even-firing' } }),
-  'saber-sb12-low-couple': saberPreset(3, 'SB12 clocked 0° / 120° / 240°: the rocking couple cancels, firing 120° / 0° / 120° in pairs.', { physical: { xTiltDeg: 15, xPhasing: 'low-couple' } }),
+export const SABER_PRESETS: Record<string, { name: string; shortName?: string; description: string; config: EngineConfiguration }> = {
+  'saber-sb4': { ...saberPreset(1, 'One module, 5.5 L. The two opposed pairs fire 120° / 240° apart.'), shortName: 'Saber SB4' },
+  'saber-sb8': { ...saberPreset(2, 'Two modules 180° apart, 11 L: 60° / 120° firing.'), shortName: 'Saber SB8' },
+  'saber-sb12': { ...saberPreset(3, 'Three modules at 0° / 160° / 80°, 16.5 L: 40° / 80° firing.'), shortName: 'Saber SB12' },
+  'saber-sb16': { ...saberPreset(4, 'Four modules a quarter turn apart, 22 L: 30° / 60° firing.'), shortName: 'Saber SB16' },
+  'saber-sb16-square': { ...saberPreset(4, 'SB16 with the cylinders at 45°: a square X firing evenly every 45°.', { physical: { xTiltDeg: 45, xPhasing: 'even-firing' } }), shortName: 'Saber SB16 Square' },
+  'saber-sb12-low-couple': { ...saberPreset(3, 'SB12 clocked 0° / 120° / 240°: the rocking couple cancels, firing 120° / 0° / 120° in pairs.', { physical: { xTiltDeg: 15, xPhasing: 'low-couple' } }), shortName: 'Saber SB12 Low-Couple' },
   // Two-strokes carry the long, densely packed silencers: on the sport exhaust the eight's idle alone reaches full scale.
-  'saber-sb4-two-stroke': saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
-  'saber-sb8-two-stroke': saberPreset(2, 'SB8 as a two-stroke on side collectors and long silencers: four paired firings a revolution.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }),
-  'saber-sb8-diesel': saberPreset(2, 'SB8 as a turbo-diesel at the study\'s 16.8 : 1 compression, on twin 100 mm exhausts.', { forcedInduction: { type: 'turbo', turboSize: 'balanced', maxBoost: 18, bovEnabled: false, wastegateEnabled: true }, physical: { xTiltDeg: 15, xPhasing: 'even-firing', compressionRatio: 16.8, pipeDiameterMm: 100, tailpipeDiameterMm: 110 } }, { fuel: 'diesel', aspiration: 'turbo' }),
+  'saber-sb4-two-stroke': { ...saberPreset(1, 'SB4 as a two-stroke: each opposed pair fires together every revolution, through four tuned pipes.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }), shortName: 'Saber SB4 2-Stroke' },
+  'saber-sb8-two-stroke': { ...saberPreset(2, 'SB8 as a two-stroke on side collectors and long silencers: four paired firings a revolution.', {}, { cycle: 'two-stroke', exhaustCharacter: 'stock' }), shortName: 'Saber SB8 2-Stroke' },
+  'saber-sb8-diesel': { ...saberPreset(2, 'SB8 as a turbo-diesel at the study\'s 16.8 : 1 compression, on twin 100 mm exhausts.', { forcedInduction: { type: 'turbo', turboSize: 'balanced', maxBoost: 18, bovEnabled: false, wastegateEnabled: true }, physical: { xTiltDeg: 15, xPhasing: 'even-firing', compressionRatio: 16.8, pipeDiameterMm: 100, tailpipeDiameterMm: 110 } }, { fuel: 'diesel', aspiration: 'turbo' }), shortName: 'Saber SB8 Diesel' },
 };
 
 /**
