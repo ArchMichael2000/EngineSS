@@ -10,7 +10,7 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | Working branch | `claude/elegant-albattani-7t1qgq` (PR #4, November 2026): X layouts (Cross-Four and shared-pin), link rods, faster core, two-stroke work, engine view, moving listeners, steady idle. Earlier work is merged to `main`. |
 | `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
 | Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
-| Tests | `npx vitest run`: 221 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
+| Tests | `npx vitest run`: 227 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
 | Browser | `npm run test:browser -- --url <app>/simulator --stress`: every reference engine, every control and export in Chromium. Results: `docs/browser-verification.md`. |
 | Typecheck and build | `npm run build` (runs `tsc -b`, then `vite build`) |
 | Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 40 1`: 120/120 random configurations pass across seeds 1–120 (X engines, 17–24 cylinders, X exhaust arrangements and firing presets included) |
@@ -151,6 +151,10 @@ High-revving NA engines now read 6–7 % low at peak power (F136, S54, K20A; 12�
 - **Idle.** The largest audible change of the round; numbers in `docs/reference-sources.md` §4 "Idle". Half-second idle speed now holds 1–3 % on the reference engines (it was 6–7 % on stock engines, and the flat-six preset and the long-cam F136 swung between a quarter and twice their target). Four changes: cycle-to-cycle variation recalibrated (COV of IMEP 7 % on a mild cam instead of 19 %); idle spark feedback 70°/unit error up to MBT; phased cams park on wider centrelines when they are longer than the family cam; overlap back-flow carries what the cylinder last expelled. The two-stroke dilution misfire no longer applies to four-strokes (it stalled the V10 preset every few seconds).
 - **Accessory drag** is flat to 1500 rpm then constant power, plus the Patton–Nitschke–Heywood auxiliary term. **Structure-borne level** follows Anderton's 50·log N on spark engines above 2000 rpm.
 - **Reference data:** F136 and S54 cam durations, 13B runner length and intake closing, CRM250 scavenging. The rotary's +11 % at 7000 rpm is now +3 %.
+- **Owner feedback on the limiter (third pass).** Free revs to the limiter sounded severely distorted. Three causes, all fixed; detail in `docs/reference-sources.md` §4 "Rev limiter and output level":
+  - The soft limiter cut sparks at random, so an unloaded engine held its speed on about a fifth of its firings. It now holds on an electronic throttle with every cylinder firing; the backstop is a rotating fuel cut. Hard fuel-cut and ignition-cut limiters are unchanged and are the ones that stutter and bang.
+  - The output leveler read sparse peaks 8 dB low and boosted into its own limiter. Its peak detector now attacks in 5 ms.
+  - The idle-air integrator could ratchet itself into a permanent hunt at 48 kHz (found while re-rendering). It now learns symmetrically.
 - **Lesson kept as a rule:** run the whole suite before every push. Two pushes went out with a stale test (the worklet's rate tiers) and failed CI.
 
 ## 4. Conventions and gotchas
@@ -170,6 +174,7 @@ High-revving NA engines now read 6–7 % low at peak power (F136, S54, K20A; 12�
   - Rotary: 1080° of e-shaft per face.
   - For rotaries, `spec.cylinders` is the number of faces (3 × rotors), `quick.cylinderCount` is rotors, and `quick.displacement` follows Mazda's convention (rotors × one chamber). `displacementLitres(spec)` counts every face.
 - **Fuzz seeds:** variant draws (diesel, two-stroke, rotary) happen last, so a seed's base configuration doesn't change when a variant is added. A seed can still become a variant, so tests pin variants off where a specific engine matters (seed 34 is the gasoline 10 L turbo I8 limiter case).
+- **Survey at the rate the app runs at.** Idle stability margins differ with sample rate: the flat-six preset was steady at 24 and 44.1 kHz and could hunt at 48 kHz. Run idle and limiter surveys at 48 kHz, on several seeds.
 - **Judge idle on statistics, not on one instant.** Speed at a single moment after start is chaotic: any change to the model moves it by hundreds of rpm on a loping engine, and a 2 s check passed by luck for months while the V10 preset stalled every few seconds. Use half-second means over 8 s or more (the preset test in `ess.test.ts` does; so does the survey in `docs/reference-sources.md` §4 "Idle").
 - **Run the whole suite before every push**, and the fuzz sweep after any change to combustion, friction or idle control.
 - **Prefer physical fixes over fudge factors.** Each calibrated constant is listed with its basis in `docs/reference-sources.md` §1, "Calibrated constants". Add new ones there.
@@ -204,7 +209,8 @@ Done: variable-geometry turbines for common-rail diesels; Drive mode for every f
 10. **Turbo deep surge** stays the mild type at 96 % of Helmholtz (measured 63–82 %). It needs a measured negative-flow compressor characteristic. Sensitivities are in §1.
 11. **High-revving NA engines** read 6–7 % low at peak power (F136, S54, K20A), after the accessory law and realistic cam durations. The S54's torque peak is 10 % low. What is left is probably intake and head detail the family defaults do not carry.
 11a. **Long-overlap idle.** The well-mixed cylinder puts a long-overlap cam's idle at 0.4–0.7 burned gas (the V10 preset reads 0.71 at 77 kPa manifold pressure), about 1.5 times what such engines measure. The idle is steady now, but the residual scale itself is unverified; a two-zone treatment of overlap back-flow is the candidate. The MZ ETZ 250 idles at 1700 rpm against its 1300 target.
-11b. **Leveler and impulsive idles.** The auto level reads sparse peaks low (0.4 s attack) and lifts a popping idle toward the limiter, so the two-stroke SB8's idle comes out within 2 dB of its full-throttle level. A 5 ms peak detector restores the swing but lowers every engine's full-throttle level by 3–4 dB; left as it was.
+11b. ~~Leveler and impulsive idles.~~ Fixed with the limiter work: 5 ms peak detector, 50 ms gain attack, target −4 dBFS.
+11c. **Soft limiter character.** Holding on the throttle is quiet (an unloaded engine at constant speed makes little noise). If the owner wants the default to stutter instead, switch `revLimiterType` to `hard-fuel-cut` in the presets; the rotating cut is in place for it.
 12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
 13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
 
@@ -222,7 +228,7 @@ The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan, an
 ```bash
 git fetch origin main && git checkout main
 npm ci
-npx tsc -b && npx vitest run            # 221 tests
+npx tsc -b && npx vitest run            # 227 tests
 npx vite-node scripts/fuzzConfigs.ts -- 40 1
 npx vite-node scripts/verifyForcedInduction.ts
 npx vite-node scripts/renderForCompare.ts -- mazda-13b-fc exterior-rear sweep 1500 7500 6 /tmp/13b

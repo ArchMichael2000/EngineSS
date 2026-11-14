@@ -397,6 +397,21 @@ describe("soft rev limiter", () => {
     }, 60_000);
   }
 
+  it("learns nothing from blips that touch the limiter and are lifted", () => {
+    // Each lift on the limiter used to read as "holding pressure too low" and add 25 kPa of trim,
+    // so the next real hold sat in the fuel cut for seconds.
+    const sim = new EngineSimulator(resolveEngineSpec({ ...SABER_PRESETS["saber-sb8"].config, seed: 11 }), 24000);
+    sim.setControls({ mode: "free", throttle: 0 });
+    sim.prewarm(1);
+    for (let blip = 0; blip < 3; blip++) {
+      sim.setControls({ throttle: 1 });
+      sim.prewarm(0.6);
+      sim.setControls({ throttle: 0 });
+      sim.prewarm(1);
+    }
+    expect(Math.abs((sim as unknown as { limiterTrim: number }).limiterTrim)).toBeLessThan(8);
+  }, 60_000);
+
   it("lets go of the throttle when a load takes the speed away", () => {
     // A dyno run overshoots its set speed on the way up; 450 rpm under the limit it must be at full throttle.
     const sim = new EngineSimulator(specOf("ferrari-f140"), 24000);

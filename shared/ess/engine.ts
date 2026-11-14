@@ -183,6 +183,8 @@ export class EngineSimulator {
   private limiterIntegral = 0;
   private limiterHolding = false;
   private limiterBelow = 0;
+  /** Largest pedal position since the hold began (a drop from it is the driver lifting). */
+  private limiterPedal = 0;
   private limiterTrim = 0;
   /** Indicated torque at full load, referred to 100 kPa manifold pressure (learned on the run). */
   private wotIndicated = 0;
@@ -886,8 +888,15 @@ export class EngineSimulator {
           // less than half of that). The trim is kept between visits: what it learned about this
           // engine's holding pressure (blower drive, friction the estimate missed) still applies.
           this.limiterBelow = rpm < lim - 45 ? this.limiterBelow + blockSec : 0;
-          if (!this.limiterHolding && rpm > lim - 30) this.limiterHolding = true;
-          else if (this.limiterHolding && (rpm < lim - Math.max(300, 0.12 * lim) || this.limiterBelow > 1)) this.limiterHolding = false;
+          // It also lets go the moment the pedal asks for less than the limiter allows: the driver
+          // has lifted, and the speed falling away then says nothing about the holding pressure.
+          // (Without this, each blip that touched the limiter taught the trim 25 kPa too much.)
+          const lifted = pedal < this.limiterPedal - 0.05 && Math.pow(pedal, 1.35) < this.limiterPlate;
+          if (!this.limiterHolding && rpm > lim - 30 && pedal > 0.03) {
+            this.limiterHolding = true;
+            this.limiterPedal = pedal;
+          } else if (this.limiterHolding && (lifted || rpm < lim - Math.max(300, 0.12 * lim) || this.limiterBelow > 1)) this.limiterHolding = false;
+          if (this.limiterHolding) this.limiterPedal = Math.max(this.limiterPedal, pedal);
           if (this.limiterHolding) {
             const fullLoad = this.wotIndicated > 0 ? this.wotIndicated : 100 * this.displacementL;
             const holdKpa = 10 + 90 * clamp((this.frictionTorque(lim) + (this.fi ? Math.max(0, this.fi.crankTorque) : 0)) / fullLoad, 0.03, 0.9);

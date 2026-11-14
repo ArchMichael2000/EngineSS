@@ -85,6 +85,8 @@ The SB16 presets held 48 kHz in this run (32 kHz in the first round) and the SB1
 
 Listener perspectives round-trip through the worklet: exterior-rear 78 dB, exterior-side 68 dB, engine-bay 66 dB, cabin 75 dB, dyno-tailpipe 91 dB, pass-by 61 dB. The fly-over read 30 dB in one run and silence in the next: its track starts 252 m out, so the first 0.7 s after selecting it is the sound still on its way.
 
+**After the limiter and leveler work (third pass).** All checks pass again on the Pages build, no console errors, no rate step-downs. "Full throttle louder than idle" now compares idle with the loudest quarter second of the rev: the soft limiter holds on the throttle, so most of the old 2.6–4.5 s window is an unloaded engine at constant speed (the Wasp Junior read −27.8 dBFS there against −18.9 at idle). With the leveler's fast peak detector the two-stroke SB8 reads −17.7 dBFS at idle and −8.8 at full throttle (it was −11.9 and −10.3).
+
 **Found by this run.** The two-stroke SB8 failed "full throttle louder than idle" (−12.0 against −11.9 dBFS) on the sport exhaust: a 300 mm straight-through silencer on 11 litres of two-stroke puts even the idle at full scale, and the auto level then holds both at its target. Both two-stroke Saber presets now carry the stock silencers (380 mm, denser packing). The idle still comes out within 2 dB of full throttle after levelling, because the auto level reads sparse pops low and lifts them; see `docs/HANDOFF.md` §5 item 11b.
 
 ## Controls

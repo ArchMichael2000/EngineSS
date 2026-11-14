@@ -68,6 +68,9 @@ Each calibrated constant below was fitted against a measured reference, so chang
 | Idle feed-forward | Energy balance: friction + accessories + pumping at η 0.27/(1 + overlap/30) | Lands within about 10 % of the converged idle-valve opening on all 29 engines. |
 | Accessory drag | (min(2.05, 322/ω) + 0.0796·(6.23 + 5.22e-3·N − 1.79e-7·N²)) N·m per litre | Electrical, steering and climate loads: flat torque to 1500 rpm, constant power (322 W/L) above. Pumps: the auxiliary term of Patton, Nitschke & Heywood (SAE 890836), amep in kPa × 0.0796 N·m per kPa·L. Equal to the former (2.6 + 0.00035·rpm)·L at idle (≈ 16 N·m on a 6 L V8), about 60 % of it at 6000 rpm. Took the F136, S54 and K20A from −12/−13 % to −6/−7 % at peak power together with their cam data. |
 | Structure-borne speed gain | clamp(rpm/2000, 1, 4) on spark engines | The modelled impacts grow ≈ 30 dB per decade of speed; Anderton's surveys give ≈ 50·log N for petrol engines and ≈ 30·log N for NA DI diesels. Applied above 2000 rpm, where the level was fitted to HL-CEAD; limited to 12 dB. The slope is sourced, the level at speed is not anchored. |
+| Idle air valve | P 0.1, I 0.15/s on error clamped to ±0.6 (whole error after 1 s on one side), rate damping 0.1 × min(1, cylinders/6) | Fitted to the 48 kHz idle survey in §4 "Rev limiter and output level". |
+| Soft limiter governor | loop rate 6/s, integral 2.5× that, plate-follows-pressure 40/s, aim 15 rpm under, fuel cut from +30 rpm | Fitted on the free-rev holds listed in §4; faster loops hunt. |
+| Output leveler | peak attack 5 ms, gain attack 50 ms, release 4 s, target −4 dBFS, ceiling −2 dBFS | A slower peak attack under-reads sparse pulses (8 dB at 0.4 s). |
 | Idle spark feedback | 70° per unit speed error, 2° to MBT | Fitted to the idle survey in §4 (40 left the long-overlap engines hunting; 120 made the two-cylinder Harley hunt). |
 | Phaser park offset | half the extra duration over the family cam, ≤ half the phaser travel | Keeps a phased long cam's idle overlap at the family's. F136: 9.5° intake, 5.5° exhaust. |
 | Centrifugal blower sizing | tip speed from (PR^0.2857 − 1)/0.95e-6, flow coefficient 0.07, impeller from redline airflow | Rated boost reached at the redline: Merlin 84 kPa of 83, FA20 Vortech 44–52 of 48, Vulture 38–40 of 41. |
@@ -268,6 +271,37 @@ Measured as the mean speed of each half second over 20–40 s after a 3 s settle
 The 7 % target for a mild cam sits under the ≈ 10 % COV of IMEP at which Heywood (§9.4) places driveability complaints. The figures for long-overlap cams (15–20 % at 0.2 burned gas, 40–50 % on a loping cam) are estimates; no measured idle COV for a race cam was found. A spark rate term (15–40° per unit of speed rate) destabilised every engine, the speed derivative being too noisy at block rate.
 
 **Still off.** The burned-gas fraction itself: 0.13 for a mild cam is plausible, but 0.40 for the lumpy presets and 0.71 for the V10 preset (at 77 kPa manifold pressure) are about 1.5 times what long-overlap engines measure. The cylinder is one well-mixed zone, so overlap back-flow dilutes the whole charge at once.
+
+### Rev limiter and output level (November 2026, from owner feedback)
+
+The owner reported that free revs to the limiter sounded severely distorted while idle and blips sounded right. Measured on the SB8 held at full throttle on its 3000 rpm limiter:
+
+| | Before | After |
+|---|---|---|
+| How the speed is held | random spark cuts, about 80 % of firings dropped | throttle plate at 0.11, manifold 27 kPa, every cylinder firing |
+| Speed over 2.5 s | 2987–3116 rpm | 2981–2989 rpm |
+| Share of 40–1500 Hz power in the 40 strongest lines | 0.38 | 0.99 |
+| Spectral flatness, 40–1500 Hz | 0.060 | 0.0013 |
+| Output limiter | dips of 3–8 dB, five a second | not acting |
+| Automatic gain during the hold | +8 dB (envelope reading sparse peaks low) | +1 to +3 dB |
+
+**Soft limiter** (`engine.ts`, the limiter block of `blockUpdate`). From 30 rpm under the limit the plate is governed so the manifold holds the pressure that carries the engine's own friction (and blower drive) there:
+* feed-forward: friction torque at the limit over full-load indicated torque, learned while the plate is open and referred to 100 kPa, taken as linear in manifold pressure above 10 kPa;
+* a PI trim on speed aimed 15 rpm under the limit, loop rate 6 per second scaled by the engine's unloaded acceleration per kPa (full-load torque over inertia), learning six times faster when the speed falls more than 60 rpm under the aim, and kept between visits;
+* the plate follows the allowed pressure by integral control on the logarithm of both (40 per second);
+* backstop from 30 rpm past the limit: a rotating fuel cut, each cylinder decided once a cycle before its intake stroke, the remainder carried to the next cylinder in the firing sequence. Two-strokes and rotaries lose the spark in the same pattern.
+
+The hold lets go when the pedal drops from where it was and asks for less than the limiter allows (the driver lifted), 12 % under the limit, or after a second spent more than 45 rpm under it. Before the pedal rule, each blip that touched the limiter and was lifted taught the trim about 25 kPa too much, and the next real hold sat in the fuel cut for seconds.
+
+What did not work, in order: a proportional plate limit (limit cycle, 2975–3180 rpm); PI on the logarithm of the opening (stable on the SB8 at one gain, 300 rpm of swing on the F136); look-ahead on the speed trend with pressure control (100–700 rpm of swing). An unloaded engine gains 90–370 rpm/s per kPa and answers about 0.1 s late; only a slow trim around a good first estimate holds.
+
+Speed held over the second half of an 8 s free rev (limit in brackets): LS3 6579–6592 (6600), F136 9178–9206 (9200), K20A 8371–8440 (8400), 2JZ 6777–6790 (6800), 13B 7979–7990 (8000), VR38 7075–7092 (7100), Hellcat 6137–6290 (6200), W16 6671–6757 (6700), Harley 5461–5559 (5500), Ducati 11412–11573 (11500), SB16 2984–2988 (3000).
+
+On the dyno the absorber holds the speed, so the plate simply closes over 80 rpm from 30 rpm under the limit, without a latch; the dyno survey is unchanged by the new limiter.
+
+**Output leveler** (`leveler.ts`). The peak envelope rose over 0.4 s and so read a train of sparse pulses about 8 dB under their peaks; the automatic gain rode that much too high and the look-ahead limiter took it back pulse by pulse. The envelope now catches a peak in 5 ms, the gain comes down in 50 ms (was 0.4 s) and the target is −4 dBFS (was −6) to keep the loudness. Test: 25 pulses a second at −3 dBFS pass at one gain within 1 dB.
+
+**Idle-air integrator** (found while re-rendering at 48 kHz). In a large excursion the integrator saw the overshoots and not the dips (it stopped below half the target) and wound the valve from 0.23 to 0.08 in 25 s: a permanent hunt at 0.23–2.1 of target on the flat-six preset. It now learns at any speed and takes at most 60 % of error either way, or the whole error once it has kept its sign for a second. Rate damping on the valve went from 0.04 to 0.1 (scaled back under six cylinders, faded out 30–60 % over target). Flat-six preset at 48 kHz over 60 s on three seeds: 5.1–8.1 % (26 % on the worst seed before the damping change, 47 % once hunting).
 
 ### Engine-bay perspective against HL-CEAD
 
