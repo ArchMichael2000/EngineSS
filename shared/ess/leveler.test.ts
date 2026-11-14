@@ -8,6 +8,20 @@ function sine(amp: number, freq: number, seconds: number): Float32Array {
   for (let i = 0; i < n; i++) x[i] = amp * Math.sin((2 * Math.PI * freq * i) / FS);
   return x;
 }
+/** BS.1770 K-weighted loudness of a stereo pair, LUFS (ungated; 48 kHz coefficients from the standard). */
+function lufs(l: Float32Array, r: Float32Array): number {
+  const weigh = (x: Float32Array) => {
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0, z1 = 0, z2 = 0, sum = 0;
+    for (let i = 0; i < x.length; i++) {
+      const y = 1.53512485958697 * x[i] - 2.69169618940638 * x1 + 1.19839281085285 * x2 + 1.69065929318241 * y1 - 0.73248077421585 * y2;
+      const z = y - 2 * y1 + y2 + 1.99004745483398 * z1 - 0.99007225036621 * z2;
+      x2 = x1; x1 = x[i]; y2 = y1; y1 = y; z2 = z1; z1 = z;
+      sum += z * z;
+    }
+    return sum / x.length;
+  };
+  return -0.691 + 10 * Math.log10(weigh(l) + weigh(r));
+}
 const peak = (x: Float32Array, from = 0) => x.subarray(from).reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 /** Level of the harmonics 2f…10f relative to the fundamental, via single-bin DFTs over whole periods. */
 function harmonicsDb(x: Float32Array, freq: number): number {
@@ -33,24 +47,71 @@ describe("output leveler", () => {
     expect(harmonicsDb(l, 220)).toBeLessThan(-50);
   });
 
-  it("settles a loud sustained signal near the −4 dBFS target", () => {
-    const l = sine(4, 150, 4);
-    const r = l.slice();
-    new OutputLeveler(FS).process(l, r);
-    const p = peak(l, 3 * FS);
-    expect(20 * Math.log10(p)).toBeGreaterThan(-5.5);
-    expect(20 * Math.log10(p)).toBeLessThan(-3);
+  it("brings signals 50 dB apart to the same loudness, and to the target", () => {
+    // 150 Hz at +12 dBFS and at −38 dBFS: a straight-piped V10 and a diesel, both at full load.
+    const out = [4, 0.0126].map((amp) => {
+      const l = sine(amp, 150, 8);
+      const r = l.slice();
+      new OutputLeveler(FS).process(l, r);
+      return lufs(l.subarray(7 * FS), r.subarray(7 * FS));
+    });
+    expect(Math.abs(out[0] - out[1])).toBeLessThan(0.5);
+    expect(out[0]).toBeGreaterThan(-9);
+    expect(out[0]).toBeLessThan(-7);
   });
 
-  it("boosts a quiet signal by at most 12 dB, and not at all with auto gain off", () => {
-    const quiet = sine(0.01, 100, 8);
+  it("places idle 15 dB under full effort for every engine", () => {
+    const level = (amp: number, effort: number) => {
+      const l = sine(amp, 150, 8);
+      const r = l.slice();
+      const lev = new OutputLeveler(FS);
+      lev.effort = effort;
+      lev.process(l, r);
+      return lufs(l.subarray(7 * FS), r.subarray(7 * FS));
+    };
+    for (const amp of [0.5, 0.002]) {
+      expect(level(amp, 1) - level(amp, 0)).toBeGreaterThan(14);
+      expect(level(amp, 1) - level(amp, 0)).toBeLessThan(16);
+      expect(level(amp, 0.5) - level(amp, 0)).toBeGreaterThan(6.5);
+      expect(level(amp, 0.5) - level(amp, 0)).toBeLessThan(8.5);
+    }
+  });
+
+  it("leaves the level alone with auto gain off, and while held", () => {
+    const quiet = sine(0.01, 100, 4);
     const l = quiet.slice(), r = quiet.slice();
-    new OutputLeveler(FS).process(l, r);
-    expect(peak(l, 7 * FS) / 0.01).toBeLessThan(4.05);
-    expect(peak(l, 7 * FS) / 0.01).toBeGreaterThan(3.5);
-    const l2 = quiet.slice(), r2 = quiet.slice();
-    new OutputLeveler(FS, { autoGain: false }).process(l2, r2);
-    expect(peak(l2, FS) / 0.01).toBeCloseTo(1, 2);
+    new OutputLeveler(FS, { autoGain: false }).process(l, r);
+    expect(peak(l, FS) / 0.01).toBeCloseTo(1, 2);
+    // Engine stopped: the gain stays where the running engine left it instead of rising on the silence.
+    const lev = new OutputLeveler(FS);
+    const a = sine(0.2, 100, 4), b = a.slice();
+    lev.process(a, b);
+    const settled = lev.lastGain;
+    lev.hold = true;
+    const tail = sine(0.0005, 100, 4), tail2 = tail.slice();
+    lev.process(tail, tail2);
+    expect(lev.lastGain / settled).toBeCloseTo(1, 2);
+  });
+
+  it("does not duck the engine for a single bang 30 dB over it", () => {
+    // Steady 200 Hz with one 30 ms burst 30 dB higher at 4 s: a flat-shift afterfire in a 0–100 run.
+    const n = 7 * FS;
+    const l = sine(0.05, 200, 7);
+    for (let i = 4 * FS; i < 4 * FS + 0.03 * FS; i++) l[i] += 1.6 * Math.sin((2 * Math.PI * 90 * i) / FS);
+    const r = l.slice();
+    const before = l.slice();
+    const lev = new OutputLeveler(FS);
+    lev.process(l, r);
+    const gainAt = (t: number) => {
+      const from = Math.round(t * FS), to = from + Math.round(0.1 * FS);
+      return 20 * Math.log10(peak(l.subarray(from + lev.latency, to + lev.latency)) / peak(before.subarray(from, to)));
+    };
+    const settled = gainAt(3.8);
+    // (The previous leveler sat 15 dB down for the next three seconds.)
+    expect(settled - gainAt(4.3)).toBeLessThan(4);
+    expect(settled - gainAt(5)).toBeLessThan(1.5);
+    expect(peak(l)).toBeLessThanOrEqual(Math.pow(10, -2 / 20) + 1e-6);
+    expect(n).toBe(l.length);
   });
 
   it("does not ride sparse pulses up into the limiter", () => {
@@ -78,7 +139,7 @@ describe("output leveler", () => {
         ratioMax = Math.max(ratioMax, g);
       }
     }
-    // Pulses pass at one steady gain near the −4 dBFS target (−3 dBFS in, so about −1 dB of gain).
+    // Pulses pass at one steady gain near the −4.5 dBFS peak target (−3 dBFS in, so about −1.5 dB of gain).
     expect(20 * Math.log10(ratioMax)).toBeLessThan(0.5);
     expect(20 * Math.log10(ratioMax / ratioMin)).toBeLessThan(1);
   });

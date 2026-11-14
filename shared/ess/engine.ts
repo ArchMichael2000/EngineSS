@@ -378,6 +378,21 @@ export class EngineSimulator {
     return this.controls;
   }
 
+  /**
+   * How hard the engine is being worked, 0 (idling) … 1 (full pedal at the redline): 0.7 of the
+   * pedal plus 0.3 of the way from idle to the redline. The output leveler places its loudness
+   * target on this (leveler.ts), so every engine keeps the same idle-to-full-load swing.
+   */
+  get effort(): number {
+    const cal = this.spec.calibration;
+    return 0.7 * this.controls.throttle + 0.3 * clamp((this.rpm - cal.idleRpm) / Math.max(1, cal.redlineRpm - cal.idleRpm), 0, 1);
+  }
+
+  /** The engine is firing (not stopped, not on the starter). */
+  get isRunning(): boolean {
+    return this.running && !this.cranking;
+  }
+
   setPerspective(perspective: Perspective): void {
     this.observer = new Observer(this.sampleRate, perspective, this.sourceDefs, this.exposed);
   }
@@ -980,7 +995,12 @@ export class EngineSimulator {
     // impacts also shorten and move energy up into the radiating band, which fixed contact times
     // do not reproduce. Above 2000 rpm, where the level was fitted, spark engines get the missing
     // 20 dB per decade, limited to 12 dB.
+    // The correction belongs to the impacts (combustion, slap, valve seating). The timing-drive term
+    // is a continuous, stationary excitation fitted at 1000–2000 rpm; carried up with the same gain it
+    // became a steady hiss that rose with speed and stood 17 dB over the exhaust in 4–12 kHz on an
+    // exposed (motorcycle) engine at 10 000 rpm, so it keeps its own 30 dB per decade.
     this.structureSpeedGain = this.spec.diesel ? 1 : clamp(rpm / 2000, 1, 4);
+    this.structure.driveGain = 1 / this.structureSpeedGain;
 
     // Housekeeping at block rate.
     this.intake.updateBlock();

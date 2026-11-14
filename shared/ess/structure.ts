@@ -76,6 +76,15 @@ export class StructuralRadiator {
   private readonly chainPulse: ContactPulse;
   /** Surface volume acceleration (m³/s²) radiated as a monopole. */
   volumeAcceleration = 0;
+  /**
+   * Gain on the timing-drive excitation alone. The simulator sets it to the inverse of the speed
+   * gain it applies to the whole radiator (see `structureSpeedGain` in engine.ts): that gain stands
+   * for impacts shortening with speed, which a continuous excitation does not do, and the drive
+   * term already grows 30 dB per decade on its own.
+   */
+  driveGain = 1;
+  /** Diagnostic gains on each excitation (1 = as modelled), for source isolation in scripts. */
+  readonly mix = { gas: 1, slap: 1, seat: 1, driveNoise: 1, driveTone: 1 };
 
   constructor(
     private readonly fs: number,
@@ -190,7 +199,7 @@ export class StructuralRadiator {
     // High-frequency part of the chain tension fluctuation at the guides and tensioner, N (the
     // low-frequency part, hundreds of N, sits below the structure modes and does not radiate).
     const tone = this.drive.teeth > 0 ? 36 * Math.sin(this.meshPhase) : 0;
-    return k * this.drive.level * (60 * this.rng.gaussian() + tone) + starter;
+    return k * this.drive.level * this.driveGain * (60 * this.rng.gaussian() * this.mix.driveNoise + tone * this.mix.driveTone) + starter;
   }
 
   step(gaugePressures: Float64Array, scale: number, rpm = 0): void {
@@ -199,11 +208,11 @@ export class StructuralRadiator {
     for (let i = 0; i < gaugePressures.length; i++) force += gaugePressures[i] * this.pistonArea * this.participation[i];
     // Timing drive acts on the front cover / block (guides and tensioner are bolted there).
     const mech = this.chainPulse.next(this.mechanical(rpm));
-    const drive = force + this.slapPulse.next(this.slapImpulse * this.fs) + mech;
+    const drive = force * this.mix.gas + this.slapPulse.next(this.slapImpulse * this.fs) * this.mix.slap + mech;
     this.slapImpulse = 0;
     let v = 0;
     for (let k = 0; k < this.blockModes.length; k++) v += runMode(this.blockModes[k], drive) * BLOCK_MOBILITY;
-    const head = this.seatPulse.next(this.headImpulse * this.fs);
+    const head = this.seatPulse.next(this.headImpulse * this.fs) * this.mix.seat;
     this.headImpulse = 0;
     for (let k = 0; k < this.headModes.length; k++) v += runMode(this.headModes[k], head) * HEAD_MOBILITY;
     const h = this.hp;

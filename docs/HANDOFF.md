@@ -7,10 +7,10 @@ The state of the Engine Sound Simulator (ESS) rebuild, written for a fresh sessi
 | | |
 |---|---|
 | Repository | `ArchMichael2000/EngineSS` |
-| Working branch | `claude/elegant-albattani-7t1qgq` (PR #4, November 2026): X layouts (Cross-Four and shared-pin), link rods, faster core, two-stroke work, engine view, moving listeners, steady idle. Earlier work is merged to `main`. |
+| Working branch | `t3/41b98773` (November 2026, third round): loudness rider, high-speed structure hiss, short preset names. PR #4 (X layouts, link rods, faster core, engine view, moving listeners, steady idle) and earlier work are merged to `main`. |
 | `main` | Runs v16 only. The v0–v15 engine lives in `legacy/` (see `legacy/README.md`) and is never shipped. |
 | Live site | GitHub Pages builds `dist/` from `main` via `.github/workflows/pages.yml` (not from `docs/`). The build fails if the legacy worklet reaches it. |
-| Tests | `npx vitest run`: 228 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
+| Tests | `npx vitest run`: 237 tests pass (≈ 140 s on 4 vCPU, CPU-heavy). CI (`.github/workflows/ci.yml`) runs typecheck, build and tests on pushes and PRs. |
 | Browser | `npm run test:browser -- --url <app>/simulator --stress`: every reference engine, every control and export in Chromium. Results: `docs/browser-verification.md`. |
 | Typecheck and build | `npm run build` (runs `tsc -b`, then `vite build`) |
 | Robustness | `npx vite-node scripts/fuzzConfigs.ts -- 40 1`: 120/120 random configurations pass across seeds 1–120 (X engines, 17–24 cylinders, X exhaust arrangements and firing presets included) |
@@ -65,6 +65,7 @@ The legacy v0–v15 additive model (`legacy/engineSoundModel.ts`, its worklet, m
 - `scripts/fuzzConfigs.ts -- [count] [firstSeed]`: robustness sweep.
 - `scripts/verifyForcedInduction.ts -- [outDir]`: 19 turbo/supercharger acoustic checks.
 - `scripts/renderPreset.ts -- <presetKey> sweep|steady|free-rev <seconds> <out.wav>`: any preset (reference, Saber, factory) through the live chain to a stereo WAV.
+- `scripts/levelSurvey.ts -- <outDir> [presetKey …]` then `python scripts/analyzeLevels.py loudness|stems|compare …`: every preset through idle, dyno pull, 0–100 and free rev; loudness after the leveler, limiter working time, and each stem alone (`STEMS=1`). Run it before and after any change to the leveler or to a source's level.
 - `scripts/plotSpectrograms.py out.png "Title=a.wav" …`: spectrogram contact sheet.
 - `scripts/renderV16.ts`, `scripts/renderBaseline.ts`, `scripts/analyzeBaseline.py`, `scripts/analyzeReferenceCorpus.py`: audit and corpus tooling.
 
@@ -157,6 +158,13 @@ High-revving NA engines now read 6–7 % low at peak power (F136, S54, K20A; 12�
   - The idle-air integrator could ratchet itself into a permanent hunt at 48 kHz (found while re-rendering). It now learns symmetrically.
 - **Lesson kept as a rule:** run the whole suite before every push. Two pushes went out with a stale test (the worklet's rate tiers) and failed CI.
 
+### November 2026, third round: loudness, high-speed hiss, preset names
+Numbers and method in `docs/reference-sources.md` §4 "Loudness across presets, and the high-speed hiss".
+- **Loudness.** The leveler's automatic gain is now a loudness rider (`leveler.ts`): K-weighted loudness to a target that follows `EngineSimulator.effort` (pedal and speed), −8 LUFS at full effort and 15 dB lower at idle, with a guard for recurring peaks. It replaced a peak follower with a 12 dB boost limit and a 4 s release, under which quiet engines never reached the target and one shift bang held a 0–100 run 5–8 dB down. Spread over the 49 presets: idle 48.8 → 3.7 LU, dyno pull 18.9 → 6.7, 0–100 20.2 → 8.3, free rev 20.8 → 8.7, with the limiter working about as much as before.
+- **Whoosh at high revs.** It was the timing-drive noise in the structure stem, a stationary term fitted at 1000–2000 rpm and multiplied by the Anderton speed gain: 15 dB over the exhaust in 4–12 kHz on the CP3 at 10 900 rpm, and unshielded on a motorcycle. The speed gain no longer applies to it (+15.4 → +4.4 dB).
+- **Preset menu.** Short names in the list, the full name in a tooltip and for screen readers (`PresetSelector.tsx`, `presetMenu.ts`; `shortName` on every preset).
+- **Not judged yet:** all three are waiting for the owner's ear. The metrics say the levels agree and the hiss is 11 dB lower; they do not say it sounds right.
+
 ## 4. Conventions and gotchas
 
 - **Performance rules for the audio loop** (each one was measured; breaking them brings back hundreds of MB/s of garbage):
@@ -177,6 +185,8 @@ High-revving NA engines now read 6–7 % low at peak power (F136, S54, K20A; 12�
 - **Survey at the rate the app runs at.** Idle stability margins differ with sample rate: the flat-six preset was steady at 24 and 44.1 kHz and could hunt at 48 kHz. Run idle and limiter surveys at 48 kHz, on several seeds.
 - **Judge idle on statistics, not on one instant.** Speed at a single moment after start is chaotic: any change to the model moves it by hundreds of rpm on a loping engine, and a 2 s check passed by luck for months while the V10 preset stalled every few seconds. Use half-second means over 8 s or more (the preset test in `ess.test.ts` does; so does the survey in `docs/reference-sources.md` §4 "Idle").
 - **Run the whole suite before every push**, and the fuzz sweep after any change to combustion, friction or idle control.
+- **A source that does not follow the firing is heard as wind.** Broadband noise has to be shaped by the event that makes it (a blow-down, an impact). The audit of the old engine found the same thing (`docs/sound-engine-audit.md`), and the timing-drive term brought it back. Check a new noise source with the stems at the highest speed an exposed engine reaches, not at the speed it was fitted.
+- **The leveler can hide a defect and a defect can skew the leveler.** A 30 dB bang is clamped by the limiter and reads as a quiet run. Survey the calibrated pressure (`*.raw.wav`) next to the leveled output.
 - **Prefer physical fixes over fudge factors.** Each calibrated constant is listed with its basis in `docs/reference-sources.md` §1, "Calibrated constants". Add new ones there.
 - **Git:**
   - Develop on the session's designated branch and merge to `main` through a PR (the owner has given standing permission).
@@ -213,6 +223,8 @@ Done: variable-geometry turbines for common-rail diesels; Drive mode for every f
 11c. ~~Soft limiter character.~~ Settled by the owner: the default bounces; the quiet throttle hold is selectable (Advanced → Rev Limiter → Electronic Throttle).
 12. **Diesel extras:** no injector tick, EGR, cold start or glow plugs.
 13. **Forced induction:** no sequential or twin-turbo staging, no anti-lag.
+13a. **Flat-shift bangs.** An afterfire at a full-throttle upshift reaches +10 to +18 dBFS before the leveler (128–136 dB at 3 m), 28–36 dB over the running engine, and most of it on the S54 and K20A is the outlet-jet noise at its velocity limit (tailpipe velocity past the speed of sound in the linear waveguide; jet coefficient 60 × the value written beside it, with no recorded basis). The Pratt & Whitney R-985 reaches +31 to +34 dBFS. Measured in the reference doc §4; not changed.
+13b. **Leveler choices to hear:** the 15 dB idle-to-full swing, the −8 LUFS target, and sparse-pulse engines (two-strokes, the Ducati) 3–5 LU under the rest at full load.
 
 ### E. X-engine layouts: built (November 2026)
 The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan, and the classic shared-pin X (Vulture) followed with master-and-link rods. The owner's answers are built in: both cycles, exhaust arrangements as options, firing order by preset or by hand, 24 cylinders everywhere. Still open:
@@ -228,7 +240,7 @@ The owner's Saber Cross-Four replaced the earlier four-banks-on-one-pin plan, an
 ```bash
 git fetch origin main && git checkout main
 npm ci
-npx tsc -b && npx vitest run            # 228 tests
+npx tsc -b && npx vitest run            # 237 tests
 npx vite-node scripts/fuzzConfigs.ts -- 40 1
 npx vite-node scripts/verifyForcedInduction.ts
 npx vite-node scripts/renderForCompare.ts -- mazda-13b-fc exterior-rear sweep 1500 7500 6 /tmp/13b

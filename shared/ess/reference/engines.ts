@@ -16,6 +16,8 @@ export type Provenance = "published" | "engine-sim" | "EngineLab" | "estimated";
 
 export interface ReferenceEngine {
   name: string;
+  /** Concise label for menus; the full name is shown on hover. */
+  shortName?: string;
   description: string;
   /** What each group of parameters is based on. */
   provenance: Partial<Record<"geometry" | "valvetrain" | "induction" | "exhaust" | "boost", Provenance>>;
@@ -29,6 +31,7 @@ const v16 = { soundProfile: "v16" as const };
 export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   "gm-ls3": {
     name: "GM LS3 6.2 V8",
+    shortName: "LS3 6.2 V8",
     description: "Pushrod cross-plane V8, 1-8-7-2-6-5-4-3, dual exhaust with X-pipe",
     provenance: { geometry: "published", valvetrain: "published", induction: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [575, 4600], peakPowerKw: [321, 5900] },
@@ -42,6 +45,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "ferrari-f136": {
     name: "Ferrari F136 FB 4.5 V8",
+    shortName: "Ferrari F136 V8",
     description: "Flat-plane 90° V8, 9000 rpm, race-type 4-into-1 per bank",
     provenance: { geometry: "published", valvetrain: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [540, 6000], peakPowerKw: [425, 9000] },
@@ -56,6 +60,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "toyota-2jz-gte": {
     name: "Toyota 2JZ-GTE 3.0 I6 turbo",
+    shortName: "Toyota 2JZ-GTE",
     description: "Inline six, 1-5-3-6-2-4, single large turbo conversion",
     provenance: { geometry: "published", valvetrain: "engine-sim", boost: "estimated" },
     config: {
@@ -68,6 +73,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "bmw-s54": {
     name: "BMW S54 3.2 I6",
+    shortName: "BMW S54 I6",
     description: "8000 rpm inline six on individual throttle bodies",
     provenance: { geometry: "published", induction: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [365, 4900], peakPowerKw: [252, 7900] },
@@ -82,6 +88,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "honda-k20a": {
     name: "Honda K20A 2.0 I4",
+    shortName: "Honda K20A I4",
     description: "8400 rpm DOHC four, 4-2-1 header",
     provenance: { geometry: "published", valvetrain: "EngineLab", exhaust: "EngineLab" },
     published: { peakTorqueNm: [206, 7000], peakPowerKw: [162, 8000] },
@@ -95,6 +102,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "subaru-ej257": {
     name: "Subaru EJ257 2.5 flat-4 turbo",
+    shortName: "Subaru EJ257",
     description: "Boxer four with unequal-length headers — the classic rumble",
     provenance: { geometry: "published", valvetrain: "engine-sim", exhaust: "engine-sim", boost: "estimated" },
     config: {
@@ -107,6 +115,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "porsche-9a1": {
     name: "Porsche 9A1 3.8 flat-6",
+    shortName: "Porsche 9A1 F6",
     description: "Water-cooled boxer six, 7800 rpm",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [420, 4400], peakPowerKw: [283, 6500] },
@@ -120,6 +129,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "audi-ea855": {
     name: "Audi 2.5 TFSI inline-5",
+    shortName: "Audi 2.5 TFSI I5",
     description: "1-2-4-5-3 five-cylinder warble, turbocharged",
     provenance: { geometry: "published", boost: "estimated" },
     published: { peakTorqueNm: [480, 2000], peakPowerKw: [294, 6000] },
@@ -133,6 +143,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "lexus-1lr-gue": {
     name: "Lexus 1LR-GUE 4.8 V10",
+    shortName: "Lexus 1LR-GUE V10",
     description: "72° even-fire V10, 9000 rpm, equal-length 5-into-1",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [480, 6800], peakPowerKw: [412, 8700] },
@@ -146,6 +157,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "ferrari-f140": {
     name: "Ferrari F140 6.3 V12",
+    shortName: "Ferrari F140 V12",
     description: "65° V12, 8700 rpm",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [690, 6000], peakPowerKw: [545, 8250] },
@@ -159,6 +171,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "harley-m8-107": {
     name: "Harley-Davidson Milwaukee-Eight 107",
+    shortName: "Harley M8 107",
     description: "45° common-pin V-twin: 315°/405° firing — the potato-potato",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -171,6 +184,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "ducati-1299": {
     name: "Ducati Superquadro 1299",
+    shortName: "Ducati 1299",
     description: "90° L-twin, 270°/450°, 11 500 rpm",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -183,6 +197,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "yamaha-cp4": {
     name: "Yamaha CP4 (R1) crossplane I4",
+    shortName: "Yamaha CP4 (R1)",
     description: "Crossplane inline-4: 270-180-90-180 firing",
     provenance: { geometry: "published", exhaust: "EngineLab" },
     config: {
@@ -195,6 +210,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "yamaha-cp3": {
     name: "Yamaha CP3 (MT-09) inline-3",
+    shortName: "Yamaha CP3 I3",
     description: "240° crossplane triple",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -207,6 +223,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "buick-231-oddfire": {
     name: "Buick 231 odd-fire V6",
+    shortName: "Buick 231 V6",
     description: "90° V6 on three shared crankpins: 90°/150° alternating",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -219,6 +236,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "nissan-vr38": {
     name: "Nissan VR38DETT 3.8 V6",
+    shortName: "Nissan VR38DETT",
     description: "60° split-pin V6, twin turbo",
     provenance: { geometry: "published", boost: "estimated" },
     published: { peakTorqueNm: [632, 3300], peakPowerKw: [419, 6800] },
@@ -232,6 +250,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "hellcat-6-2": {
     name: "SRT Hellcat 6.2 supercharged V8",
+    shortName: "Hellcat 6.2 SC V8",
     description: "Cross-plane Hemi V8 with 2.4 L twin-screw blower",
     provenance: { geometry: "published", boost: "published" },
     published: { peakTorqueNm: [881, 4000], peakPowerKw: [527, 6000] },
@@ -245,6 +264,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "pw-r985": {
     name: "Pratt & Whitney R-985 Wasp Junior",
+    shortName: "Wasp Junior R-985",
     description: "Nine-cylinder single-row radial, collector ring",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -257,6 +277,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "merlin-v12": {
     name: "Rolls-Royce Merlin V12",
+    shortName: "Merlin V12",
     description: "60° V12, short ejector stacks (open primaries)",
     provenance: { geometry: "published", exhaust: "published", boost: "estimated" },
     config: {
@@ -269,6 +290,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "rr-vulture": {
     name: "Rolls-Royce Vulture X-24",
+    shortName: "Vulture X-24",
     description: "Four banks of six at 90° on one six-throw crank, master and link rods, ejector stacks",
     provenance: { geometry: "published", exhaust: "estimated", boost: "published" },
     published: { peakPowerKw: [1327, 2850] },
@@ -282,6 +304,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "bugatti-w16": {
     name: "Bugatti W16 8.0 quad-turbo",
+    shortName: "Bugatti W16",
     description: "Two narrow-angle VR8 banks at 90°, four turbochargers",
     provenance: { geometry: "published", boost: "estimated" },
     published: { peakTorqueNm: [1250, 2200], peakPowerKw: [736, 6000] },
@@ -295,6 +318,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-vr6": {
     name: "VW VR6 2.8 (15° narrow V)",
+    shortName: "VW VR6 2.8",
     description: "Six cylinders in a 15° V under one head, even-fire",
     provenance: { geometry: "published", exhaust: "estimated" },
     config: {
@@ -307,6 +331,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-ea288": {
     name: "VW EA288 2.0 TDI (110 kW)",
+    shortName: "VW EA288 TDI",
     description: "Common-rail inline-4 diesel with pilot injection and a variable-geometry turbo",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [340, 2000], peakPowerKw: [110, 3750] },
@@ -320,6 +345,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "cummins-6bt": {
     name: "Cummins 6BT 5.9 12-valve (1994)",
+    shortName: "Cummins 6BT 5.9",
     description: "Inline-6 diesel, mechanical P7100 injection pump (no pilot): the classic diesel clatter",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [542, 1600], peakPowerKw: [119, 2500] },
@@ -334,6 +360,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "toyota-fa20-vortech": {
     name: "Toyota/Subaru FA20 2.0 flat-4 + Vortech V3",
+    shortName: "FA20 + Vortech",
     description: "GT86 / BRZ / FR-S boxer, equal-length header, port + direct injection, aftermarket centrifugal supercharger (~0.5 bar)",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     config: {
@@ -346,6 +373,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "psa-dv5-bluehdi": {
     name: "PSA DV5 1.5 BlueHDi 130",
+    shortName: "PSA DV5 BlueHDi",
     description: "Common-rail inline-4 diesel (2018+ Peugeot/Citroën), pilot injection, VGT; free revs cap at 4000 rpm in neutral",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [300, 1750], peakPowerKw: [96, 3750] },
@@ -360,6 +388,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "vw-alh-tdi": {
     name: "VW 1.9 TDI ALH (66 kW)",
+    shortName: "VW 1.9 TDI ALH",
     description: "Inline-4 diesel with an electronic VE distributor pump (no pilot injection) and a Garrett VNT-15 variable-nozzle turbo: late-1990s New Beetle / Golf IV",
     provenance: { geometry: "published", boost: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [210, 1900], peakPowerKw: [66, 4000] },
@@ -374,6 +403,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "mercedes-om601": {
     name: "Mercedes OM601 2.0 (190 D, W201)",
+    shortName: "Mercedes OM601",
     description: "Naturally aspirated inline-4 diesel, Bosch in-line pump, 22:1. The real engine has a prechamber; the model injects directly, so its clatter is too hard",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [123, 2800], peakPowerKw: [53, 4600] },
@@ -387,6 +417,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "honda-crm250": {
     name: "Honda CRM250R (MD24) two-stroke single",
+    shortName: "Honda CRM250R",
     description: "Liquid-cooled 249 cc single, reed-valve induction, tuned expansion chamber (the real bike's RC exhaust power valve is not modelled)",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [36, 7000], peakPowerKw: [29.4, 8000] },
@@ -401,6 +432,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "mz-etz250": {
     name: "MZ ETZ 250 two-stroke single",
+    shortName: "MZ ETZ 250",
     description: "Air-cooled 243 cc single (1981–89), piston-port induction, mild expansion chamber",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [27.5, 5200], peakPowerKw: [15.4, 5500] },
@@ -414,6 +446,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "yamaha-rd350lc": {
     name: "Yamaha RD350LC (4L0) two-stroke twin",
+    shortName: "Yamaha RD350LC",
     description: "Liquid-cooled 180° parallel twin, reed-valve induction, tuned expansion chambers",
     provenance: { geometry: "published", exhaust: "estimated" },
     published: { peakTorqueNm: [40, 8000], peakPowerKw: [34.6, 8500] },
@@ -428,6 +461,7 @@ export const REFERENCE_ENGINES: Record<string, ReferenceEngine> = {
   },
   "mazda-13b-fc": {
     name: "Mazda 13B (FC RX-7 Series 5 NA)",
+    shortName: "Mazda 13B Rotary",
     description: "Two-rotor Wankel, 2 × 654 cc, side intake ports, peripheral exhaust ports",
     provenance: { geometry: "published", induction: "estimated", exhaust: "estimated" },
     published: { peakTorqueNm: [187, 4000], peakPowerKw: [118, 7000] },

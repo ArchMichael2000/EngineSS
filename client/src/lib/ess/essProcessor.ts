@@ -207,6 +207,8 @@ class EssProcessor extends AudioWorkletProcessor {
       this.fade += n;
       if (this.fade >= FADE_SAMPLES) this.outgoing = null;
     }
+    this.leveler.effort = voice.sim.effort;
+    this.leveler.hold = !voice.sim.isRunning;
     this.leveler.process(left, right, n);
     this.sinceTelemetry += n;
     if (this.sinceTelemetry >= TELEMETRY_INTERVAL) {

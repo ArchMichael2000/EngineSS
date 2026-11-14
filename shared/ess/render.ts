@@ -80,24 +80,43 @@ export function renderEssPcm(config: EngineConfiguration, options: EssRenderOpti
   const first = controlAt(0);
   sim.setControls({ ...first, load: 0 });
   sim.prewarm(options.prerollSec ?? 1.5);
-  for (let off = 0; off < n; off += CHUNK) {
+  // What the leveler needs from the engine, chunk by chunk: how hard it is working, and whether it runs.
+  const chunks = Math.ceil(n / CHUNK) + 1;
+  const effort = new Float32Array(chunks);
+  const hold = new Uint8Array(chunks);
+  for (let off = 0, c = 0; off < n; off += CHUNK, c++) {
     sim.setControls(controlAt(off / sampleRate));
     sim.process(left, right, Math.min(CHUNK, n - off), off);
+    effort[c] = sim.effort;
+    hold[c] = sim.isRunning ? 0 : 1;
   }
+  effort[chunks - 1] = effort[Math.max(0, chunks - 2)];
+  hold[chunks - 1] = hold[Math.max(0, chunks - 2)];
 
   if ((options.leveling ?? "live") === "live") {
     const leveler = new OutputLeveler(sampleRate, { autoGain: config.listener?.autoLevel ?? true });
     // Settle the gain rider on the first second so the export does not start with a level swell,
     // then level the whole clip and drop the look-ahead delay so it stays aligned with the program.
     const warm = Math.min(n, sampleRate);
-    leveler.process(left.slice(0, warm), right.slice(0, warm));
+    for (let pass = 0; pass < 4; pass++) {
+      const warmL = left.slice(0, warm);
+      const warmR = right.slice(0, warm);
+      for (let off = 0, c = 0; off < warm; off += CHUNK, c++) {
+        const m = Math.min(CHUNK, warm - off);
+        leveler.effort = effort[c];
+        leveler.hold = hold[c] === 1;
+        leveler.process(warmL.subarray(off, off + m), warmR.subarray(off, off + m), m);
+      }
+    }
     const lat = leveler.latency;
     const padL = new Float32Array(n + lat);
     const padR = new Float32Array(n + lat);
     padL.set(left);
     padR.set(right);
-    for (let off = 0; off < n + lat; off += CHUNK) {
+    for (let off = 0, c = 0; off < n + lat; off += CHUNK, c++) {
       const m = Math.min(CHUNK, n + lat - off);
+      leveler.effort = effort[Math.min(c, chunks - 1)];
+      leveler.hold = hold[Math.min(c, chunks - 1)] === 1;
       leveler.process(padL.subarray(off, off + m), padR.subarray(off, off + m), m);
     }
     left.set(padL.subarray(lat, lat + n));
